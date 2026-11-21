@@ -40,7 +40,7 @@
 	bind:open
 	title="Preferences &amp; Engineering Standards"
 	description="Configure schematic symbols, phasor notation, numerical precision, and canvas overlays."
-	class="max-w-xl"
+	class="sm:max-w-xl"
 >
 	<div class="flex flex-col gap-5">
 		<!-- Schematic Symbol Standard -->
@@ -54,7 +54,7 @@
 						onclick={() => (settings.schematicStandard = opt.value)}
 						aria-pressed={active}
 						class={cn(
-							'flex cursor-pointer items-center justify-between gap-3 rounded-md border p-3 text-left transition-colors duration-150',
+							'flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-md border p-3 text-left transition-colors duration-150 sm:min-h-0',
 							'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 							active
 								? 'border-primary bg-primary/10'
@@ -91,7 +91,7 @@
 						onclick={() => (settings.angleDisplay = opt.value)}
 						aria-pressed={active}
 						class={cn(
-							'flex cursor-pointer flex-col gap-0.5 rounded-md border px-3 py-2 text-left transition-colors duration-150',
+							'flex min-h-11 cursor-pointer flex-col justify-center gap-0.5 rounded-md border px-3 py-2 text-left transition-colors duration-150 sm:min-h-0',
 							'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 							active
 								? 'border-primary bg-primary/10 text-foreground'
@@ -117,7 +117,7 @@
 							onclick={() => (settings.precision = prec)}
 							aria-pressed={active}
 							class={cn(
-								'font-engineering cursor-pointer rounded-md border px-2.5 py-1.5 text-center text-xs font-medium transition-colors duration-150',
+								'font-engineering min-h-11 cursor-pointer rounded-md border px-2.5 py-1.5 text-center text-xs font-medium transition-colors duration-150 sm:min-h-0',
 								'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 								active
 									? 'border-primary bg-primary/10 text-primary'
@@ -141,7 +141,7 @@
 							aria-pressed={active}
 							title={opt.detail}
 							class={cn(
-								'cursor-pointer rounded-md border px-2.5 py-1.5 text-center text-xs font-medium transition-colors duration-150',
+								'min-h-11 cursor-pointer rounded-md border px-2.5 py-1.5 text-center text-xs font-medium transition-colors duration-150 sm:min-h-0',
 								'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 								active
 									? 'border-primary bg-primary/10 text-primary'
@@ -159,7 +159,7 @@
 
 		<!-- Switches -->
 		<section class="flex flex-col gap-3">
-			<div class="flex items-center justify-between gap-4">
+			<div class="flex min-h-11 items-center justify-between gap-4 py-1 sm:min-h-0 sm:py-0">
 				<div class="flex flex-col gap-0.5">
 					<Label for="setting-dc-fractions">Show Exact DC Fractions</Label>
 					<span class="text-[11px] text-muted-foreground">
@@ -173,7 +173,7 @@
 				/>
 			</div>
 
-			<div class="flex items-center justify-between gap-4">
+			<div class="flex min-h-11 items-center justify-between gap-4 py-1 sm:min-h-0 sm:py-0">
 				<div class="flex flex-col gap-0.5">
 					<Label for="setting-show-grid">Canvas Engineering Grid</Label>
 					<span class="text-[11px] text-muted-foreground">
@@ -187,7 +187,7 @@
 				/>
 			</div>
 
-			<div class="flex items-center justify-between gap-4">
+			<div class="flex min-h-11 items-center justify-between gap-4 py-1 sm:min-h-0 sm:py-0">
 				<div class="flex flex-col gap-0.5">
 					<Label for="setting-snap-grid">Snap to 20 px Grid</Label>
 					<span class="text-[11px] text-muted-foreground">
@@ -201,7 +201,7 @@
 				/>
 			</div>
 
-			<div class="flex items-center justify-between gap-4">
+			<div class="flex min-h-11 items-center justify-between gap-4 py-1 sm:min-h-0 sm:py-0">
 				<div class="flex flex-col gap-0.5">
 					<Label for="setting-live-overlays">Live Voltage &amp; Current Overlays</Label>
 					<span class="text-[11px] text-muted-foreground">
@@ -218,12 +218,14 @@
 	</div>
 
 	{#snippet footer()}
-		<div class="flex w-full items-center justify-between gap-2">
-			<Button variant="ghost" size="sm" onclick={() => settings.reset()}>
+		<div class="flex w-full flex-wrap items-center justify-between gap-2">
+			<Button variant="ghost" size="sm" onclick={() => settings.reset()} class="min-h-11 sm:min-h-0">
 				<RotateCcw class="size-3.5" aria-hidden="true" />
 				Reset to Defaults
 			</Button>
-			<Button variant="default" size="sm" onclick={() => (open = false)}>Done</Button>
+			<Button variant="default" size="sm" onclick={() => (open = false)} class="min-h-11 sm:min-h-0">
+				Done
+			</Button>
 		</div>
 	{/snippet}
 </Dialog>

@@ -78,7 +78,7 @@
 	bind:open
 	title="Circuit JSON Import / Export"
 	description="Export the current schematic as canonical Circuit Lab JSON, or import an existing JSON circuit or netlist."
-	class="max-w-2xl"
+	class="sm:max-w-2xl"
 >
 	<Tabs
 		value={activeTab}
@@ -87,9 +87,9 @@
 		}}
 		class="gap-3"
 	>
-		<TabsList class="w-fit">
-			<TabsTrigger value="export">Export JSON</TabsTrigger>
-			<TabsTrigger value="import">Import JSON</TabsTrigger>
+		<TabsList class="grid h-auto w-full grid-cols-2 sm:inline-flex sm:h-9 sm:w-fit">
+			<TabsTrigger value="export" class="min-h-11 sm:min-h-0">Export JSON</TabsTrigger>
+			<TabsTrigger value="import" class="min-h-11 sm:min-h-0">Import JSON</TabsTrigger>
 		</TabsList>
 
 		<TabsContent value="export" class="flex flex-col gap-3">
@@ -97,8 +97,8 @@
 				<span class="text-xs text-muted-foreground">
 					{document.components.length} components · {document.wires.length} wires
 				</span>
-				<div class="flex items-center gap-2">
-					<Button variant="outline" size="sm" onclick={copyExportJson}>
+				<div class="flex flex-wrap items-center gap-2">
+					<Button variant="outline" size="sm" onclick={copyExportJson} class="min-h-11 sm:min-h-0">
 						{#if copied}
 							<Check class="size-3.5 text-success" aria-hidden="true" />
 							Copied!
@@ -107,7 +107,7 @@
 							Copy JSON
 						{/if}
 					</Button>
-					<Button variant="default" size="sm" onclick={downloadJsonFile}>
+					<Button variant="default" size="sm" onclick={downloadJsonFile} class="min-h-11 sm:min-h-0">
 						<Download class="size-3.5" aria-hidden="true" />
 						Download .json
 					</Button>
@@ -119,7 +119,7 @@
 				aria-label="Exported circuit JSON"
 				value={exportedJson}
 				rows={13}
-				class="font-engineering w-full resize-y rounded-md border border-input bg-surface-rail/60 p-3 text-xs leading-relaxed text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				class="font-engineering w-full resize-y rounded-md border border-input bg-surface-rail/60 p-3 text-base leading-relaxed text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-xs"
 			></textarea>
 		</TabsContent>
 
@@ -141,6 +141,7 @@
 						variant="outline"
 						size="sm"
 						onclick={() => fileInputEl?.click()}
+						class="min-h-11 sm:min-h-0"
 					>
 						<Upload class="size-3.5" aria-hidden="true" />
 						Upload .json File
@@ -153,7 +154,7 @@
 				aria-label="Paste circuit JSON to import"
 				placeholder={'{\n  "schemaVersion": 1,\n  "mode": "dc",\n  "components": [...],\n  "wires": [...]\n}'}
 				rows={10}
-				class="font-engineering w-full resize-y rounded-md border border-input bg-card p-3 text-xs leading-relaxed text-foreground placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				class="font-engineering w-full resize-y rounded-md border border-input bg-card p-3 text-base leading-relaxed text-foreground placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-xs"
 			></textarea>
 
 			{#if parsedResult}
@@ -194,12 +195,13 @@
 				{/if}
 			{/if}
 
-			<div class="flex items-center justify-end gap-2">
+			<div class="flex flex-wrap items-center justify-end gap-2">
 				<Button
 					variant="default"
 					size="sm"
 					disabled={!parsedResult?.ok}
 					onclick={handleConfirmImport}
+					class="min-h-11 sm:min-h-0"
 				>
 					Load Circuit
 				</Button>
@@ -208,6 +210,8 @@
 	</Tabs>
 
 	{#snippet footer()}
-		<Button variant="outline" size="sm" onclick={() => (open = false)}>Close</Button>
+		<Button variant="outline" size="sm" onclick={() => (open = false)} class="min-h-11 sm:min-h-0">
+			Close
+		</Button>
 	{/snippet}
 </Dialog>

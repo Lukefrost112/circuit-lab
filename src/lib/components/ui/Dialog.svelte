@@ -49,7 +49,14 @@
 	}
 
 	function handleBackdropClick(e: MouseEvent) {
-		if (e.target === dialogEl) {
+		if (!dialogEl || e.target !== dialogEl) return;
+		const rect = dialogEl.getBoundingClientRect();
+		const inside =
+			e.clientX >= rect.left &&
+			e.clientX <= rect.right &&
+			e.clientY >= rect.top &&
+			e.clientY <= rect.bottom;
+		if (!inside) {
 			closeDialog();
 		}
 	}
@@ -62,16 +69,21 @@
 	aria-labelledby={title ? titleId : undefined}
 	aria-describedby={description ? descId : undefined}
 	class={cn(
-		'fixed inset-0 m-auto max-h-[85vh] w-[calc(100vw-2rem)] max-w-lg rounded-lg border border-border bg-card p-0 text-card-foreground shadow-xl',
+		'fixed inset-x-0 bottom-0 top-auto m-0 mt-auto max-h-[90dvh] w-full max-w-none rounded-t-xl rounded-b-none border-x border-t border-b-0 border-border bg-card p-0 text-card-foreground shadow-xl',
+		'sm:inset-0 sm:m-auto sm:max-h-[85dvh] sm:w-[calc(100vw-2rem)] sm:max-w-lg sm:rounded-lg sm:border',
 		'backdrop:bg-slate-950/55 backdrop:backdrop-blur-[1px]',
 		'open:flex open:flex-col',
 		className
 	)}
 >
-	<div class="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
-		<div class="flex flex-col gap-1">
+	<div class="flex shrink-0 justify-center pt-2 pb-0.5 sm:hidden" aria-hidden="true">
+		<span class="h-1 w-10 rounded-full bg-border"></span>
+	</div>
+
+	<div class="flex shrink-0 items-start justify-between gap-3 border-b border-border px-4 py-3 sm:gap-4 sm:px-5 sm:py-4">
+		<div class="flex min-w-0 flex-col gap-1">
 			{#if title}
-				<h2 id={titleId} class="text-base font-semibold leading-none tracking-tight">
+				<h2 id={titleId} class="text-base font-semibold leading-snug tracking-tight sm:leading-none">
 					{title}
 				</h2>
 			{/if}
@@ -85,18 +97,25 @@
 			type="button"
 			onclick={closeDialog}
 			aria-label="Close dialog"
-			class="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			class="inline-flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-7 sm:w-7 sm:min-h-0 sm:min-w-0"
 		>
-			<X class="size-4" />
+			<X class="size-4" aria-hidden="true" />
 		</button>
 	</div>
 
-	<div class="flex-1 overflow-y-auto px-5 py-4 text-sm">
+	<div
+		class={cn(
+			'min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3.5 text-sm sm:px-5 sm:py-4',
+			!footer && 'pb-[max(0.875rem,env(safe-area-inset-bottom))] sm:pb-4'
+		)}
+	>
 		{@render children?.()}
 	</div>
 
 	{#if footer}
-		<div class="flex items-center justify-end gap-2 border-t border-border bg-surface-rail/60 px-5 py-3">
+		<div
+			class="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border bg-surface-rail/60 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5"
+		>
 			{@render footer()}
 		</div>
 	{/if}

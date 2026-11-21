@@ -73,7 +73,7 @@
 	bind:open
 	title="Import Circuit from AI"
 	description="Convert any textbook schematic or photo into an editable, auto-laid-out Circuit Lab schematic."
-	class="max-w-2xl"
+	class="sm:max-w-2xl"
 >
 	<div class="flex flex-col gap-4">
 		<!-- Step 1 — Copy Prompt -->
@@ -84,12 +84,12 @@
 					<h3 class="text-xs font-semibold text-foreground">Copy the AI Netlist Prompt</h3>
 				</div>
 
-				<div class="flex items-center gap-2">
+				<div class="flex flex-wrap items-center gap-2">
 					<button
 						type="button"
 						onclick={() => (promptExpanded = !promptExpanded)}
 						aria-expanded={promptExpanded}
-						class="inline-flex cursor-pointer items-center gap-1 rounded-sm px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+						class="inline-flex min-h-11 cursor-pointer items-center gap-1 rounded-sm px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0 sm:px-2 sm:text-[11px]"
 					>
 						{promptExpanded ? 'Hide Prompt' : 'Preview Prompt'}
 						<ChevronDown
@@ -100,7 +100,7 @@
 							aria-hidden="true"
 						/>
 					</button>
-					<Button variant="default" size="sm" onclick={copyPrompt}>
+					<Button variant="default" size="sm" onclick={copyPrompt} class="min-h-11 sm:min-h-0">
 						{#if promptCopied}
 							<Check class="size-3.5" aria-hidden="true" />
 							Copied!
@@ -138,7 +138,7 @@
 					<h3 class="text-xs font-semibold text-foreground">Paste AI JSON &amp; Render</h3>
 				</div>
 
-				<Button variant="outline" size="sm" onclick={loadSampleNetlist}>
+				<Button variant="outline" size="sm" onclick={loadSampleNetlist} class="min-h-11 sm:min-h-0">
 					<FlaskConical class="size-3.5" aria-hidden="true" />
 					Try Sample AI Netlist
 				</Button>
@@ -154,7 +154,7 @@
 				aria-label="Paste AI JSON output"
 				placeholder={'```json\n{\n  "schemaVersion": 1,\n  "name": "My Circuit",\n  "mode": "dc",\n  "elements": [...]\n}\n```'}
 				rows={8}
-				class="font-engineering w-full resize-y rounded-md border border-input bg-card p-3 text-xs leading-relaxed text-foreground placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				class="font-engineering w-full resize-y rounded-md border border-input bg-card p-3 text-base leading-relaxed text-foreground placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-xs"
 			></textarea>
 
 			{#if parseResult}
@@ -205,12 +205,15 @@
 	</div>
 
 	{#snippet footer()}
-		<Button variant="outline" size="sm" onclick={() => (open = false)}>Cancel</Button>
+		<Button variant="outline" size="sm" onclick={() => (open = false)} class="min-h-11 sm:min-h-0">
+			Cancel
+		</Button>
 		<Button
 			variant="default"
 			size="sm"
 			disabled={!parseResult?.ok}
 			onclick={handleRenderAndSolve}
+			class="min-h-11 sm:min-h-0"
 		>
 			<Sparkles class="size-3.5" aria-hidden="true" />
 			Render &amp; Solve Circuit

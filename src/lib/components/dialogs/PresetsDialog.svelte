@@ -49,7 +49,7 @@
 	bind:open
 	title="Circuit Presets"
 	description="Load a curated DC or AC textbook circuit to inspect, edit, and cross-verify across all 6 methods."
-	class="max-w-3xl"
+	class="sm:max-w-3xl"
 >
 	<div class="flex flex-col gap-4">
 		<Tabs
@@ -58,10 +58,10 @@
 				categoryFilter = next as 'all' | 'dc' | 'ac';
 			}}
 		>
-			<TabsList>
-				<TabsTrigger value="all">All ({PRESETS.length})</TabsTrigger>
-				<TabsTrigger value="dc">DC ({dcCount})</TabsTrigger>
-				<TabsTrigger value="ac">AC ({acCount})</TabsTrigger>
+			<TabsList class="grid h-auto w-full grid-cols-3 sm:inline-flex sm:h-9 sm:w-fit">
+				<TabsTrigger value="all" class="min-h-11 sm:min-h-0">All ({PRESETS.length})</TabsTrigger>
+				<TabsTrigger value="dc" class="min-h-11 sm:min-h-0">DC ({dcCount})</TabsTrigger>
+				<TabsTrigger value="ac" class="min-h-11 sm:min-h-0">AC ({acCount})</TabsTrigger>
 			</TabsList>
 		</Tabs>
 
@@ -110,7 +110,7 @@
 							variant="default"
 							size="sm"
 							onclick={() => handleLoad(preset)}
-							class="gap-1.5"
+							class="min-h-11 w-full gap-1.5 sm:min-h-0 sm:w-auto"
 						>
 							Load Circuit
 							<ArrowRight class="size-3.5" aria-hidden="true" />
@@ -122,6 +122,8 @@
 	</div>
 
 	{#snippet footer()}
-		<Button variant="outline" size="sm" onclick={() => (open = false)}>Close</Button>
+		<Button variant="outline" size="sm" onclick={() => (open = false)} class="min-h-11 sm:min-h-0">
+			Close
+		</Button>
 	{/snippet}
 </Dialog>
