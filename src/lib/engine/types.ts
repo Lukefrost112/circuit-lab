@@ -58,6 +58,8 @@ export interface CircuitComponent {
 	numericValue?: number;
 	/** Optional AC phase in degrees (for sources) */
 	phaseDeg?: number;
+	/** Optional per-source frequency in Hz (for multi-frequency AC superposition) */
+	frequencyHz?: number;
 	/** Optional unit label (e.g. "Ω", "F", "H", "V", "A") */
 	unit?: string;
 	/** Optional port name for 'terminal' components (e.g. "A", "B") */
@@ -208,14 +210,31 @@ export interface MethodResult {
 	inapplicableReason?: string;
 	steps: SolutionStep[];
 	summaryLatex?: string;
+	/** True when independently solved voltages/currents match MNA within < 1e-8 */
+	verifiedAgainstMna?: boolean;
+	/** Maximum absolute discrepancy against MNA ground truth */
+	maxDiscrepancy?: number;
+}
+
+export type TheveninTarget =
+	| { kind: 'component'; componentId: string }
+	| { kind: 'terminals'; nodeA: string; nodeB: string };
+
+export interface MaxPowerTransferInfo {
+	optimalLoadImpedance: Complex;
+	maxRealPowerW: number;
 }
 
 export interface TheveninNortonResult {
 	terminalA: string;
 	terminalB: string;
+	loadComponentId?: string;
 	vth: Complex;
-	isc: Complex;
+	isc: Complex | null;
 	zth: Complex | null;
+	maxPowerTransfer?: MaxPowerTransferInfo;
+	verifiedAgainstMna?: boolean;
+	maxDiscrepancy?: number;
 	steps: SolutionStep[];
 }
 
@@ -223,4 +242,6 @@ export interface FullSolveResult {
 	mna: MnaSolution;
 	methods: Partial<Record<MethodId, MethodResult>>;
 	theveninNorton?: TheveninNortonResult;
+	allVerified: boolean;
+	maxDiscrepancy: number;
 }
