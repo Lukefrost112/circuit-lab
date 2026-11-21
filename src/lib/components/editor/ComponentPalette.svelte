@@ -243,8 +243,12 @@
 			<span>Active tool</span>
 			<span class="truncate font-medium text-foreground">{activeToolLabel}</span>
 		</div>
-		<div class="font-engineering text-[10px] text-muted-foreground/90">
-			R: Rotate · Del: Remove · Esc: Select
+		<div class="font-engineering flex flex-wrap gap-x-1.5 gap-y-0.5 text-[10px] text-muted-foreground/90">
+			<span class="whitespace-nowrap">R / ]: Rotate</span>
+			<span aria-hidden="true">·</span>
+			<span class="whitespace-nowrap">Del: Remove</span>
+			<span aria-hidden="true">·</span>
+			<span class="whitespace-nowrap">Esc: Select</span>
 		</div>
 	</div>
 </aside>

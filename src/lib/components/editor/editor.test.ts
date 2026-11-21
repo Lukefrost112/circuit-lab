@@ -116,7 +116,7 @@ describe('editor Svelte components SSR rendering', () => {
 		expect(out.body).toContain('DC Voltage Source');
 		expect(out.body).toContain('Orthogonal Wire');
 		expect(out.body).toContain('data-symbol-kind="resistor"');
-		expect(out.body).toContain('R: Rotate');
+		expect(out.body).toContain('Rotate');
 	});
 
 	it('renders PropertyInspector for empty selection, component selection, and wire selection', () => {

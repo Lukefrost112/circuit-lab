@@ -98,6 +98,21 @@
 			hide();
 		}
 	}
+
+	function handleFocusIn(e: FocusEvent) {
+		const target = e.target as HTMLElement | null;
+		let isFocusVisible = false;
+		if (target) {
+			try {
+				isFocusVisible = target.matches(':focus-visible');
+			} catch {
+				isFocusVisible = false;
+			}
+		}
+		if (isFocusVisible) {
+			show();
+		}
+	}
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -105,7 +120,9 @@
 	bind:this={triggerEl}
 	onmouseenter={show}
 	onmouseleave={hide}
-	onfocusin={show}
+	onpointerdown={hide}
+	onclick={hide}
+	onfocusin={handleFocusIn}
 	onfocusout={hide}
 	onkeydown={handleKeyDown}
 	class={cn('inline-flex items-center', className)}

@@ -31,15 +31,28 @@
 		formatComponentDisplayValue,
 		type WireBendMode
 	} from './helpers';
+	import {
+		buildSchematicObstacles,
+		chooseBranchPillPosition,
+		chooseNodePillPosition,
+		type LayoutRect
+	} from './overlayLayout';
 
 	interface Props {
 		onOpenPresets?: () => void;
 		onOpenImport?: () => void;
 		onOpenAiImport?: () => void;
+		onComponentInspect?: (id: string) => void;
 		class?: string;
 	}
 
-	let { onOpenPresets, onOpenImport, onOpenAiImport, class: className }: Props = $props();
+	let {
+		onOpenPresets,
+		onOpenImport,
+		onOpenAiImport,
+		onComponentInspect,
+		class: className
+	}: Props = $props();
 
 	let containerEl = $state<HTMLDivElement | undefined>(undefined);
 	let svgEl = $state<SVGSVGElement | undefined>(undefined);
@@ -159,30 +172,45 @@
 		let maxY = -Infinity;
 
 		for (const c of comps) {
-			minX = Math.min(minX, c.x - 3);
-			maxX = Math.max(maxX, c.x + 3);
-			minY = Math.min(minY, c.y - 2.5);
-			maxY = Math.max(maxY, c.y + 2.5);
+			minX = Math.min(minX, (c.x - 3) * GRID_SIZE);
+			maxX = Math.max(maxX, (c.x + 3) * GRID_SIZE);
+			minY = Math.min(minY, (c.y - 2.5) * GRID_SIZE);
+			maxY = Math.max(maxY, (c.y + 2.5) * GRID_SIZE);
 		}
 		for (const w of wires) {
 			for (const pt of w.points) {
-				minX = Math.min(minX, pt.x - 1);
-				maxX = Math.max(maxX, pt.x + 1);
-				minY = Math.min(minY, pt.y - 1);
-				maxY = Math.max(maxY, pt.y + 1);
+				minX = Math.min(minX, (pt.x - 1) * GRID_SIZE);
+				maxX = Math.max(maxX, (pt.x + 1) * GRID_SIZE);
+				minY = Math.min(minY, (pt.y - 1) * GRID_SIZE);
+				maxY = Math.max(maxY, (pt.y + 1) * GRID_SIZE);
 			}
 		}
 
-		const contentW = Math.max(120, (maxX - minX) * GRID_SIZE);
-		const contentH = Math.max(120, (maxY - minY) * GRID_SIZE);
-		const padX = 110;
-		const padY = 110;
+		if (settings.showLiveOverlays) {
+			for (const br of overlayLayout.branches) {
+				minX = Math.min(minX, br.badgeX - br.pillWidth / 2);
+				maxX = Math.max(maxX, br.badgeX + br.pillWidth / 2);
+				minY = Math.min(minY, br.badgeY - 12);
+				maxY = Math.max(maxY, br.badgeY + 12);
+			}
+			for (const nd of overlayLayout.nodes) {
+				minX = Math.min(minX, nd.xPx - nd.pillWidth / 2);
+				maxX = Math.max(maxX, nd.xPx + nd.pillWidth / 2);
+				minY = Math.min(minY, nd.yPx - 12);
+				maxY = Math.max(maxY, nd.yPx + 12);
+			}
+		}
+
+		const contentW = Math.max(120, maxX - minX);
+		const contentH = Math.max(120, maxY - minY);
+		const padX = settings.showLiveOverlays ? 120 : 90;
+		const padY = settings.showLiveOverlays ? 96 : 80;
 		const availW = Math.max(200, viewportW - padX);
 		const availH = Math.max(200, viewportH - padY);
 
 		const nextZoom = Math.min(1.6, Math.max(0.45, Math.min(availW / contentW, availH / contentH)));
-		const centerX = ((minX + maxX) / 2) * GRID_SIZE;
-		const centerY = ((minY + maxY) / 2) * GRID_SIZE;
+		const centerX = (minX + maxX) / 2;
+		const centerY = (minY + maxY) / 2;
 
 		zoom = nextZoom;
 		pan = {
@@ -481,6 +509,8 @@
 	function handlePointerUp(): void {
 		if (dragState?.kind === 'pan' && !dragState.moved) {
 			circuit.clearSelection();
+		} else if (dragState?.kind === 'component' && !dragState.snapshotRecorded) {
+			onComponentInspect?.(dragState.componentId);
 		}
 		dragState = null;
 	}
@@ -552,12 +582,31 @@
 		}
 
 		if (key === 'r') {
+			if (e.shiftKey) {
+				if (isPlacementTool(circuit.activeTool)) {
+					circuit.rotatePlacement();
+				} else if (circuit.selectedComponentId) {
+					circuit.rotateComponent(circuit.selectedComponentId);
+				} else {
+					circuit.rotatePlacement();
+				}
+				return;
+			}
 			if (isPlacementTool(circuit.activeTool)) {
 				circuit.rotatePlacement();
 			} else if (circuit.selectedComponentId) {
 				circuit.rotateComponent(circuit.selectedComponentId);
 			} else {
 				circuit.setActiveTool('resistor');
+			}
+			return;
+		}
+
+		if (e.key === ']' || e.key === '[') {
+			if (isPlacementTool(circuit.activeTool)) {
+				circuit.rotatePlacement();
+			} else if (circuit.selectedComponentId) {
+				circuit.rotateComponent(circuit.selectedComponentId);
 			}
 			return;
 		}
@@ -643,69 +692,40 @@
 		nodeId: string;
 		xPx: number;
 		yPx: number;
+		anchorX: number;
+		anchorY: number;
+		pillWidth: number;
 		text: string;
 		isReference: boolean;
 	}
-
-	const nodeOverlays = $derived.by<NodeOverlayItem[]>(() => {
-		if (!settings.showLiveOverlays || !circuit.solution.mna.valid) return [];
-
-		const compCenters = new Set(
-			circuit.document.components.map((c) => `${c.x},${c.y}`)
-		);
-		const items: NodeOverlayItem[] = [];
-
-		for (const node of Object.values(circuit.solution.mna.nodeVoltages)) {
-			if (node.gridPoints.length === 0) continue;
-
-			// Pick clean anchor point
-			let anchor = node.gridPoints[0];
-			if (node.isReference) {
-				const gndComp = circuit.document.components.find((c) => c.kind === 'ground');
-				if (gndComp) {
-					anchor = { x: gndComp.x, y: gndComp.y };
-				}
-			} else {
-				const candidates = node.gridPoints.filter(
-					(gp) => !compCenters.has(`${gp.x},${gp.y}`)
-				);
-				const pool = candidates.length > 0 ? candidates : node.gridPoints;
-				anchor = [...pool].sort((a, b) => (a.y !== b.y ? a.y - b.y : a.x - b.x))[0];
-			}
-
-			const formattedV = node.isReference
-				? '0 V'
-				: formatComplexOverlay(node.voltage, 'V', circuit.document.mode, {
-						precision: settings.precision,
-						angleDisplay: settings.angleDisplay,
-						showDcFractions: settings.showDcFractions
-					});
-
-			items.push({
-				nodeId: node.nodeId,
-				xPx: anchor.x * GRID_SIZE,
-				yPx: node.isReference ? anchor.y * GRID_SIZE + 28 : anchor.y * GRID_SIZE - 15,
-				text: node.isReference ? 'GND · 0 V' : `${node.nodeId}: ${formattedV}`,
-				isReference: node.isReference
-			});
-		}
-		return items;
-	});
 
 	interface BranchOverlayItem {
 		componentId: string;
 		badgeX: number;
 		badgeY: number;
+		pillWidth: number;
 		arrowX: number;
 		arrowY: number;
 		arrowAngleDeg: number;
 		text: string;
 	}
 
-	const branchOverlays = $derived.by<BranchOverlayItem[]>(() => {
-		if (!settings.showLiveOverlays || !circuit.solution.mna.valid) return [];
+	const overlayLayout = $derived.by<{ nodes: NodeOverlayItem[]; branches: BranchOverlayItem[] }>(() => {
+		if (!settings.showLiveOverlays || !circuit.solution.mna.valid) {
+			return { nodes: [], branches: [] };
+		}
 
-		const items: BranchOverlayItem[] = [];
+		const theveninCompId =
+			circuit.theveninTarget?.kind === 'component' ? circuit.theveninTarget.componentId : null;
+		const obstacles = buildSchematicObstacles(
+			circuit.document.components,
+			circuit.document.wires,
+			(c) => formatComponentDisplayValue(c, circuit.document.mode),
+			theveninCompId
+		);
+		const placedPills: LayoutRect[] = [];
+		const branches: BranchOverlayItem[] = [];
+
 		for (const comp of circuit.document.components) {
 			if (comp.kind === 'ground' || comp.kind === 'terminal') continue;
 			const branch = circuit.solution.mna.branches[comp.id];
@@ -723,34 +743,88 @@
 				angleDisplay: settings.angleDisplay,
 				showDcFractions: settings.showDcFractions
 			});
+			const pillWidth = Math.max(40, formattedI.length * 6.0 + 12);
+			const pillHeight = 16;
 
-			// Pin 0 -> Pin 1 unit direction vector in SVG coordinates
-			const rad = ((comp.rotation + (reversed ? 180 : 0)) * Math.PI) / 180;
 			const arrowAngleDeg = (comp.rotation + (reversed ? 180 : 0)) % 360;
-
-			// Place arrow on lead near pin 1 side (or pin 0 if reversed) at radius 28px
 			const leadSign = reversed ? -1 : 1;
 			const leadRad = (comp.rotation * Math.PI) / 180;
 			const arrowX = comp.x * GRID_SIZE + Math.cos(leadRad) * 28 * leadSign;
 			const arrowY = comp.y * GRID_SIZE + Math.sin(leadRad) * 28 * leadSign;
-			void rad;
 
-			const isVertical = comp.rotation === 90 || comp.rotation === 270;
-			const badgeX = comp.x * GRID_SIZE + (isVertical ? -22 : 0);
-			const badgeY = comp.y * GRID_SIZE + (isVertical ? 0 : 25);
+			const chosen = chooseBranchPillPosition(comp, pillWidth, pillHeight, obstacles, placedPills);
+			placedPills.push(chosen.rect);
 
-			items.push({
+			branches.push({
 				componentId: comp.id,
-				badgeX,
-				badgeY,
+				badgeX: chosen.x,
+				badgeY: chosen.y,
+				pillWidth,
 				arrowX,
 				arrowY,
 				arrowAngleDeg,
 				text: formattedI
 			});
 		}
-		return items;
+
+		const compCenters = new Set(circuit.document.components.map((c) => `${c.x},${c.y}`));
+		const nodes: NodeOverlayItem[] = [];
+
+		const sortedNodes = Object.values(circuit.solution.mna.nodeVoltages).sort((a, b) => {
+			if (a.isReference !== b.isReference) return a.isReference ? 1 : -1;
+			return a.nodeId.localeCompare(b.nodeId, undefined, { numeric: true });
+		});
+
+		for (const node of sortedNodes) {
+			if (node.gridPoints.length === 0) continue;
+
+			let pool = node.gridPoints;
+			if (node.isReference) {
+				const gndComp = circuit.document.components.find((c) => c.kind === 'ground');
+				if (gndComp) {
+					pool = [{ x: gndComp.x, y: gndComp.y }];
+				}
+			}
+
+			const formattedV = node.isReference
+				? '0 V'
+				: formatComplexOverlay(node.voltage, 'V', circuit.document.mode, {
+						precision: settings.precision,
+						angleDisplay: settings.angleDisplay,
+						showDcFractions: settings.showDcFractions
+					});
+			const text = node.isReference ? 'GND · 0 V' : `${node.nodeId}: ${formattedV}`;
+			const pillWidth = Math.max(42, text.length * 6.2 + 12);
+			const pillHeight = 17;
+
+			const chosen = chooseNodePillPosition(
+				pool,
+				node.isReference,
+				pillWidth,
+				pillHeight,
+				compCenters,
+				obstacles,
+				placedPills
+			);
+			placedPills.push(chosen.rect);
+
+			nodes.push({
+				nodeId: node.nodeId,
+				xPx: chosen.x,
+				yPx: chosen.y,
+				anchorX: chosen.anchorX,
+				anchorY: chosen.anchorY,
+				pillWidth,
+				text,
+				isReference: node.isReference
+			});
+		}
+
+		return { nodes, branches };
 	});
+
+	const nodeOverlays = $derived(overlayLayout.nodes);
+	const branchOverlays = $derived(overlayLayout.branches);
 
 	const activeToolHint = $derived.by(() => {
 		if (wireStart) {
@@ -1143,7 +1217,6 @@
 
 			<!-- Live Branch Current Overlays (Emerald) -->
 			{#each branchOverlays as br (br.componentId)}
-				{@const pillWidth = Math.max(44, br.text.length * 6.3 + 12)}
 				<g pointer-events="none">
 					<!-- Directional current arrowhead along lead -->
 					<g transform="translate({br.arrowX}, {br.arrowY}) rotate({br.arrowAngleDeg})">
@@ -1155,28 +1228,24 @@
 					<!-- Compact Emerald pill -->
 					<g transform="translate({br.badgeX}, {br.badgeY})">
 						<rect
-							x={br.badgeX < circuit.document.components.find((c) => c.id === br.componentId)!.x * GRID_SIZE
-								? -pillWidth
-								: -pillWidth / 2}
-							y="-9"
-							width={pillWidth}
-							height="17"
+							x={-br.pillWidth / 2}
+							y="-8"
+							width={br.pillWidth}
+							height="16"
 							rx="4"
 							fill="var(--card)"
-							fill-opacity="0.94"
+							fill-opacity="0.95"
 							stroke="var(--current)"
 							stroke-opacity="0.45"
 							stroke-width="1"
 						/>
 						<text
-							x={br.badgeX < circuit.document.components.find((c) => c.id === br.componentId)!.x * GRID_SIZE
-								? -pillWidth / 2
-								: 0}
+							x="0"
 							y="3"
 							text-anchor="middle"
 							fill="var(--current)"
 							font-family="var(--font-mono)"
-							font-size="10"
+							font-size="9.5"
 							font-weight="600"
 							style="font-variant-numeric: tabular-nums;"
 						>
@@ -1188,32 +1257,46 @@
 
 			<!-- Live Node Voltage Overlays (Cobalt) -->
 			{#each nodeOverlays as node (node.nodeId)}
-				{@const pillWidth = Math.max(42, node.text.length * 6.4 + 14)}
-				<g transform="translate({node.xPx}, {node.yPx})" pointer-events="none">
-					<rect
-						x={-pillWidth / 2}
-						y="-9"
-						width={pillWidth}
-						height="18"
-						rx="9"
-						fill="var(--card)"
-						fill-opacity="0.95"
-						stroke={node.isReference ? 'var(--border)' : 'var(--voltage)'}
-						stroke-opacity={node.isReference ? '1' : '0.55'}
-						stroke-width="1"
-					/>
-					<text
-						x="0"
-						y="3"
-						text-anchor="middle"
-						fill={node.isReference ? 'var(--muted-foreground)' : 'var(--voltage)'}
-						font-family="var(--font-mono)"
-						font-size="10"
-						font-weight="600"
-						style="font-variant-numeric: tabular-nums;"
-					>
-						{node.text}
-					</text>
+				{@const distFromAnchor = Math.hypot(node.xPx - node.anchorX, node.yPx - node.anchorY)}
+				<g pointer-events="none">
+					{#if !node.isReference && distFromAnchor > 26}
+						<line
+							x1={node.anchorX}
+							y1={node.anchorY}
+							x2={node.xPx}
+							y2={node.yPx}
+							stroke="var(--voltage)"
+							stroke-opacity="0.4"
+							stroke-width="1"
+							stroke-dasharray="2 2"
+						/>
+					{/if}
+					<g transform="translate({node.xPx}, {node.yPx})">
+						<rect
+							x={-node.pillWidth / 2}
+							y="-8.5"
+							width={node.pillWidth}
+							height="17"
+							rx="8.5"
+							fill="var(--card)"
+							fill-opacity="0.96"
+							stroke={node.isReference ? 'var(--border)' : 'var(--voltage)'}
+							stroke-opacity={node.isReference ? '1' : '0.55'}
+							stroke-width="1"
+						/>
+						<text
+							x="0"
+							y="3"
+							text-anchor="middle"
+							fill={node.isReference ? 'var(--muted-foreground)' : 'var(--voltage)'}
+							font-family="var(--font-mono)"
+							font-size="9.5"
+							font-weight="600"
+							style="font-variant-numeric: tabular-nums;"
+						>
+							{node.text}
+						</text>
+					</g>
 				</g>
 			{/each}
 		</g>
@@ -1221,7 +1304,7 @@
 
 	<!-- Top Telemetry Strip -->
 	<div class="pointer-events-none absolute top-3 right-3 left-3 flex items-center justify-between gap-2">
-		<div class="pointer-events-auto inline-flex items-center gap-2 rounded-md border border-border bg-card/95 px-2.5 py-1 text-[11px] shadow-2xs">
+		<div class="pointer-events-auto inline-flex items-center gap-2 whitespace-nowrap rounded-md border border-border bg-card/95 px-2.5 py-1 text-[11px] shadow-2xs">
 			<span class="font-engineering text-muted-foreground">Grid: 20 px</span>
 			<Separator orientation="vertical" class="h-3" />
 			<span class="font-engineering text-foreground">
@@ -1232,8 +1315,8 @@
 				{nodeCount} {nodeCount === 1 ? 'Node' : 'Nodes'}
 			</span>
 			{#if hoverGrid}
-				<Separator orientation="vertical" class="hidden h-3 sm:block" />
-				<span class="hidden font-engineering text-muted-foreground sm:inline">
+				<Separator orientation="vertical" class="hidden h-3 xl:block" />
+				<span class="hidden font-engineering text-muted-foreground xl:inline">
 					({hoverGrid.x}, {hoverGrid.y})
 				</span>
 			{/if}
