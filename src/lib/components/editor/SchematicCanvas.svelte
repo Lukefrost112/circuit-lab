@@ -14,6 +14,7 @@
 		Target,
 		Trash2,
 		Undo2,
+		Waypoints,
 		X
 	} from 'lucide-svelte';
 	import { CircuitSymbol, GRID_SIZE, PALETTE_ITEMS } from '$lib/components/symbols';
@@ -30,12 +31,17 @@
 	import { settings } from '$lib/stores/settings.svelte';
 	import { cn } from '$lib/utils';
 	import {
+		TOUCH_WIRE_DRAG_THRESHOLD_PX,
 		computeJunctionPoints,
 		computeManhattanPoints,
 		computePinchTransform,
 		computeTouchPinHitRadiusWorld,
 		formatComplexOverlay,
 		formatComponentDisplayValue,
+		getDragThresholdPx,
+		hasExceededDragThreshold,
+		isPointInComponentBodyHitbox,
+		isTouchLikePointer,
 		type WireBendMode
 	} from './helpers';
 	import {
@@ -71,6 +77,7 @@
 	let viewportH = $state(0);
 
 	let zoom = $state(1);
+	let settledZoom = $state(1);
 	let pan = $state({ x: 80, y: 60 });
 	let needsFit = $state(true);
 	let lastLoadedDocId = $state<string | undefined>(circuit.document.id);
@@ -84,6 +91,22 @@
 	let wireStart = $state<GridPoint | null>(null);
 	let wireBendMode = $state<WireBendMode>('hv');
 	let wireStartedFromSelect = $state(false);
+
+	// Zero-lag local preview states (defer solver/overlay work until pointerup)
+	let dragPreview = $state<{ componentId: string; x: number; y: number } | null>(null);
+	let placementPreview = $state<GridPoint | null>(null);
+
+	// Non-reactive refs for 60fps rAF coalescing and zero-layout-thrash rect caching
+	let cachedSvgRect: DOMRect | null = null;
+	let viewportRafId: number | null = null;
+	let pendingViewport: { pan: { x: number; y: number }; zoom?: number } | null = null;
+	let lastPointerType = 'mouse';
+	let wireDragOrigin: {
+		pointerId: number;
+		startClientX: number;
+		startClientY: number;
+		dragged: boolean;
+	} | null = null;
 
 	let spaceHeld = $state(false);
 	const activePointers = new Map<
@@ -109,17 +132,26 @@
 				startPanX: number;
 				startPanY: number;
 				moved: boolean;
+				tapWireId?: string;
 		  }
 		| {
 				kind: 'component';
 				pointerId: number;
 				pointerType: string;
 				componentId: string;
+				startClientX: number;
+				startClientY: number;
 				offsetGx: number;
 				offsetGy: number;
 				origGx: number;
 				origGy: number;
-				snapshotRecorded: boolean;
+				moved: boolean;
+		  }
+		| {
+				kind: 'place';
+				pointerId: number;
+				pointerType: string;
+				tool: ComponentKind;
 		  }
 		| null
 	>(null);
@@ -170,8 +202,44 @@
 		circuit.solution.mna.diagnostics.some((d) => d.severity === 'error')
 	);
 
-	const pinHitRadiusWorld = $derived(computeTouchPinHitRadiusWorld(zoom, 24));
-	const wireHitStrokeWidth = $derived(Math.max(14, 28 / Math.max(0.2, zoom)));
+	const isViewportGesturing = $derived(
+		pinchState !== null || (dragState?.kind === 'pan' && dragState.moved)
+	);
+	const isWiringMode = $derived(circuit.activeTool === 'wire' || wireStart !== null);
+
+	// Use settledZoom so pinch frames only update the root <g> transform without thrashing hitboxes
+	const pinHitRadiusWorld = $derived(computeTouchPinHitRadiusWorld(settledZoom, 24));
+	const wireHitStrokeWidth = $derived(Math.max(14, 28 / Math.max(0.2, settledZoom)));
+
+	// Freeze settledZoom during active pinch and sync immediately when pinch settles
+	$effect(() => {
+		if (pinchState === null) {
+			settledZoom = zoom;
+		}
+	});
+
+	// Refresh cached SVG bounding rect when viewport dimensions change
+	$effect(() => {
+		void viewportW;
+		void viewportH;
+		if (svgEl) {
+			cachedSvgRect = svgEl.getBoundingClientRect();
+		}
+	});
+
+	// Clear placement preview if tool changes away from placement
+	$effect(() => {
+		if (!isPlacementTool(circuit.activeTool) && placementPreview !== null) {
+			placementPreview = null;
+		}
+	});
+
+	// Cancel any pending rAF callback on unmount
+	$effect(() => {
+		return () => {
+			cancelPendingViewportUpdate();
+		};
+	});
 
 	// Mark document for refit whenever switching to a different loaded document id
 	$effect(() => {
@@ -193,7 +261,87 @@
 		}
 	});
 
+	function refreshSvgRect(): DOMRect | null {
+		if (!svgEl) return null;
+		cachedSvgRect = svgEl.getBoundingClientRect();
+		return cachedSvgRect;
+	}
+
+	function getSvgRect(): DOMRect | null {
+		return cachedSvgRect ?? refreshSvgRect();
+	}
+
+	function flushViewportUpdate(): void {
+		if (!pendingViewport) return;
+		const { pan: nextPan, zoom: nextZoom } = pendingViewport;
+		pendingViewport = null;
+		if (nextZoom !== undefined) {
+			zoom = nextZoom;
+		}
+		pan = nextPan;
+	}
+
+	function cancelPendingViewportUpdate(): void {
+		if (viewportRafId !== null && typeof cancelAnimationFrame !== 'undefined') {
+			cancelAnimationFrame(viewportRafId);
+			viewportRafId = null;
+		}
+		pendingViewport = null;
+	}
+
+	function scheduleViewportUpdate(nextPan: { x: number; y: number }, nextZoom?: number): void {
+		pendingViewport = { pan: nextPan, zoom: nextZoom };
+		if (viewportRafId !== null) return;
+		if (typeof requestAnimationFrame === 'undefined') {
+			flushViewportUpdate();
+			return;
+		}
+		viewportRafId = requestAnimationFrame(() => {
+			viewportRafId = null;
+			flushViewportUpdate();
+		});
+	}
+
+	function capturePointer(pointerId: number): void {
+		try {
+			svgEl?.setPointerCapture(pointerId);
+		} catch {
+			// Ignore if synthetic pointer or capture unsupported
+		}
+	}
+
+	function releasePointer(pointerId: number): void {
+		try {
+			if (svgEl?.hasPointerCapture(pointerId)) {
+				svgEl.releasePointerCapture(pointerId);
+			}
+		} catch {
+			// Ignore
+		}
+	}
+
+	function setHoverGrid(next: GridPoint | null): void {
+		if (next === null) {
+			if (hoverGrid !== null) hoverGrid = null;
+			return;
+		}
+		if (!hoverGrid || hoverGrid.x !== next.x || hoverGrid.y !== next.y) {
+			hoverGrid = next;
+		}
+	}
+
+	function setHoverSnappedPin(next: GridPoint | null): void {
+		if (next === null) {
+			if (hoverSnappedPin !== null) hoverSnappedPin = null;
+			return;
+		}
+		if (!hoverSnappedPin || hoverSnappedPin.x !== next.x || hoverSnappedPin.y !== next.y) {
+			hoverSnappedPin = next;
+		}
+	}
+
 	export function fitToView(): void {
+		cancelPendingViewportUpdate();
 		const comps = circuit.document.components;
 		const wires = circuit.document.wires;
 		if (comps.length === 0 && wires.length === 0) {
@@ -260,6 +408,7 @@
 	}
 
 	function adjustZoom(delta: number): void {
+		cancelPendingViewportUpdate();
 		const nextZoom = clampZoom(zoom + delta);
 		const cx = viewportW / 2;
 		const cy = viewportH / 2;
@@ -273,6 +422,7 @@
 	}
 
 	function resetZoom(): void {
+		cancelPendingViewportUpdate();
 		const cx = viewportW / 2;
 		const cy = viewportH / 2;
 		const wx = (cx - pan.x) / zoom;
@@ -285,8 +435,8 @@
 	}
 
 	function clientToGrid(clientX: number, clientY: number): { gx: number; gy: number; sx: number; sy: number } {
-		if (!svgEl) return { gx: 0, gy: 0, sx: 0, sy: 0 };
-		const rect = svgEl.getBoundingClientRect();
+		const rect = getSvgRect();
+		if (!rect) return { gx: 0, gy: 0, sx: 0, sy: 0 };
 		const sx = clientX - rect.left;
 		const sy = clientY - rect.top;
 		const wx = (sx - pan.x) / zoom;
@@ -330,14 +480,11 @@
 		return null;
 	}
 
-	function snapCoord(val: number): number {
-		return settings.snapToGrid ? Math.round(val) : Math.round(val * 2) / 2;
-	}
-
 	function handleWheel(e: WheelEvent): void {
 		e.preventDefault();
-		if (!svgEl) return;
-		const rect = svgEl.getBoundingClientRect();
+		const rect = refreshSvgRect();
+		if (!rect) return;
+		cancelPendingViewportUpdate();
 		const sx = e.clientX - rect.left;
 		const sy = e.clientY - rect.top;
 		const wx = (sx - pan.x) / zoom;
@@ -363,6 +510,7 @@
 		const pts = computeManhattanPoints(wireStart, endPt, wireBendMode);
 		circuit.addWire(pts);
 		wireStart = null;
+		wireDragOrigin = null;
 		if (wireStartedFromSelect) {
 			wireStartedFromSelect = false;
 		}
@@ -376,18 +524,25 @@
 	}
 
 	function beginPinchFromActivePointers(): void {
-		if (!svgEl || activePointers.size < 2) return;
+		if (activePointers.size < 2) return;
+		const rect = refreshSvgRect();
+		if (!rect) return;
+		flushViewportUpdate();
+		cancelPendingViewportUpdate();
+
 		const pts = Array.from(activePointers.values());
 		const p1 = pts[0];
 		const p2 = pts[1];
-		const rect = svgEl.getBoundingClientRect();
 		const x1 = p1.clientX - rect.left;
 		const y1 = p1.clientY - rect.top;
 		const x2 = p2.clientX - rect.left;
 		const y2 = p2.clientY - rect.top;
 
-		// Cancel any in-progress single-finger pan or component drag cleanly
+		// Cancel any in-progress single-finger pan, component drag, wire drag, or placement drag cleanly
 		dragState = null;
+		dragPreview = null;
+		placementPreview = null;
+		wireDragOrigin = null;
 
 		pinchState = {
 			startZoom: zoom,
@@ -423,10 +578,14 @@
 	}
 
 	function handleBackgroundPointerDown(e: PointerEvent): void {
+		lastPointerType = e.pointerType;
+		refreshSvgRect();
+
 		if (e.pointerType === 'mouse' && e.button === 2) {
 			if (wireStart) {
 				wireStart = null;
 				wireStartedFromSelect = false;
+				wireDragOrigin = null;
 			} else if (circuit.activeTool !== 'select') {
 				circuit.setActiveTool('select');
 			}
@@ -440,6 +599,7 @@
 
 		if (e.pointerType === 'mouse' && (e.button === 1 || (e.button === 0 && spaceHeld))) {
 			e.preventDefault();
+			capturePointer(e.pointerId);
 			dragState = {
 				kind: 'pan',
 				pointerId: e.pointerId,
@@ -465,6 +625,17 @@
 		if (circuit.activeTool === 'wire') {
 			if (!wireStart) {
 				startWireAt(targetPt, false);
+				if (isTouchLikePointer(e.pointerType)) {
+					wireDragOrigin = {
+						pointerId: e.pointerId,
+						startClientX: e.clientX,
+						startClientY: e.clientY,
+						dragged: false
+					};
+					capturePointer(e.pointerId);
+					setHoverGrid(targetPt);
+					setHoverSnappedPin(snappedPin);
+				}
 			} else {
 				finishWireAt(targetPt);
 			}
@@ -480,6 +651,17 @@
 		if (isPlacementTool(circuit.activeTool)) {
 			const gxSnap = Math.round(gx);
 			const gySnap = Math.round(gy);
+			if (isTouchLikePointer(e.pointerType)) {
+				placementPreview = { x: gxSnap, y: gySnap };
+				dragState = {
+					kind: 'place',
+					pointerId: e.pointerId,
+					pointerType: e.pointerType,
+					tool: circuit.activeTool
+				};
+				capturePointer(e.pointerId);
+				return;
+			}
 			circuit.addComponent(circuit.activeTool, gxSnap, gySnap, {
 				rotation: circuit.placementRotation,
 				sourceMode: circuit.activeSourceMode
@@ -493,6 +675,7 @@
 			return;
 		}
 
+		capturePointer(e.pointerId);
 		dragState = {
 			kind: 'pan',
 			pointerId: e.pointerId,
@@ -506,6 +689,9 @@
 	}
 
 	function handleComponentPointerDown(e: PointerEvent, comp: CircuitComponent): void {
+		lastPointerType = e.pointerType;
+		refreshSvgRect();
+
 		if (e.pointerType === 'mouse' && (e.button === 1 || (e.button === 0 && spaceHeld))) {
 			// Let middle-click / Space+drag pan cleanly
 			return;
@@ -529,6 +715,8 @@
 
 		e.stopPropagation();
 		circuit.selectComponent(comp.id);
+		dragPreview = null;
+		capturePointer(e.pointerId);
 
 		const { gx, gy } = clientToGrid(e.clientX, e.clientY);
 		dragState = {
@@ -536,11 +724,13 @@
 			pointerId: e.pointerId,
 			pointerType: e.pointerType,
 			componentId: comp.id,
+			startClientX: e.clientX,
+			startClientY: e.clientY,
 			offsetGx: gx - comp.x,
 			offsetGy: gy - comp.y,
 			origGx: comp.x,
 			origGy: comp.y,
-			snapshotRecorded: false
+			moved: false
 		};
 	}
 
@@ -550,7 +740,21 @@
 		pinX: number,
 		pinY: number
 	): void {
+		lastPointerType = e.pointerType;
+		refreshSvgRect();
+
 		if (!isPrimaryPointerDown(e) || spaceHeld) return;
+
+		// Stop accidental touch/pen wiring when in Select mode: bubble to component drag only if
+		// inside the body hitbox; otherwise stop propagation and start canvas pan directly.
+		if (isTouchLikePointer(e.pointerType) && circuit.activeTool === 'select' && !wireStart) {
+			const { gx, gy } = clientToGrid(e.clientX, e.clientY);
+			if (!isPointInComponentBodyHitbox(comp, gx, gy)) {
+				e.stopPropagation();
+				handleBackgroundPointerDown(e);
+			}
+			return;
+		}
 
 		if (trackPointerDown(e)) {
 			e.stopPropagation();
@@ -560,8 +764,8 @@
 
 		if (isPlacementTool(circuit.activeTool)) return;
 
-		// In Select mode (when not actively routing a wire), allow taps near the component body
-		// to fall through to component selection/dragging even when zoomed out with large touch hitboxes.
+		// In Select mode (desktop mouse, when not actively routing a wire), allow clicks near the
+		// component body to fall through to component selection/dragging cleanly.
 		if (circuit.activeTool === 'select' && !wireStart) {
 			const { gx, gy } = clientToGrid(e.clientX, e.clientY);
 			const distToPin = Math.hypot(gx - pinX, gy - pinY);
@@ -584,12 +788,26 @@
 
 		if (!wireStart) {
 			startWireAt(pt, circuit.activeTool === 'select');
+			if (isTouchLikePointer(e.pointerType)) {
+				wireDragOrigin = {
+					pointerId: e.pointerId,
+					startClientX: e.clientX,
+					startClientY: e.clientY,
+					dragged: false
+				};
+				capturePointer(e.pointerId);
+				setHoverGrid(pt);
+				setHoverSnappedPin(pt);
+			}
 		} else {
 			finishWireAt(pt);
 		}
 	}
 
 	function handleWirePointerDown(e: PointerEvent, wire: CircuitWire): void {
+		lastPointerType = e.pointerType;
+		refreshSvgRect();
+
 		if (!isPrimaryPointerDown(e) || spaceHeld) return;
 
 		if (trackPointerDown(e)) {
@@ -603,12 +821,24 @@
 		if (circuit.activeTool === 'wire' || wireStart) {
 			e.stopPropagation();
 			const { gx, gy } = clientToGrid(e.clientX, e.clientY);
-			const pt = findNearestPin(gx, gy, getPinSnapDist(e.pointerType)) ?? {
+			const snappedPin = findNearestPin(gx, gy, getPinSnapDist(e.pointerType));
+			const pt = snappedPin ?? {
 				x: Math.round(gx),
 				y: Math.round(gy)
 			};
 			if (!wireStart) {
 				startWireAt(pt, false);
+				if (isTouchLikePointer(e.pointerType)) {
+					wireDragOrigin = {
+						pointerId: e.pointerId,
+						startClientX: e.clientX,
+						startClientY: e.clientY,
+						dragged: false
+					};
+					capturePointer(e.pointerId);
+					setHoverGrid(pt);
+					setHoverSnappedPin(snappedPin);
+				}
 			} else {
 				finishWireAt(pt);
 			}
@@ -623,6 +853,22 @@
 		}
 
 		e.stopPropagation();
+		if (isTouchLikePointer(e.pointerType)) {
+			refreshSvgRect();
+			capturePointer(e.pointerId);
+			dragState = {
+				kind: 'pan',
+				pointerId: e.pointerId,
+				pointerType: e.pointerType,
+				startClientX: e.clientX,
+				startClientY: e.clientY,
+				startPanX: pan.x,
+				startPanY: pan.y,
+				moved: false,
+				tapWireId: wire.id
+			};
+			return;
+		}
 		circuit.selectWire(wire.id);
 	}
 
@@ -635,11 +881,13 @@
 			});
 		}
 
-		if (pinchState && activePointers.size >= 2 && svgEl) {
+		// 1. Two-finger pinch-zoom + two-finger pan (rAF coalesced, zero hover/rect thrash)
+		if (pinchState && activePointers.size >= 2) {
+			const rect = getSvgRect();
+			if (!rect) return;
 			const pts = Array.from(activePointers.values());
 			const p1 = pts[0];
 			const p2 = pts[1];
-			const rect = svgEl.getBoundingClientRect();
 			const x1 = p1.clientX - rect.left;
 			const y1 = p1.clientY - rect.top;
 			const x2 = p2.clientX - rect.left;
@@ -658,82 +906,221 @@
 				minZoom: 0.3,
 				maxZoom: 2.5
 			});
-			zoom = next.zoom;
-			pan = { x: next.panX, y: next.panY };
+			scheduleViewportUpdate({ x: next.panX, y: next.panY }, next.zoom);
 			return;
 		}
 
-		const { gx, gy } = clientToGrid(e.clientX, e.clientY);
-		const gridPt = { x: snapCoord(gx), y: snapCoord(gy) };
-		hoverGrid = { x: Math.round(gx), y: Math.round(gy) };
-		hoverSnappedPin = findNearestPin(gx, gy, getPinSnapDist(e.pointerType));
-
-		if (circuit.activeTool === 'probe') {
-			hoveredNodeId = findNodeNearGrid(gx, gy, getNodeProbeDist(e.pointerType));
-		} else if (hoveredNodeId !== null) {
-			hoveredNodeId = null;
-		}
-
-		if (!dragState || dragState.pointerId !== e.pointerId) return;
-
-		if (dragState.kind === 'pan') {
+		// 2. Active single-pointer pan (rAF coalesced, short-circuit hover updates)
+		if (dragState?.kind === 'pan' && dragState.pointerId === e.pointerId) {
 			const dx = e.clientX - dragState.startClientX;
 			const dy = e.clientY - dragState.startClientY;
-			const moveThreshold = dragState.pointerType === 'touch' ? 6 : 3;
-			if (Math.hypot(dx, dy) > moveThreshold) {
+			if (
+				!dragState.moved &&
+				hasExceededDragThreshold(
+					dragState.startClientX,
+					dragState.startClientY,
+					e.clientX,
+					e.clientY,
+					getDragThresholdPx(dragState.pointerType)
+				)
+			) {
 				dragState.moved = true;
 			}
 			if (dragState.moved) {
-				pan = {
+				scheduleViewportUpdate({
 					x: dragState.startPanX + dx,
 					y: dragState.startPanY + dy
-				};
+				});
 			}
-		} else if (dragState.kind === 'component') {
-			const compId = dragState.componentId;
+			return;
+		}
+
+		// 3. Zero-lag component drag preview (defer solver + overlay recompute until pointerup)
+		if (dragState?.kind === 'component' && dragState.pointerId === e.pointerId) {
+			if (!dragState.moved) {
+				if (
+					!hasExceededDragThreshold(
+						dragState.startClientX,
+						dragState.startClientY,
+						e.clientX,
+						e.clientY,
+						getDragThresholdPx(dragState.pointerType)
+					)
+				) {
+					return;
+				}
+				dragState.moved = true;
+			}
+			const { gx, gy } = clientToGrid(e.clientX, e.clientY);
 			const nextGx = Math.round(gx - dragState.offsetGx);
 			const nextGy = Math.round(gy - dragState.offsetGy);
-			const target = circuit.document.components.find((c) => c.id === compId);
-			if (!target) return;
-			if (target.x !== nextGx || target.y !== nextGy) {
-				if (!dragState.snapshotRecorded) {
-					circuit.recordSnapshot();
-					dragState.snapshotRecorded = true;
-				}
-				circuit.moveComponent(compId, nextGx, nextGy, { recordUndo: false });
+			if (
+				!dragPreview ||
+				dragPreview.componentId !== dragState.componentId ||
+				dragPreview.x !== nextGx ||
+				dragPreview.y !== nextGy
+			) {
+				dragPreview = { componentId: dragState.componentId, x: nextGx, y: nextGy };
 			}
-			void gridPt;
+			return;
+		}
+
+		// 4. Touch drag-to-place live ghost positioning
+		if (dragState?.kind === 'place' && dragState.pointerId === e.pointerId) {
+			const { gx, gy } = clientToGrid(e.clientX, e.clientY);
+			const nextGx = Math.round(gx);
+			const nextGy = Math.round(gy);
+			if (!placementPreview || placementPreview.x !== nextGx || placementPreview.y !== nextGy) {
+				placementPreview = { x: nextGx, y: nextGy };
+			}
+			return;
+		}
+
+		// 5. Touch press-drag-release orthogonal wiring preview
+		if (wireDragOrigin && wireDragOrigin.pointerId === e.pointerId && wireStart) {
+			if (
+				!wireDragOrigin.dragged &&
+				hasExceededDragThreshold(
+					wireDragOrigin.startClientX,
+					wireDragOrigin.startClientY,
+					e.clientX,
+					e.clientY,
+					TOUCH_WIRE_DRAG_THRESHOLD_PX
+				)
+			) {
+				wireDragOrigin.dragged = true;
+			}
+			const { gx, gy } = clientToGrid(e.clientX, e.clientY);
+			setHoverGrid({ x: Math.round(gx), y: Math.round(gy) });
+			setHoverSnappedPin(findNearestPin(gx, gy, getPinSnapDist(e.pointerType)));
+			return;
+		}
+
+		// 6. Idle hover tracking (deduplicated writes; skipped during viewport gestures)
+		if (isViewportGesturing) return;
+
+		const { gx, gy } = clientToGrid(e.clientX, e.clientY);
+		setHoverGrid({ x: Math.round(gx), y: Math.round(gy) });
+
+		if (isWiringMode || e.pointerType === 'mouse') {
+			setHoverSnappedPin(findNearestPin(gx, gy, getPinSnapDist(e.pointerType)));
+		} else {
+			setHoverSnappedPin(null);
+		}
+
+		if (circuit.activeTool === 'probe') {
+			const nextNode = findNodeNearGrid(gx, gy, getNodeProbeDist(e.pointerType));
+			if (hoveredNodeId !== nextNode) {
+				hoveredNodeId = nextNode;
+			}
+		} else if (hoveredNodeId !== null) {
+			hoveredNodeId = null;
 		}
 	}
 
 	function handlePointerUp(e: PointerEvent): void {
+		releasePointer(e.pointerId);
 		activePointers.delete(e.pointerId);
 
 		if (pinchState) {
+			flushViewportUpdate();
+			cancelPendingViewportUpdate();
 			if (activePointers.size < 2) {
 				pinchState = null;
 			}
 			dragState = null;
+			dragPreview = null;
+			placementPreview = null;
+			if (isTouchLikePointer(e.pointerType)) {
+				setHoverGrid(null);
+				setHoverSnappedPin(null);
+			}
+			return;
+		}
+
+		if (wireDragOrigin && wireDragOrigin.pointerId === e.pointerId) {
+			const origin = wireDragOrigin;
+			wireDragOrigin = null;
+			if (origin.dragged && wireStart) {
+				const { gx, gy } = clientToGrid(e.clientX, e.clientY);
+				const endPt = findNearestPin(gx, gy, getPinSnapDist(e.pointerType)) ?? {
+					x: Math.round(gx),
+					y: Math.round(gy)
+				};
+				finishWireAt(endPt);
+			}
+			if (isTouchLikePointer(e.pointerType)) {
+				setHoverGrid(null);
+				setHoverSnappedPin(null);
+			}
 			return;
 		}
 
 		if (dragState && dragState.pointerId === e.pointerId) {
-			if (dragState.kind === 'pan' && !dragState.moved) {
-				circuit.clearSelection();
-			} else if (dragState.kind === 'component' && !dragState.snapshotRecorded) {
-				onComponentInspect?.(dragState.componentId);
-			}
+			const ds = dragState;
 			dragState = null;
+
+			if (ds.kind === 'pan') {
+				flushViewportUpdate();
+				cancelPendingViewportUpdate();
+				if (!ds.moved) {
+					if (ds.tapWireId) {
+						circuit.selectWire(ds.tapWireId);
+					} else {
+						circuit.clearSelection();
+					}
+				}
+			} else if (ds.kind === 'component') {
+				const preview = dragPreview;
+				dragPreview = null;
+				if (
+					preview &&
+					preview.componentId === ds.componentId &&
+					(preview.x !== ds.origGx || preview.y !== ds.origGy)
+				) {
+					circuit.moveComponent(ds.componentId, preview.x, preview.y, { recordUndo: true });
+				} else if (!ds.moved && ds.pointerType === 'mouse') {
+					onComponentInspect?.(ds.componentId);
+				}
+			} else if (ds.kind === 'place') {
+				const pt = placementPreview;
+				placementPreview = null;
+				if (pt) {
+					circuit.addComponent(ds.tool, pt.x, pt.y, {
+						rotation: circuit.placementRotation,
+						sourceMode: circuit.activeSourceMode
+					});
+					circuit.setActiveTool('select');
+				}
+			}
+		}
+
+		if (isTouchLikePointer(e.pointerType)) {
+			setHoverGrid(null);
+			setHoverSnappedPin(null);
 		}
 	}
 
 	function handlePointerCancel(e: PointerEvent): void {
+		releasePointer(e.pointerId);
 		activePointers.delete(e.pointerId);
+		flushViewportUpdate();
+		cancelPendingViewportUpdate();
+
 		if (activePointers.size < 2) {
 			pinchState = null;
 		}
+		if (wireDragOrigin && wireDragOrigin.pointerId === e.pointerId) {
+			wireDragOrigin = null;
+		}
 		if (dragState && dragState.pointerId === e.pointerId) {
 			dragState = null;
+			dragPreview = null;
+			placementPreview = null;
+		}
+		if (isTouchLikePointer(e.pointerType)) {
+			setHoverGrid(null);
+			setHoverSnappedPin(null);
 		}
 	}
 
@@ -775,6 +1162,7 @@
 			if (wireStart) {
 				wireStart = null;
 				wireStartedFromSelect = false;
+				wireDragOrigin = null;
 			} else if (circuit.activeTool !== 'select') {
 				circuit.setActiveTool('select');
 			} else {
@@ -848,6 +1236,7 @@
 
 		if (key in shortcutMap) {
 			wireStart = null;
+			wireDragOrigin = null;
 			shortcutMap[key]();
 		}
 	}
@@ -1252,6 +1641,7 @@
 					onclick={() => {
 						wireStart = null;
 						wireStartedFromSelect = false;
+						wireDragOrigin = null;
 					}}
 				>
 					<X class="size-3.5" aria-hidden="true" />
@@ -1313,7 +1703,7 @@
 			<div class="flex min-w-0 items-center gap-1.5 text-xs">
 				<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" aria-hidden="true"></span>
 				<span class="truncate font-medium text-foreground">
-					Orthogonal Wire<span class="hidden font-normal text-muted-foreground sm:inline">{' · Tap pin or grid'}</span>
+					Orthogonal Wire<span class="hidden font-normal text-muted-foreground sm:inline">{' · Drag or tap pins'}</span>
 				</span>
 			</div>
 			<Button
@@ -1321,7 +1711,12 @@
 				size="sm"
 				class="min-h-11 shrink-0 gap-1 px-2.5 text-xs lg:min-h-0 lg:h-6 lg:px-2"
 				aria-label="Exit active tool"
-				onclick={() => circuit.setActiveTool('select')}
+				onclick={() => {
+					wireStart = null;
+					wireStartedFromSelect = false;
+					wireDragOrigin = null;
+					circuit.setActiveTool('select');
+				}}
 			>
 				<X class="size-3.5" aria-hidden="true" />
 				<span>Done</span>
@@ -1427,7 +1822,10 @@
 			</pattern>
 		</defs>
 
-		<g transform="translate({pan.x}, {pan.y}) scale({zoom})">
+		<g
+			transform="translate({pan.x}, {pan.y}) scale({zoom})"
+			data-gesturing={isViewportGesturing ? 'true' : undefined}
+		>
 			<!-- World Grid Plane -->
 			{#if settings.showGrid}
 				<rect
@@ -1505,11 +1903,22 @@
 					/>
 					{#if hoverSnappedPin || hoverGrid}
 						{@const endPt = hoverSnappedPin ?? hoverGrid!}
+						{#if hoverSnappedPin}
+							<circle
+								cx={endPt.x * GRID_SIZE}
+								cy={endPt.y * GRID_SIZE}
+								r="8.5"
+								fill="var(--primary)"
+								fill-opacity="0.14"
+								stroke="var(--primary)"
+								stroke-width="1.5"
+							/>
+						{/if}
 						<circle
 							cx={endPt.x * GRID_SIZE}
 							cy={endPt.y * GRID_SIZE}
-							r={hoverSnappedPin ? 5.5 : 3.5}
-							fill={hoverSnappedPin ? 'none' : 'var(--primary)'}
+							r={hoverSnappedPin ? 5 : 3.5}
+							fill={hoverSnappedPin ? 'var(--card)' : 'var(--primary)'}
 							stroke="var(--primary)"
 							stroke-width="2"
 						/>
@@ -1531,14 +1940,21 @@
 
 			<!-- Components -->
 			{#each circuit.document.components as comp (comp.id)}
+				{@const isDraggingThis = dragPreview?.componentId === comp.id}
+				{@const renderX = isDraggingThis ? dragPreview!.x : comp.x}
+				{@const renderY = isDraggingThis ? dragPreview!.y : comp.y}
+				{@const renderComp = isDraggingThis ? { ...comp, x: renderX, y: renderY } : comp}
 				{@const isSelected = circuit.selectedComponentId === comp.id}
 				{@const isThevenin =
 					circuit.theveninTarget?.kind === 'component' &&
 					circuit.theveninTarget.componentId === comp.id}
-				{@const pins = getPinPositions(comp)}
-				{@const labelLayout = getComponentLabelLayout(comp)}
+				{@const pins = getPinPositions(renderComp)}
+				{@const labelLayout = getComponentLabelLayout(renderComp)}
 				{@const displayVal = formatComponentDisplayValue(comp, circuit.document.mode)}
 				{@const isVertical = comp.rotation === 90 || comp.rotation === 270}
+				{@const isOnePinComp = comp.kind === 'ground' || comp.kind === 'terminal'}
+				{@const hitHalfW = isOnePinComp ? 18 : isVertical ? 18 : 34}
+				{@const hitHalfH = isOnePinComp ? 18 : isVertical ? 34 : 18}
 				<g
 					role="button"
 					tabindex="-1"
@@ -1552,13 +1968,14 @@
 					)}
 					onpointerdown={(e) => handleComponentPointerDown(e, comp)}
 					ondblclick={(e) => {
+						if (lastPointerType !== 'mouse') return;
 						e.stopPropagation();
 						circuit.rotateComponent(comp.id);
 					}}
 				>
 					<!-- Selection Highlight Ring -->
 					{#if isSelected}
-						{@const selRect = getSelectionRect(comp)}
+						{@const selRect = getSelectionRect(renderComp)}
 						<rect
 							x={selRect.x}
 							y={selRect.y}
@@ -1576,16 +1993,16 @@
 
 					<!-- Invisible generous click hitbox -->
 					<rect
-						x={comp.x * GRID_SIZE - (isVertical ? 18 : 34)}
-						y={comp.y * GRID_SIZE - (isVertical ? 34 : 18)}
-						width={isVertical ? 36 : 68}
-						height={isVertical ? 68 : 36}
+						x={renderX * GRID_SIZE - hitHalfW}
+						y={renderY * GRID_SIZE - hitHalfH}
+						width={hitHalfW * 2}
+						height={hitHalfH * 2}
 						fill="transparent"
 					/>
 
 					<!-- Unified CircuitSymbol -->
 					<g
-						transform="translate({comp.x * GRID_SIZE}, {comp.y * GRID_SIZE}) rotate({comp.rotation})"
+						transform="translate({renderX * GRID_SIZE}, {renderY * GRID_SIZE}) rotate({comp.rotation})"
 						class={cn(
 							'transition-colors duration-100',
 							isSelected ? 'text-warning' : 'text-foreground'
@@ -1602,7 +2019,7 @@
 
 					<!-- Upright Counter-Rotated Designator & Value -->
 					<g
-						transform="translate({comp.x * GRID_SIZE}, {comp.y * GRID_SIZE})"
+						transform="translate({renderX * GRID_SIZE}, {renderY * GRID_SIZE})"
 						pointer-events="none"
 					>
 						<text
@@ -1634,7 +2051,7 @@
 					<!-- Thévenin Load Target Badge -->
 					{#if isThevenin}
 						<g
-							transform="translate({comp.x * GRID_SIZE}, {comp.y * GRID_SIZE - (isVertical ? 52 : 54)})"
+							transform="translate({renderX * GRID_SIZE}, {renderY * GRID_SIZE - (isVertical ? 52 : 54)})"
 							pointer-events="none"
 						>
 							<rect
@@ -1663,6 +2080,7 @@
 
 					<!-- Interactive Pin Circles -->
 					{#each pins as pin (pin.index)}
+						{@const isSnappedPin = hoverSnappedPin?.x === pin.x && hoverSnappedPin?.y === pin.y}
 						<g
 							role="button"
 							tabindex="-1"
@@ -1673,86 +2091,114 @@
 							<circle
 								cx={pin.x * GRID_SIZE}
 								cy={pin.y * GRID_SIZE}
-								r={pinHitRadiusWorld}
+								r={isWiringMode || circuit.activeTool === 'probe' ? pinHitRadiusWorld : 8}
 								fill="transparent"
 							/>
 							<circle
 								cx={pin.x * GRID_SIZE}
 								cy={pin.y * GRID_SIZE}
-								r="3"
-								fill="var(--card)"
-								stroke={hoverSnappedPin?.x === pin.x && hoverSnappedPin?.y === pin.y
+								r={isWiringMode ? 4.2 : 3}
+								fill={isSnappedPin ? 'var(--primary)' : 'var(--card)'}
+								stroke={isSnappedPin || isWiringMode
 									? 'var(--primary)'
 									: 'var(--muted-foreground)'}
-								stroke-width="1.5"
-								class="opacity-70 transition-opacity duration-100 group-hover/pin:opacity-100"
+								stroke-width={isWiringMode ? 1.75 : 1.5}
+								class={cn(
+									'transition-opacity duration-100',
+									isWiringMode || isSnappedPin
+										? 'opacity-100'
+										: 'opacity-70 group-hover/pin:opacity-100'
+								)}
 							/>
 						</g>
 					{/each}
 				</g>
 			{/each}
 
-			<!-- Ghost Placement Preview -->
-			{#if isPlacementTool(circuit.activeTool) && hoverGrid}
+			<!-- Ghost Placement Preview (mouse hover or touch drag-to-place) -->
+			{#if isPlacementTool(circuit.activeTool) && (placementPreview || hoverGrid)}
+				{@const ghostPt = placementPreview ?? hoverGrid!}
 				<g
-					transform="translate({hoverGrid.x * GRID_SIZE}, {hoverGrid.y * GRID_SIZE}) rotate({circuit.placementRotation})"
-					class="text-primary opacity-60"
+					transform="translate({ghostPt.x * GRID_SIZE}, {ghostPt.y * GRID_SIZE})"
 					pointer-events="none"
 				>
-					<CircuitSymbol
-						kind={circuit.activeTool}
-						variant="schematic"
-						asGroup={true}
-						sourceMode={circuit.activeSourceMode}
-						terminalLabel={circuit.activeTool === 'terminal' ? 'T' : undefined}
-					/>
-					{#if circuit.activeTool !== 'ground' && circuit.activeTool !== 'terminal'}
-						<circle cx="-40" cy="0" r="3" fill="var(--primary)" />
-						<circle cx="40" cy="0" r="3" fill="var(--primary)" />
-					{:else}
-						<circle cx="0" cy="0" r="3" fill="var(--primary)" />
+					{#if placementPreview}
+						<circle
+							cx="0"
+							cy="0"
+							r="18"
+							fill="var(--primary)"
+							fill-opacity="0.08"
+							stroke="var(--primary)"
+							stroke-width="1.25"
+							stroke-dasharray="3 2"
+						/>
+						<line x1="-24" y1="0" x2="-10" y2="0" stroke="var(--primary)" stroke-width="1" stroke-opacity="0.65" />
+						<line x1="10" y1="0" x2="24" y2="0" stroke="var(--primary)" stroke-width="1" stroke-opacity="0.65" />
+						<line x1="0" y1="-24" x2="0" y2="-10" stroke="var(--primary)" stroke-width="1" stroke-opacity="0.65" />
+						<line x1="0" y1="10" x2="0" y2="24" stroke="var(--primary)" stroke-width="1" stroke-opacity="0.65" />
 					{/if}
+					<g
+						transform="rotate({circuit.placementRotation})"
+						class="text-primary opacity-65"
+					>
+						<CircuitSymbol
+							kind={circuit.activeTool}
+							variant="schematic"
+							asGroup={true}
+							sourceMode={circuit.activeSourceMode}
+							terminalLabel={circuit.activeTool === 'terminal' ? 'T' : undefined}
+						/>
+						{#if circuit.activeTool !== 'ground' && circuit.activeTool !== 'terminal'}
+							<circle cx="-40" cy="0" r="3" fill="var(--primary)" />
+							<circle cx="40" cy="0" r="3" fill="var(--primary)" />
+						{:else}
+							<circle cx="0" cy="0" r="3" fill="var(--primary)" />
+						{/if}
+					</g>
 				</g>
 			{/if}
 
 			<!-- Live Branch Current Overlays (Emerald) -->
 			{#each branchOverlays as br (br.componentId)}
-				<g pointer-events="none">
-					<!-- Directional current arrowhead along lead -->
-					<g transform="translate({br.arrowX}, {br.arrowY}) rotate({br.arrowAngleDeg})">
-						<path
-							d="M -4 -3.5 L 4 0 L -4 3.5 Z"
-							fill="var(--current)"
-						/>
+				{#if dragPreview?.componentId !== br.componentId}
+					<g pointer-events="none">
+						<!-- Directional current arrowhead along lead -->
+						<g transform="translate({br.arrowX}, {br.arrowY}) rotate({br.arrowAngleDeg})">
+							<path
+								d="M -4 -3.5 L 4 0 L -4 3.5 Z"
+								fill="var(--current)"
+							/>
+						</g>
+						<!-- Compact Emerald pill -->
+						<g transform="translate({br.badgeX}, {br.badgeY})">
+							<rect
+								x={-br.pillWidth / 2}
+								y="-8"
+								width={br.pillWidth}
+								height="16"
+								rx="3"
+								fill="var(--card)"
+								fill-opacity="0.95"
+								stroke="var(--current)"
+								stroke-opacity="0.45"
+								stroke-width="1"
+							/>
+							<text
+								x="0"
+								y="3"
+								text-anchor="middle"
+								fill="var(--current)"
+								font-family="var(--font-mono)"
+								font-size="9.5"
+								font-weight="600"
+								style="font-variant-numeric: tabular-nums;"
+							>
+								{br.text}
+							</text>
+						</g>
 					</g>
-					<!-- Compact Emerald pill -->
-					<g transform="translate({br.badgeX}, {br.badgeY})">
-						<rect
-							x={-br.pillWidth / 2}
-							y="-8"
-							width={br.pillWidth}
-							height="16"
-							rx="3"
-							fill="var(--card)"
-							fill-opacity="0.95"
-							stroke="var(--current)"
-							stroke-opacity="0.45"
-							stroke-width="1"
-						/>
-						<text
-							x="0"
-							y="3"
-							text-anchor="middle"
-							fill="var(--current)"
-							font-family="var(--font-mono)"
-							font-size="9.5"
-							font-weight="600"
-							style="font-variant-numeric: tabular-nums;"
-						>
-							{br.text}
-						</text>
-					</g>
-				</g>
+				{/if}
 			{/each}
 
 			<!-- Live Node Voltage Overlays (Cobalt) -->
@@ -1943,8 +2389,8 @@
 	{/if}
 
 	<!-- Mobile & Tablet Bottom Docked Canvas Tool Strip (< lg) -->
-	<div class="flex shrink-0 items-center justify-between gap-2 border-t border-border bg-surface-rail px-2 py-1 lg:hidden">
-		<div class="flex items-center">
+	<div class="flex shrink-0 items-center justify-between gap-1 border-t border-border bg-surface-rail px-1.5 py-1 sm:gap-2 sm:px-2 lg:hidden">
+		<div class="flex shrink-0 items-center">
 			<Button
 				variant="ghost"
 				size="icon"
@@ -1994,15 +2440,42 @@
 			</Button>
 		</div>
 
-		<button
-			type="button"
-			onclick={() => onOpenPalette?.()}
-			aria-label="Open component palette"
-			class="inline-flex min-h-11 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-[4px] bg-foreground px-3.5 text-xs font-medium text-background transition-colors duration-150 hover:bg-foreground/90 active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-		>
-			<Plus class="size-4" aria-hidden="true" />
-			<span>Parts</span>
-		</button>
+		<div class="flex shrink-0 items-center gap-1 sm:gap-1.5">
+			<button
+				type="button"
+				aria-label="Wire tool"
+				aria-pressed={circuit.activeTool === 'wire'}
+				onclick={() => {
+					if (circuit.activeTool === 'wire') {
+						wireStart = null;
+						wireStartedFromSelect = false;
+						wireDragOrigin = null;
+						circuit.setActiveTool('select');
+					} else {
+						circuit.setActiveTool('wire');
+					}
+				}}
+				class={cn(
+					'inline-flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-[4px] border text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-2.5',
+					circuit.activeTool === 'wire'
+						? 'border-primary/50 bg-primary/12 text-primary'
+						: 'border-border bg-card text-foreground hover:bg-accent'
+				)}
+			>
+				<Waypoints class="size-4 shrink-0" aria-hidden="true" />
+				<span class="hidden sm:inline">Wire</span>
+			</button>
+
+			<button
+				type="button"
+				onclick={() => onOpenPalette?.()}
+				aria-label="Open component palette"
+				class="inline-flex min-h-11 shrink-0 cursor-pointer items-center justify-center gap-1 rounded-[4px] bg-foreground px-2.5 text-xs font-medium text-background transition-colors duration-150 hover:bg-foreground/90 active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:gap-1.5 sm:px-3.5"
+			>
+				<Plus class="size-4 shrink-0" aria-hidden="true" />
+				<span>Parts</span>
+			</button>
+		</div>
 	</div>
 
 	<!-- Desktop Docked Bottom Status & Tool Bar (lg+) -->

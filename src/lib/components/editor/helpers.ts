@@ -285,3 +285,54 @@ export function computeTouchPinHitRadiusWorld(zoom: number, minScreenRadiusPx = 
 	return Math.max(10, minScreenRadiusPx / safeZoom);
 }
 
+export interface FrequencyPreset {
+	label: string;
+	hz: number;
+}
+
+/** Standard electrical engineering lab AC drive frequencies for quick mobile selection. */
+export const AC_FREQUENCY_PRESETS: readonly FrequencyPreset[] = [
+	{ label: '50 Hz', hz: 50 },
+	{ label: '60 Hz', hz: 60 },
+	{ label: '1 kHz', hz: 1000 },
+	{ label: '10 kHz', hz: 10000 }
+] as const;
+
+export const TOUCH_DRAG_THRESHOLD_PX = 6;
+export const MOUSE_DRAG_THRESHOLD_PX = 3;
+export const TOUCH_WIRE_DRAG_THRESHOLD_PX = 14;
+
+export function isTouchLikePointer(pointerType: string): boolean {
+	return pointerType === 'touch' || pointerType === 'pen';
+}
+
+export function getDragThresholdPx(pointerType: string): number {
+	return isTouchLikePointer(pointerType) ? TOUCH_DRAG_THRESHOLD_PX : MOUSE_DRAG_THRESHOLD_PX;
+}
+
+export function hasExceededDragThreshold(
+	startX: number,
+	startY: number,
+	currX: number,
+	currY: number,
+	thresholdPx: number
+): boolean {
+	return Math.hypot(currX - startX, currY - startY) > thresholdPx;
+}
+
+/**
+ * Checks whether a grid-space point `(gx, gy)` falls inside the component's body hitbox
+ * (`34×18`px horizontal / `18×34`px vertical half-extents for 2-pin parts; `18×18`px for 1-pin
+ * ground/terminal parts, at `GRID_SIZE = 20`).
+ */
+export function isPointInComponentBodyHitbox(
+	comp: Pick<CircuitComponent, 'kind' | 'x' | 'y' | 'rotation'>,
+	gx: number,
+	gy: number
+): boolean {
+	const isOnePinComp = comp.kind === 'ground' || comp.kind === 'terminal';
+	const isVertical = comp.rotation === 90 || comp.rotation === 270;
+	const halfW = isOnePinComp ? 0.9 : isVertical ? 0.9 : 1.7;
+	const halfH = isOnePinComp ? 0.9 : isVertical ? 1.7 : 0.9;
+	return Math.abs(gx - comp.x) <= halfW + 1e-9 && Math.abs(gy - comp.y) <= halfH + 1e-9;
+}

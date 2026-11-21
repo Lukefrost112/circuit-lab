@@ -5,16 +5,24 @@ import { Complex } from '$lib/engine';
 import { circuit } from '$lib/stores/circuit.svelte';
 import { settings } from '$lib/stores/settings.svelte';
 import {
+	AC_FREQUENCY_PRESETS,
 	ComponentPalette,
 	EngineeringInput,
+	MOUSE_DRAG_THRESHOLD_PX,
 	PropertyInspector,
 	SchematicCanvas,
+	TOUCH_DRAG_THRESHOLD_PX,
+	TOUCH_WIRE_DRAG_THRESHOLD_PX,
 	computeJunctionPoints,
 	computeManhattanPoints,
 	computePinchTransform,
 	computeTouchPinHitRadiusWorld,
 	formatComplexOverlay,
-	formatComponentDisplayValue
+	formatComponentDisplayValue,
+	getDragThresholdPx,
+	hasExceededDragThreshold,
+	isPointInComponentBodyHitbox,
+	isTouchLikePointer
 } from './index';
 
 beforeEach(() => {
@@ -246,6 +254,59 @@ describe('editor geometry & formatting helpers', () => {
 		// Clamps degenerate low zoom at 0.2
 		expect(computeTouchPinHitRadiusWorld(0.05)).toBeCloseTo(120, 6);
 	});
+
+	it('exposes standard lab AC frequency presets in ascending order', () => {
+		expect(AC_FREQUENCY_PRESETS.map((p) => p.label)).toEqual([
+			'50 Hz',
+			'60 Hz',
+			'1 kHz',
+			'10 kHz'
+		]);
+		expect(AC_FREQUENCY_PRESETS.map((p) => p.hz)).toEqual([50, 60, 1000, 10000]);
+	});
+
+	it('classifies touch-like pointers and evaluates drag/wire movement thresholds accurately', () => {
+		expect(isTouchLikePointer('touch')).toBe(true);
+		expect(isTouchLikePointer('pen')).toBe(true);
+		expect(isTouchLikePointer('mouse')).toBe(false);
+
+		expect(getDragThresholdPx('touch')).toBe(TOUCH_DRAG_THRESHOLD_PX);
+		expect(getDragThresholdPx('pen')).toBe(TOUCH_DRAG_THRESHOLD_PX);
+		expect(getDragThresholdPx('mouse')).toBe(MOUSE_DRAG_THRESHOLD_PX);
+
+		// Sub-threshold jitter must not trigger drag
+		expect(hasExceededDragThreshold(100, 100, 104, 104, TOUCH_DRAG_THRESHOLD_PX)).toBe(false);
+		expect(hasExceededDragThreshold(100, 100, 107, 100, TOUCH_DRAG_THRESHOLD_PX)).toBe(true);
+
+		// Wire press-drag-release threshold separates tap-tap from press-drag-release
+		expect(hasExceededDragThreshold(50, 50, 59, 59, TOUCH_WIRE_DRAG_THRESHOLD_PX)).toBe(false);
+		expect(hasExceededDragThreshold(50, 50, 65, 50, TOUCH_WIRE_DRAG_THRESHOLD_PX)).toBe(true);
+	});
+
+	it('distinguishes component body hitboxes from open pan space beside pins', () => {
+		const horizResistor = { kind: 'resistor' as const, x: 10, y: 6, rotation: 0 as const };
+		// Inside 34x18px (1.7x0.9 grid) half-extents
+		expect(isPointInComponentBodyHitbox(horizResistor, 10, 6)).toBe(true);
+		expect(isPointInComponentBodyHitbox(horizResistor, 11.7, 6.9)).toBe(true);
+		// Pin itself (x=12) and ~10px beside pin (x=12.5) are outside body hitbox
+		expect(isPointInComponentBodyHitbox(horizResistor, 12.0, 6)).toBe(false);
+		expect(isPointInComponentBodyHitbox(horizResistor, 12.5, 6)).toBe(false);
+		expect(isPointInComponentBodyHitbox(horizResistor, 10, 7.1)).toBe(false);
+
+		const vertResistor = { kind: 'resistor' as const, x: 10, y: 6, rotation: 90 as const };
+		expect(isPointInComponentBodyHitbox(vertResistor, 10.9, 7.7)).toBe(true);
+		expect(isPointInComponentBodyHitbox(vertResistor, 11.1, 6)).toBe(false);
+		expect(isPointInComponentBodyHitbox(vertResistor, 10, 8.0)).toBe(false);
+
+		const gnd = { kind: 'ground' as const, x: 4, y: 10, rotation: 0 as const };
+		expect(isPointInComponentBodyHitbox(gnd, 4.9, 10.9)).toBe(true);
+		expect(isPointInComponentBodyHitbox(gnd, 5.1, 10)).toBe(false);
+		expect(isPointInComponentBodyHitbox(gnd, 4, 11.1)).toBe(false);
+
+		const term = { kind: 'terminal' as const, x: 18, y: 4, rotation: 90 as const };
+		expect(isPointInComponentBodyHitbox(term, 18.8, 4.8)).toBe(true);
+		expect(isPointInComponentBodyHitbox(term, 18, 5.2)).toBe(false);
+	});
 });
 
 describe('editor Svelte components SSR rendering', () => {
@@ -322,5 +383,27 @@ describe('editor Svelte components SSR rendering', () => {
 		expect(placingOut.body).toContain('Active tool controls');
 		expect(placingOut.body).toContain('Rotate 90°');
 		expect(placingOut.body).toContain('Done');
+
+		// 1-tap mobile Wire tool toggle reflects active state cleanly
+		expect(placingOut.body).toContain('aria-label="Wire tool"');
+		expect(placingOut.body).toContain('aria-pressed="false"');
+
+		circuit.setActiveTool('wire');
+		const wiringOut = render(SchematicCanvas);
+		expect(wiringOut.body).toContain('aria-label="Wire tool"');
+		expect(wiringOut.body).toContain('aria-pressed="true"');
+		expect(wiringOut.body).toContain('Orthogonal Wire');
+		// Expanded 24px touch pin hit circle is active in wire and probe modes
+		expect(wiringOut.body).toContain('r="24" fill="transparent"');
+
+		circuit.setActiveTool('probe');
+		const probeOut = render(SchematicCanvas);
+		expect(probeOut.body).toContain('r="24" fill="transparent"');
+
+		// Tight 8px pin hit circle in select mode so open space beside pins pans cleanly
+		circuit.setActiveTool('select');
+		const selectOut = render(SchematicCanvas);
+		expect(selectOut.body).toContain('r="8" fill="transparent"');
+		expect(selectOut.body).not.toContain('r="24" fill="transparent"');
 	});
 });
