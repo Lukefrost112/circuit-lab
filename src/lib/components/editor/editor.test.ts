@@ -11,6 +11,8 @@ import {
 	SchematicCanvas,
 	computeJunctionPoints,
 	computeManhattanPoints,
+	computePinchTransform,
+	computeTouchPinHitRadiusWorld,
 	formatComplexOverlay,
 	formatComponentDisplayValue
 } from './index';
@@ -87,6 +89,163 @@ describe('editor geometry & formatting helpers', () => {
 			})
 		).toBe('120∠-30° V');
 	});
+
+	it('computes pinch-to-zoom centered on midpoint without drift', () => {
+		const startZoom = 1;
+		const startPanX = 50;
+		const startPanY = 40;
+		const startMidX = 200;
+		const startMidY = 160;
+		const worldBeforeX = (startMidX - startPanX) / startZoom;
+		const worldBeforeY = (startMidY - startPanY) / startZoom;
+
+		const res = computePinchTransform({
+			startZoom,
+			startMidX,
+			startMidY,
+			startDist: 100,
+			currMidX: startMidX,
+			currMidY: startMidY,
+			currDist: 180,
+			startPanX,
+			startPanY,
+			minZoom: 0.3,
+			maxZoom: 2.5
+		});
+
+		expect(res.zoom).toBeCloseTo(1.8, 6);
+		// World point under the midpoint remains unchanged
+		expect((startMidX - res.panX) / res.zoom).toBeCloseTo(worldBeforeX, 6);
+		expect((startMidY - res.panY) / res.zoom).toBeCloseTo(worldBeforeY, 6);
+	});
+
+	it('clamps pinch zoom to minZoom and maxZoom cleanly', () => {
+		const zoomedOut = computePinchTransform({
+			startZoom: 0.8,
+			startMidX: 150,
+			startMidY: 120,
+			startDist: 200,
+			currMidX: 150,
+			currMidY: 120,
+			currDist: 20,
+			startPanX: 30,
+			startPanY: 20,
+			minZoom: 0.3,
+			maxZoom: 2.5
+		});
+		expect(zoomedOut.zoom).toBeCloseTo(0.3, 6);
+		expect(Number.isFinite(zoomedOut.panX)).toBe(true);
+		expect(Number.isFinite(zoomedOut.panY)).toBe(true);
+
+		const zoomedIn = computePinchTransform({
+			startZoom: 1.5,
+			startMidX: 150,
+			startMidY: 120,
+			startDist: 80,
+			currMidX: 150,
+			currMidY: 120,
+			currDist: 400,
+			startPanX: 30,
+			startPanY: 20,
+			minZoom: 0.3,
+			maxZoom: 2.5
+		});
+		expect(zoomedIn.zoom).toBeCloseTo(2.5, 6);
+	});
+
+	it('supports simultaneous two-finger midpoint pan with and without scale change', () => {
+		const purePan = computePinchTransform({
+			startZoom: 1.2,
+			startMidX: 100,
+			startMidY: 100,
+			startDist: 120,
+			currMidX: 145,
+			currMidY: 70,
+			currDist: 120,
+			startPanX: 20,
+			startPanY: 30,
+			minZoom: 0.3,
+			maxZoom: 2.5
+		});
+		expect(purePan.zoom).toBeCloseTo(1.2, 6);
+		expect(purePan.panX).toBeCloseTo(65, 6);
+		expect(purePan.panY).toBeCloseTo(0, 6);
+
+		const panAndZoom = computePinchTransform({
+			startZoom: 1,
+			startMidX: 100,
+			startMidY: 80,
+			startDist: 100,
+			currMidX: 130,
+			currMidY: 110,
+			currDist: 200,
+			startPanX: 0,
+			startPanY: 0,
+			minZoom: 0.3,
+			maxZoom: 2.5
+		});
+		expect(panAndZoom.zoom).toBeCloseTo(2, 6);
+		// World (100, 80) maps to new midpoint (130, 110) at zoom 2 => pan = (130 - 200, 110 - 160)
+		expect(panAndZoom.panX).toBeCloseTo(-70, 6);
+		expect(panAndZoom.panY).toBeCloseTo(-50, 6);
+	});
+
+	it('guards against degenerate zero or tiny startDist without NaN or jumps', () => {
+		const zeroDist = computePinchTransform({
+			startZoom: 1,
+			startMidX: 120,
+			startMidY: 90,
+			startDist: 0,
+			currMidX: 135,
+			currMidY: 100,
+			currDist: 40,
+			startPanX: 10,
+			startPanY: 20,
+			minZoom: 0.3,
+			maxZoom: 2.5
+		});
+		expect(Number.isNaN(zeroDist.zoom)).toBe(false);
+		expect(Number.isNaN(zeroDist.panX)).toBe(false);
+		expect(Number.isNaN(zeroDist.panY)).toBe(false);
+		expect(zeroDist.zoom).toBe(1);
+		expect(zeroDist.panX).toBeCloseTo(25, 6);
+		expect(zeroDist.panY).toBeCloseTo(30, 6);
+
+		const tinyDist = computePinchTransform({
+			startZoom: 1.25,
+			startMidX: 100,
+			startMidY: 100,
+			startDist: 1e-6,
+			currMidX: 100,
+			currMidY: 100,
+			currDist: 50,
+			startPanX: 40,
+			startPanY: -10,
+			minZoom: 0.3,
+			maxZoom: 2.5
+		});
+		expect(tinyDist.zoom).toBeCloseTo(1.25, 6);
+		expect(tinyDist.panX).toBeCloseTo(40, 6);
+		expect(tinyDist.panY).toBeCloseTo(-10, 6);
+	});
+
+	it('computes touch pin hit radius guaranteeing >= 24px screen radius across zoom levels', () => {
+		expect(computeTouchPinHitRadiusWorld(0.4)).toBeCloseTo(60, 6);
+		expect(computeTouchPinHitRadiusWorld(0.4) * 0.4).toBeGreaterThanOrEqual(24);
+
+		expect(computeTouchPinHitRadiusWorld(1.0)).toBeCloseTo(24, 6);
+		expect(computeTouchPinHitRadiusWorld(1.0) * 1.0).toBeGreaterThanOrEqual(24);
+
+		expect(computeTouchPinHitRadiusWorld(2.0)).toBeCloseTo(12, 6);
+		expect(computeTouchPinHitRadiusWorld(2.0) * 2.0).toBeGreaterThanOrEqual(24);
+
+		// At high zoom, floor stays at 10 world units
+		expect(computeTouchPinHitRadiusWorld(2.5)).toBe(10);
+		expect(computeTouchPinHitRadiusWorld(2.5) * 2.5).toBeGreaterThanOrEqual(24);
+
+		// Clamps degenerate low zoom at 0.2
+		expect(computeTouchPinHitRadiusWorld(0.05)).toBeCloseTo(120, 6);
+	});
 });
 
 describe('editor Svelte components SSR rendering', () => {
@@ -149,5 +308,19 @@ describe('editor Svelte components SSR rendering', () => {
 		circuit.clearCircuit();
 		const emptyOut = render(SchematicCanvas);
 		expect(emptyOut.body).toContain('Place a component or load a preset to begin');
+	});
+
+	it('renders mobile quick element action bar and active placement mode pill cleanly', () => {
+		circuit.selectComponent('R1');
+		const selectedOut = render(SchematicCanvas);
+		expect(selectedOut.body).toContain('Selected element actions');
+		expect(selectedOut.body).toContain('Rotate component 90 degrees');
+		expect(selectedOut.body).toContain('Open component palette');
+
+		circuit.setActiveTool('resistor');
+		const placingOut = render(SchematicCanvas);
+		expect(placingOut.body).toContain('Active tool controls');
+		expect(placingOut.body).toContain('Rotate 90°');
+		expect(placingOut.body).toContain('Done');
 	});
 });

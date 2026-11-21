@@ -13,7 +13,6 @@
 		PanelLeftOpen,
 		PanelRightClose,
 		PanelRightOpen,
-		Plus,
 		Settings,
 		SlidersHorizontal,
 		Sparkles,
@@ -537,19 +536,12 @@
 				onOpenImport={() => (jsonOpen = true)}
 				onOpenAiImport={() => (aiOpen = true)}
 				onComponentInspect={handleCanvasComponentInspect}
+				onOpenPalette={() => (paletteSheetOpen = true)}
+				onMobileInspect={(id) => {
+					if (id) circuit.selectComponent(id);
+					mobileTab = 'inspector';
+				}}
 			/>
-
-			{#if mobileTab === 'canvas'}
-				<Button
-					variant="default"
-					onclick={() => (paletteSheetOpen = true)}
-					aria-label="Open component palette"
-					class="absolute right-3 bottom-14 z-20 min-h-11 gap-1.5 rounded-full px-3.5 text-sm shadow-lg lg:hidden"
-				>
-					<Plus class="size-4" aria-hidden="true" />
-					<span>Parts</span>
-				</Button>
-			{/if}
 		</main>
 
 		<!-- Mobile & Tablet Full-Pane Results / Inspector Views (< lg) -->

@@ -215,3 +215,73 @@ export function formatComplexOverlay(
 	const degStr = Number(deg.toPrecision(opts.precision)).toString();
 	return `${magStr}∠${degStr}° ${unit}`;
 }
+
+export interface PinchTransformInput {
+	startZoom: number;
+	startMidX: number;
+	startMidY: number;
+	startDist: number;
+	currMidX: number;
+	currMidY: number;
+	currDist: number;
+	startPanX: number;
+	startPanY: number;
+	minZoom?: number;
+	maxZoom?: number;
+}
+
+export interface PinchTransformResult {
+	zoom: number;
+	panX: number;
+	panY: number;
+}
+
+/**
+ * Computes the next canvas zoom and pan for a two-finger pinch gesture so that
+ * scaling smoothly centers between the two fingers while simultaneously tracking
+ * midpoint translation (two-finger pan). Guards against tiny/zero distances.
+ */
+export function computePinchTransform({
+	startZoom,
+	startMidX,
+	startMidY,
+	startDist,
+	currMidX,
+	currMidY,
+	currDist,
+	startPanX,
+	startPanY,
+	minZoom = 0.3,
+	maxZoom = 2.5
+}: PinchTransformInput): PinchTransformResult {
+	const safeStartZoom = Number.isFinite(startZoom) && startZoom > 0 ? startZoom : 1;
+	const safeMinZoom = Number.isFinite(minZoom) && minZoom > 0 ? minZoom : 0.3;
+	const safeMaxZoom =
+		Number.isFinite(maxZoom) && maxZoom >= safeMinZoom ? maxZoom : Math.max(2.5, safeMinZoom);
+
+	const scale =
+		Number.isFinite(startDist) && startDist > 1e-3 && Number.isFinite(currDist) && currDist > 0
+			? currDist / startDist
+			: 1;
+
+	const zoom = Math.min(safeMaxZoom, Math.max(safeMinZoom, safeStartZoom * scale));
+
+	const worldMidX = (startMidX - startPanX) / safeStartZoom;
+	const worldMidY = (startMidY - startPanY) / safeStartZoom;
+
+	return {
+		zoom,
+		panX: currMidX - worldMidX * zoom,
+		panY: currMidY - worldMidY * zoom
+	};
+}
+
+/**
+ * Returns an SVG world-space hit radius for component pins that guarantees at least
+ * `minScreenRadiusPx` (default 24px radius = 48px diameter) in screen space at any zoom level.
+ */
+export function computeTouchPinHitRadiusWorld(zoom: number, minScreenRadiusPx = 24): number {
+	const safeZoom = Number.isFinite(zoom) ? Math.max(0.2, zoom) : 1;
+	return Math.max(10, minScreenRadiusPx / safeZoom);
+}
+
