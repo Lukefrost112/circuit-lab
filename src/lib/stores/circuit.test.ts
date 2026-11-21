@@ -216,5 +216,15 @@ describe('circuit reactive store', () => {
 		// Backwards-compatible string ID still works
 		circuit.loadDocument(PRESETS[0].document, 'R3');
 		expect(circuit.theveninTarget).toEqual({ kind: 'component', componentId: 'R3' });
+
+		// Loading a document always resets any armed placement/wire tool back to 'select'
+		circuit.activeTool = 'resistor';
+		expect(circuit.activeTool).toBe('resistor');
+		circuit.loadDocument(PRESETS[0].document);
+		expect(circuit.activeTool).toBe('select');
+
+		circuit.activeTool = 'wire';
+		expect(circuit.loadPreset(PRESETS[1].id)).toBe(true);
+		expect(circuit.activeTool).toBe('select');
 	});
 });

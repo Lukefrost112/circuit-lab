@@ -62,6 +62,10 @@
 
 	const answerUnit = $derived(UNIT_BY_KIND[unknownSolution.componentKind] ?? '');
 
+	const showComponentLabel = $derived(
+		unknownSolution.componentLabel.trim() !== unknownSolution.symbol.trim()
+	);
+
 	const answerColorClass = $derived(
 		unknownSolution.componentKind === 'voltage_source'
 			? 'text-voltage'
@@ -169,7 +173,7 @@
 			<div class="mb-1 flex items-center gap-1.5 font-semibold">
 				<AlertCircle class="size-3.5 shrink-0" aria-hidden="true" />
 				<span>
-					Cannot Solve for {unknownSolution.symbol} ({unknownSolution.componentLabel})
+					Cannot Solve for {unknownSolution.symbol}{#if showComponentLabel} ({unknownSolution.componentLabel}){/if}
 				</span>
 			</div>
 			<p class="leading-relaxed text-destructive/90">
@@ -191,9 +195,11 @@
 							<span class="text-xs font-semibold text-foreground">
 								{unknownSolution.symbol}{#if isMulti}<sub>{idx + 1}</sub>{/if}
 							</span>
-							<span class="text-[11px] text-muted-foreground">
-								({unknownSolution.componentLabel})
-							</span>
+							{#if showComponentLabel}
+								<span class="text-[11px] text-muted-foreground">
+									({unknownSolution.componentLabel})
+								</span>
+							{/if}
 							<span class="text-xs text-muted-foreground">=</span>
 							<span class={cn('text-sm font-semibold whitespace-nowrap', answerColorClass)}>
 								{formatted.primary}

@@ -646,6 +646,7 @@ class CircuitStore {
 		this._document = cloned;
 		this._selectedComponentId = null;
 		this._selectedWireId = null;
+		this._activeTool = 'select';
 		this._activeSourceMode = cloned.mode;
 
 		if (cloned.components.length > 0) {

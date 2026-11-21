@@ -191,7 +191,9 @@
 							<CheckCircle2 class="size-4 shrink-0" aria-hidden="true" />
 							Ready to import: {parsedResult.document.components.length} components
 							({parsedResult.sourceFormat === 'ai-netlist'
-								? 'AI Netlist → Auto-Layout'
+								? parsedResult.layoutMode === 'visual-grid'
+									? 'AI Netlist → Exact Visual Layout'
+									: 'AI Netlist → Auto-Layout'
 								: 'Circuit Document'})
 						</div>
 						{#if parsedResult.warnings.length > 0}

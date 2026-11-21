@@ -200,6 +200,38 @@ function getConstraintUnit(kind: CircuitConstraint['kind']): string {
 	}
 }
 
+function formatConstraintQuantityProse(
+	constraint: CircuitConstraint,
+	doc: CircuitDocument
+): string {
+	if (constraint.label?.trim()) {
+		return constraint.label.trim();
+	}
+	if (constraint.kind === 'node_voltage') {
+		return `V(${constraint.targetId})`;
+	}
+	const targetComp = doc.components.find((c) => c.id === constraint.targetId);
+	const targetLabel = targetComp?.label ?? constraint.targetId;
+	switch (constraint.kind) {
+		case 'branch_voltage':
+			return `V(${targetLabel})`;
+		case 'branch_current':
+			return `I(${targetLabel})`;
+		case 'branch_power':
+			return `P(${targetLabel})`;
+	}
+}
+
+function formatUnknownTargetProse(comp: CircuitComponent, sym: string): string {
+	const trimmedSym = sym.trim();
+	const trimmedLabel = comp.label.trim();
+	const role = SOURCE_KINDS.has(comp.kind) ? 'unknown source' : 'unknown element';
+	if (trimmedSym === trimmedLabel) {
+		return `${role} ${trimmedSym}`;
+	}
+	return `${role} ${trimmedSym} (${trimmedLabel})`;
+}
+
 function getConstraintSymbolLatex(
 	constraint: CircuitConstraint,
 	doc: CircuitDocument
@@ -356,6 +388,22 @@ function formatSensitivityUnit(yUnit: string, xUnit: string): string {
 	return `\\text{ ${yUnit}/${xUnit}}`;
 }
 
+export function formatLatexResidual(value: number, unit: string): string {
+	const unitTex = unit ? (unit === 'Ω' ? '\\;\\Omega' : `\\text{ ${unit}}`) : '';
+	if (!Number.isFinite(value)) {
+		return `\\infty${unitTex}`;
+	}
+	if (Math.abs(value) < 1e-12) {
+		return `0${unitTex}`;
+	}
+	const [mantissa, expRaw] = value.toExponential(2).split('e');
+	const exp = Number.parseInt(expRaw, 10);
+	if (exp === 0) {
+		return `${mantissa}${unitTex}`;
+	}
+	return `${mantissa} \\times 10^{${exp}}${unitTex}`;
+}
+
 function formatComplexAnswerLatex(val: Complex, unit: string, mode: AnalysisMode): string {
 	const unitTex = unit === 'Ω' ? '\\;\\Omega' : `\\text{ ${unit}}`;
 	if (mode === 'dc' || val.isReal(1e-12)) {
@@ -462,7 +510,7 @@ function solveUnknownSource(
 		const steps: SolutionStep[] = [
 			{
 				title: '1. Problem Statement & Affine Branch Model',
-				description: `By linearity of the circuit with respect to ${comp.label} (${sym}), both the voltage and current of branch ${b0.label} are affine functions of ${sym}.`,
+				description: `By linearity of the circuit with respect to the ${formatUnknownTargetProse(comp, sym)}, both the voltage and current of branch ${b0.label} are affine functions of ${sym}.`,
 				latex: [
 					`V_{${targetLabel}}(${symTex}) = v_0 + k_v ${symTex} = ${formatLatexValue(Complex.from(v0, 0), 'dc')} + ${formatLatexTerm(Complex.from(kv, 0), 'dc')}${symTex}`,
 					`I_{${targetLabel}}(${symTex}) = i_0 + k_i ${symTex} = ${formatLatexValue(Complex.from(i0, 0), 'dc')} + ${formatLatexTerm(Complex.from(ki, 0), 'dc')}${symTex}`
@@ -482,7 +530,7 @@ function solveUnknownSource(
 				description: `Solved the quadratic equation exactly and independently verified ${candidates.length === 1 ? 'the root' : 'both roots'} via full MNA re-solve.`,
 				latex: candidates.map((cand, idx) => {
 					const name = candidates.length > 1 ? `${symTex}_{${idx + 1}}` : symTex;
-					return `${name} = ${formatComplexAnswerLatex(cand.value, xUnit, 'dc')} \\quad (|\\Delta P| = ${cand.discrepancy.toExponential(2)}\\text{ W})`;
+					return `${name} = ${formatComplexAnswerLatex(cand.value, xUnit, 'dc')} \\quad (|\\Delta P| = ${formatLatexResidual(cand.discrepancy, 'W')})`;
 				})
 			}
 		];
@@ -531,7 +579,7 @@ function solveUnknownSource(
 	const steps: SolutionStep[] = [
 		{
 			title: '1. Problem Statement & Linearity Model',
-			description: `By superposition and linearity, the measured quantity ${constraint.label ?? constraint.targetId} is strictly affine in the unknown source ${comp.label} (${sym}).`,
+			description: `By superposition and linearity, the measured quantity ${formatConstraintQuantityProse(constraint, doc)} is strictly affine in the ${formatUnknownTargetProse(comp, sym)}.`,
 			latex: [
 				`${ySymTex}(${symTex}) = ${ySymTex}(0) + k \\cdot ${symTex}`,
 				`${yTargetTex} = ${formatComplexAnswerLatex(yTarget, yUnit, mode)}`
@@ -553,7 +601,7 @@ function solveUnknownSource(
 			description: `Inverted the affine relation directly and confirmed the solution by full MNA re-solve.`,
 			latex: [
 				`${symTex} = \\frac{${yTargetTex} - ${ySymTex}(0)}{k} = ${formatComplexAnswerLatex(candidate.value, xUnit, mode)}`,
-				`|${ySymTex}(${symTex}) - ${yTargetTex}| = ${candidate.discrepancy.toExponential(2)}\\text{ ${yUnit}}`
+				`|${ySymTex}(${symTex}) - ${yTargetTex}| = ${formatLatexResidual(candidate.discrepancy, yUnit)}`
 			]
 		}
 	];
@@ -991,7 +1039,7 @@ function solveUnknownPassive(
 							title: '2. Exact Solution & MNA Verification',
 							description: 'Solved directly for R and verified against full MNA.',
 							latex: [
-								`${symTex} = ${formatComplexAnswerLatex(cand.value, 'Ω', 'dc')} \\quad (|\\Delta P| = ${cand.discrepancy.toExponential(2)}\\text{ W})`
+								`${symTex} = ${formatComplexAnswerLatex(cand.value, 'Ω', 'dc')} \\quad (|\\Delta P| = ${formatLatexResidual(cand.discrepancy, 'W')})`
 							]
 						}
 					]
@@ -1031,7 +1079,7 @@ function solveUnknownPassive(
 							title: '2. Exact Solution & MNA Verification',
 							description: 'Solved directly for R and verified against full MNA.',
 							latex: [
-								`${symTex} = ${formatComplexAnswerLatex(cand.value, 'Ω', 'dc')} \\quad (|\\Delta P| = ${cand.discrepancy.toExponential(2)}\\text{ W})`
+								`${symTex} = ${formatComplexAnswerLatex(cand.value, 'Ω', 'dc')} \\quad (|\\Delta P| = ${formatLatexResidual(cand.discrepancy, 'W')})`
 							]
 						}
 					]
@@ -1104,7 +1152,7 @@ function solveUnknownPassive(
 					description: `Found ${candidates.length} positive physical resistance ${candidates.length === 1 ? 'solution' : 'solutions'} and verified each via full MNA re-solve.`,
 					latex: candidates.map((cand, idx) => {
 						const name = candidates.length > 1 ? `${symTex}_{${idx + 1}}` : symTex;
-						return `${name} = ${formatComplexAnswerLatex(cand.value, 'Ω', 'dc')} \\quad (|\\Delta P| = ${cand.discrepancy.toExponential(2)}\\text{ W})`;
+						return `${name} = ${formatComplexAnswerLatex(cand.value, 'Ω', 'dc')} \\quad (|\\Delta P| = ${formatLatexResidual(cand.discrepancy, 'W')})`;
 					})
 				}
 			];
@@ -1266,7 +1314,7 @@ function solveUnknownPassive(
 				description: `Filtered to strictly positive physical values and verified via full MNA re-solve.`,
 				latex: candidates.map((cand, idx) => {
 					const name = candidates.length > 1 ? `${symTex}_{${idx + 1}}` : symTex;
-					return `${name} = ${formatComplexAnswerLatex(cand.value, xUnit, 'dc')} \\quad (|\\Delta P| = ${cand.discrepancy.toExponential(2)}\\text{ W})`;
+					return `${name} = ${formatComplexAnswerLatex(cand.value, xUnit, 'dc')} \\quad (|\\Delta P| = ${formatLatexResidual(cand.discrepancy, 'W')})`;
 				})
 			}
 		];
@@ -1356,7 +1404,7 @@ function solveUnknownPassive(
 			},
 			{
 				title: '2. Open-Circuit & Short-Circuit Responses',
-				description: `Evaluated ${constraint.label ?? constraint.targetId} with ${comp.label} open-circuited (Z → ∞) and short-circuited (Z = 0).`,
+				description: `Evaluated ${formatConstraintQuantityProse(constraint, doc)} with ${comp.label} open-circuited (Z → ∞) and short-circuited (Z = 0).`,
 				latex: [
 					`${ySymTex}(\\infty) = ${formatLatexValue(yInf, mode)}\\text{ ${yUnit}}, \\quad ${ySymTex}(0) = ${formatLatexValue(y0, mode)}\\text{ ${yUnit}}`,
 					`${ySymTex}(${zxLabel}) = \\frac{${ySymTex}(\\infty)\\,${zxLabel} + ${zLabel}\\,${ySymTex}(0)}{${zxLabel} + ${zLabel}}`
@@ -1477,7 +1525,7 @@ function solveUnknownPassive(
 		latex: [
 			...(comp.kind !== 'resistor' ? [physical.conversionLatex] : []),
 			`${symTex} = ${formatComplexAnswerLatex(candidate.value, xUnit, 'dc')}`,
-			`|${ySymTex}(${symTex}) - ${yTargetTex}| = ${candidate.discrepancy.toExponential(2)}\\text{ ${yUnit}}`
+			`|${ySymTex}(${symTex}) - ${yTargetTex}| = ${formatLatexResidual(candidate.discrepancy, yUnit)}`
 		]
 	});
 

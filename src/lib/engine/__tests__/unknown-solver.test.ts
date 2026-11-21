@@ -3,7 +3,7 @@ import { Complex } from '../complex';
 import { exportCircuitJson, parseCircuitImport } from '../io';
 import { solveCircuit } from '../solve';
 import type { CircuitComponent, CircuitDocument } from '../types';
-import { solveUnknownParameter } from '../unknown-solver';
+import { formatLatexResidual, solveUnknownParameter } from '../unknown-solver';
 
 function comp(
 	id: string,
@@ -55,6 +55,42 @@ describe('solveUnknownParameter — Exact Analytical Inverse Circuit Solver', ()
 		expect(res.solutions[0].discrepancy).toBeLessThan(1e-10);
 		expect(res.solutions[0].verified).toBe(true);
 		expect(res.steps.length).toBeGreaterThanOrEqual(3);
+		expect(res.steps[0].description).toContain('measured quantity I(R3)');
+		expect(res.steps[0].description).toContain('unknown source Vs (V1)');
+		expect(res.steps[2].latex?.[1]).toContain('= 0\\text{ A}');
+		expect(res.steps[2].latex?.[1]).not.toMatch(/\de[+-]\d/i);
+	});
+
+	it('1b. Formats LaTeX residuals cleanly and deduplicates symbol/label prose', () => {
+		expect(formatLatexResidual(0, 'A')).toBe('0\\text{ A}');
+		expect(formatLatexResidual(1e-15, 'W')).toBe('0\\text{ W}');
+		expect(formatLatexResidual(0, '')).toBe('0');
+		expect(formatLatexResidual(1.25e-9, 'A')).toBe('1.25 \\times 10^{-9}\\text{ A}');
+		expect(formatLatexResidual(3.4e-11, 'W')).toBe('3.40 \\times 10^{-11}\\text{ W}');
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('Vs', 'voltage_source', 0, 4, 90, '?'),
+				comp('R1', 'resistor', 2, 2, 0, '2k'),
+				comp('R2', 'resistor', 4, 4, 90, '4k'),
+				comp('G1', 'ground', 0, 6, 0, '0')
+			],
+			wires: [wire('w_gnd', [0, 6], [4, 6])]
+		};
+
+		const res = solveUnknownParameter(doc, {
+			componentId: 'Vs',
+			symbol: 'Vs',
+			constraint: { kind: 'branch_current', targetId: 'R2', value: '2m' }
+		});
+
+		expect(res.valid).toBe(true);
+		expect(res.solutions[0].value.re).toBeCloseTo(12, 10);
+		expect(res.steps[0].description).toContain('measured quantity I(R2)');
+		expect(res.steps[0].description).toContain('unknown source Vs.');
+		expect(res.steps[0].description).not.toContain('Vs (Vs)');
 	});
 
 	it('2. DC unknown voltage source given node voltage with nonzero offset y(0) != 0', () => {

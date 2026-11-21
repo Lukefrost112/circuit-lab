@@ -28,7 +28,7 @@ export const UNIT_SYSTEMS: Record<UnitSystemId, UnitSystemDefinition> = {
 	'ohm-v-a': {
 		id: 'ohm-v-a',
 		label: 'Ω · V · A · W',
-		shortLabel: 'Ω / V / A',
+		shortLabel: 'Ω · V · A',
 		description: 'Base SI units (ohms, volts, amperes, watts)',
 		prefixes: {
 			Ω: { symbol: '', factor: 1 },
@@ -42,7 +42,7 @@ export const UNIT_SYSTEMS: Record<UnitSystemId, UnitSystemDefinition> = {
 	'kohm-v-ma': {
 		id: 'kohm-v-ma',
 		label: 'kΩ · V · mA · mW',
-		shortLabel: 'kΩ / V / mA',
+		shortLabel: 'kΩ · V · mA',
 		description: 'Electronics scale (kiloohms, volts, milliamperes, milliwatts)',
 		prefixes: {
 			Ω: { symbol: 'k', factor: 1e3 },
@@ -56,7 +56,7 @@ export const UNIT_SYSTEMS: Record<UnitSystemId, UnitSystemDefinition> = {
 	'mohm-v-ua': {
 		id: 'mohm-v-ua',
 		label: 'MΩ · V · µA · µW',
-		shortLabel: 'MΩ / V / µA',
+		shortLabel: 'MΩ · V · µA',
 		description: 'High-impedance scale (megaohms, volts, microamperes, microwatts)',
 		prefixes: {
 			Ω: { symbol: 'M', factor: 1e6 },
