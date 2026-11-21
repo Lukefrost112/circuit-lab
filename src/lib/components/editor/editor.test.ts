@@ -398,9 +398,22 @@ describe('editor Svelte components SSR rendering', () => {
 		const iecOut = render(SchematicCanvas);
 		expect(iecOut.body).toContain('data-symbol-standard="iec"');
 
+		// Clearing canvas immediately suppresses the onboarding overlay so drafting is unblocked
 		circuit.clearCircuit();
+		expect(circuit.emptyBannerDismissed).toBe(true);
+		const clearedOut = render(SchematicCanvas);
+		expect(clearedOut.body).not.toContain('Place a component or load a preset to begin');
+
+		// When empty and not dismissed in select mode, onboarding prompt renders with dismiss control
+		circuit.resetEmptyBanner();
 		const emptyOut = render(SchematicCanvas);
 		expect(emptyOut.body).toContain('Place a component or load a preset to begin');
+		expect(emptyOut.body).toContain('aria-label="Dismiss empty canvas prompt"');
+
+		// Arming any placement/wire tool immediately hides the empty banner so it never blocks drafting
+		circuit.setActiveTool('resistor');
+		const armedEmptyOut = render(SchematicCanvas);
+		expect(armedEmptyOut.body).not.toContain('Place a component or load a preset to begin');
 	});
 
 	it('renders mobile quick element action bar and active placement mode pill cleanly', () => {

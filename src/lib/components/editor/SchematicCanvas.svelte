@@ -2275,10 +2275,20 @@
 	</svg>
 
 		<!-- Onboarding Empty State -->
-		{#if circuit.document.components.length === 0}
+		{#if circuit.document.components.length === 0 && !circuit.emptyBannerDismissed && circuit.activeTool === 'select'}
 			<div class="pointer-events-none absolute inset-0 flex items-center justify-center p-4">
-				<div class="pointer-events-auto w-full max-w-md rounded-[4px] border border-border bg-card/95 p-5">
-					<h1 class="text-sm font-semibold tracking-tight text-foreground">
+				<div class="pointer-events-auto relative w-full max-w-md rounded-[4px] border border-border bg-card/95 p-5">
+					<button
+						type="button"
+						aria-label="Dismiss empty canvas prompt"
+						title="Dismiss"
+						onclick={() => circuit.dismissEmptyBanner()}
+						class="absolute top-1.5 right-1.5 inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-[4px] text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:top-2.5 lg:right-2.5 lg:h-7 lg:w-7 lg:min-h-0 lg:min-w-0"
+					>
+						<X class="size-4 lg:size-3.5" aria-hidden="true" />
+					</button>
+
+					<h1 class="pr-10 text-sm font-semibold tracking-tight text-foreground lg:pr-8">
 						Place a component or load a preset to begin
 					</h1>
 					<p class="mt-1.5 text-xs leading-relaxed text-muted-foreground">
@@ -2288,15 +2298,30 @@
 					</p>
 
 					<div class="mt-4 flex flex-wrap items-center gap-2">
-						<Button variant="default" size="sm" onclick={() => onOpenPresets?.()}>
+						<Button
+							variant="default"
+							size="sm"
+							class="min-h-11 lg:min-h-0"
+							onclick={() => onOpenPresets?.()}
+						>
 							<BookOpen />
 							<span>Browse Presets</span>
 						</Button>
-						<Button variant="outline" size="sm" onclick={() => onOpenImport?.()}>
+						<Button
+							variant="outline"
+							size="sm"
+							class="min-h-11 lg:min-h-0"
+							onclick={() => onOpenImport?.()}
+						>
 							<FileCode2 />
 							<span>Import JSON</span>
 						</Button>
-						<Button variant="ghost" size="sm" onclick={() => onOpenAiImport?.()}>
+						<Button
+							variant="ghost"
+							size="sm"
+							class="min-h-11 lg:min-h-0"
+							onclick={() => onOpenAiImport?.()}
+						>
 							<ScanLine />
 							<span>AI Import</span>
 						</Button>

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { AlertCircle, Check, CheckCircle2, Copy, Download, Upload } from 'lucide-svelte';
+	import { AlertCircle, Check, CheckCircle2, Copy, Download, Link2, Upload } from 'lucide-svelte';
 	import {
 		Button,
 		Dialog,
@@ -15,9 +15,17 @@
 		open?: boolean;
 		document: CircuitDocument;
 		onImportDocument: (doc: CircuitDocument) => void;
+		onCopyShareLink?: () => Promise<boolean>;
+		linkCopied?: boolean;
 	};
 
-	let { open = $bindable(false), document, onImportDocument }: Props = $props();
+	let {
+		open = $bindable(false),
+		document,
+		onImportDocument,
+		onCopyShareLink,
+		linkCopied = false
+	}: Props = $props();
 
 	let activeTab = $state<'export' | 'import'>('export');
 	let copied = $state(false);
@@ -99,6 +107,22 @@
 					{document.components.length} components · {document.wires.length} wires
 				</span>
 				<div class="flex flex-wrap items-center gap-2">
+					{#if onCopyShareLink}
+						<Button
+							variant="outline"
+							size="sm"
+							onclick={onCopyShareLink}
+							class="min-h-11 sm:min-h-0"
+						>
+							{#if linkCopied}
+								<Check class="size-3.5 text-success" aria-hidden="true" />
+								Link Copied!
+							{:else}
+								<Link2 class="size-3.5" aria-hidden="true" />
+								Copy Link
+							{/if}
+						</Button>
+					{/if}
 					<Button variant="outline" size="sm" onclick={copyExportJson} class="min-h-11 sm:min-h-0">
 						{#if copied}
 							<Check class="size-3.5 text-success" aria-hidden="true" />

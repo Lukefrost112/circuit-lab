@@ -183,4 +183,38 @@ describe('circuit reactive store', () => {
 		expect(circuit.theveninTarget).toEqual({ kind: 'component', componentId: 'R1' });
 		expect(circuit.solution.theveninNorton?.loadComponentId).toBe('R1');
 	});
+
+	it('manages emptyBannerDismissed lifecycle and accepts full TheveninTarget in loadDocument', () => {
+		expect(circuit.emptyBannerDismissed).toBe(false);
+
+		circuit.clearCircuit();
+		expect(circuit.document.components).toHaveLength(0);
+		expect(circuit.emptyBannerDismissed).toBe(true);
+
+		circuit.resetEmptyBanner();
+		expect(circuit.emptyBannerDismissed).toBe(false);
+
+		circuit.dismissEmptyBanner();
+		expect(circuit.emptyBannerDismissed).toBe(true);
+
+		// Loading a non-empty document resets emptyBannerDismissed and applies TheveninTarget
+		circuit.loadDocument(PRESETS[0].document, {
+			kind: 'terminals',
+			nodeA: 'N1',
+			nodeB: '0'
+		});
+		expect(circuit.emptyBannerDismissed).toBe(false);
+		expect(circuit.theveninTarget).toEqual({ kind: 'terminals', nodeA: 'N1', nodeB: '0' });
+
+		// Loading with component TheveninTarget
+		circuit.loadDocument(PRESETS[0].document, {
+			kind: 'component',
+			componentId: 'R2'
+		});
+		expect(circuit.theveninTarget).toEqual({ kind: 'component', componentId: 'R2' });
+
+		// Backwards-compatible string ID still works
+		circuit.loadDocument(PRESETS[0].document, 'R3');
+		expect(circuit.theveninTarget).toEqual({ kind: 'component', componentId: 'R3' });
+	});
 });

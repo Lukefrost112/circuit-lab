@@ -203,6 +203,7 @@ class CircuitStore {
 			: undefined
 	);
 	private _activeMethod = $state<MethodId>(initialPreset.featuredMethod ?? 'nodal');
+	private _emptyBannerDismissed = $state(false);
 
 	private _undoStack = $state<HistorySnapshot[]>([]);
 	private _redoStack = $state<HistorySnapshot[]>([]);
@@ -288,6 +289,18 @@ class CircuitStore {
 	}
 	set activeMethod(method: MethodId) {
 		this._activeMethod = method;
+	}
+
+	get emptyBannerDismissed(): boolean {
+		return this._emptyBannerDismissed;
+	}
+
+	dismissEmptyBanner(): void {
+		this._emptyBannerDismissed = true;
+	}
+
+	resetEmptyBanner(): void {
+		this._emptyBannerDismissed = false;
 	}
 
 	get canUndo(): boolean {
@@ -627,7 +640,7 @@ class CircuitStore {
 		};
 	}
 
-	loadDocument(doc: CircuitDocument, theveninLoadId?: string): void {
+	loadDocument(doc: CircuitDocument, theveninTarget?: string | TheveninTarget): void {
 		this.recordSnapshot();
 		const cloned = cloneDocument(doc);
 		this._document = cloned;
@@ -635,8 +648,39 @@ class CircuitStore {
 		this._selectedWireId = null;
 		this._activeSourceMode = cloned.mode;
 
-		if (theveninLoadId && cloned.components.some((c) => c.id === theveninLoadId)) {
-			this._theveninTarget = { kind: 'component', componentId: theveninLoadId };
+		if (cloned.components.length > 0) {
+			this._emptyBannerDismissed = false;
+		}
+
+		if (typeof theveninTarget === 'string') {
+			if (theveninTarget && cloned.components.some((c) => c.id === theveninTarget)) {
+				this._theveninTarget = { kind: 'component', componentId: theveninTarget };
+			} else {
+				this._theveninTarget = undefined;
+			}
+		} else if (theveninTarget) {
+			if (
+				theveninTarget.kind === 'component' &&
+				cloned.components.some((c) => c.id === theveninTarget.componentId)
+			) {
+				this._theveninTarget = {
+					kind: 'component',
+					componentId: theveninTarget.componentId
+				};
+			} else if (
+				theveninTarget.kind === 'terminals' &&
+				theveninTarget.nodeA.trim() !== '' &&
+				theveninTarget.nodeB.trim() !== '' &&
+				theveninTarget.nodeA.trim() !== theveninTarget.nodeB.trim()
+			) {
+				this._theveninTarget = {
+					kind: 'terminals',
+					nodeA: theveninTarget.nodeA.trim(),
+					nodeB: theveninTarget.nodeB.trim()
+				};
+			} else {
+				this._theveninTarget = undefined;
+			}
 		} else {
 			this._theveninTarget = undefined;
 		}
@@ -652,6 +696,7 @@ class CircuitStore {
 
 	clearCircuit(): void {
 		if (this._document.components.length === 0 && this._document.wires.length === 0) {
+			this._emptyBannerDismissed = true;
 			return;
 		}
 		this.recordSnapshot();
@@ -667,6 +712,7 @@ class CircuitStore {
 		this._selectedComponentId = null;
 		this._selectedWireId = null;
 		this._theveninTarget = undefined;
+		this._emptyBannerDismissed = true;
 	}
 
 	setTheveninComponent(id: string): void {
@@ -751,6 +797,7 @@ class CircuitStore {
 			? { kind: 'component', componentId: initialPreset.theveninLoadId }
 			: undefined;
 		this._activeMethod = initialPreset.featuredMethod ?? 'nodal';
+		this._emptyBannerDismissed = false;
 		this._undoStack = [];
 		this._redoStack = [];
 	}

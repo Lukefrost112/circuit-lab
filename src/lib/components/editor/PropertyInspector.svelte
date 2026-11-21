@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { RotateCw, Target, Trash2 } from 'lucide-svelte';
+	import { Eraser, RotateCw, Target, Trash2 } from 'lucide-svelte';
 	import { CircuitSymbol } from '$lib/components/symbols';
 	import { Button, Input, Label, Select, Switch } from '$lib/components/ui';
 	import {
@@ -747,5 +747,20 @@
 				/>
 			</div>
 		</div>
+
+		{#if circuit.document.components.length > 0 || circuit.document.wires.length > 0}
+			<!-- Mobile Workspace Clear Action (< lg) -->
+			<div class="px-4 py-3.5 lg:hidden">
+				<Button
+					variant="outline"
+					size="sm"
+					class="min-h-11 w-full border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+					onclick={() => circuit.clearCircuit()}
+				>
+					<Eraser class="size-3.5" aria-hidden="true" />
+					<span>Clear Canvas</span>
+				</Button>
+			</div>
+		{/if}
 	{/if}
 </div>

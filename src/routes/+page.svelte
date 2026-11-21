@@ -1,11 +1,15 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { mode, toggleMode } from 'mode-watcher';
 	import {
 		BarChart3,
 		BookOpen,
+		Check,
 		ChevronDown,
 		CircuitBoard,
+		Eraser,
 		FileCode2,
+		Link2,
 		Moon,
 		MoreVertical,
 		PanelLeftClose,
@@ -43,7 +47,12 @@
 		Tooltip
 	} from '$lib/components/ui';
 	import type { CircuitPreset } from '$lib/data/presets';
-	import type { CircuitDocument } from '$lib/engine';
+	import {
+		buildShareableUrl,
+		decodeCircuitFromHash,
+		encodeCircuitToHash,
+		type CircuitDocument
+	} from '$lib/engine';
 	import { circuit } from '$lib/stores/circuit.svelte';
 	import { settings } from '$lib/stores/settings.svelte';
 	import { cn } from '$lib/utils';
@@ -60,6 +69,11 @@
 	let jsonOpen = $state(false);
 	let aiOpen = $state(false);
 	let settingsOpen = $state(false);
+	let linkCopied = $state(false);
+
+	let linkCopiedTimer: ReturnType<typeof setTimeout> | undefined;
+	let mobileMenuCloseTimer: ReturnType<typeof setTimeout> | undefined;
+	let lastWrittenHash = '';
 
 	let freqDraft = $state(String(circuit.document.frequencyHz));
 
@@ -148,6 +162,93 @@
 		rightTab = 'inspector';
 		rightRailOpen = true;
 	}
+
+	async function loadFromHash(hash: string) {
+		if (!hash || !hash.includes('c=')) return;
+		const payload = await decodeCircuitFromHash(hash);
+		if (!payload) return;
+		const effectiveUnitSystem = payload.unitSystem ?? payload.document.unitSystem;
+		if (effectiveUnitSystem) {
+			settings.unitSystem = effectiveUnitSystem;
+		}
+		circuit.loadDocument(payload.document, payload.theveninTarget);
+		rightTab = 'results';
+	}
+
+	async function copyTextWithFallback(text: string): Promise<boolean> {
+		if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+			try {
+				await navigator.clipboard.writeText(text);
+				return true;
+			} catch {
+				// Fall through to execCommand copy fallback
+			}
+		}
+		if (typeof document === 'undefined') return false;
+		const textarea = document.createElement('textarea');
+		textarea.value = text;
+		textarea.setAttribute('readonly', '');
+		textarea.style.position = 'fixed';
+		textarea.style.top = '-9999px';
+		textarea.style.left = '-9999px';
+		textarea.style.opacity = '0';
+		document.body.appendChild(textarea);
+		textarea.focus();
+		textarea.select();
+		let ok = false;
+		try {
+			ok = document.execCommand('copy');
+		} catch {
+			ok = false;
+		} finally {
+			textarea.remove();
+		}
+		return ok;
+	}
+
+	async function handleCopyShareLink(): Promise<boolean> {
+		const hash = await encodeCircuitToHash({
+			document: { ...circuit.document, unitSystem: settings.unitSystem },
+			theveninTarget: circuit.theveninTarget,
+			unitSystem: settings.unitSystem
+		});
+		const shareUrl = buildShareableUrl(window.location.href, hash);
+		lastWrittenHash = hash;
+		window.history.replaceState(null, '', hash);
+
+		await copyTextWithFallback(shareUrl);
+		linkCopied = true;
+		if (linkCopiedTimer !== undefined) {
+			clearTimeout(linkCopiedTimer);
+		}
+		linkCopiedTimer = setTimeout(() => {
+			linkCopied = false;
+		}, 2000);
+		return true;
+	}
+
+	onMount(() => {
+		void loadFromHash(window.location.hash);
+
+		const onHashChange = () => {
+			const currentHash = window.location.hash;
+			if (currentHash && currentHash === lastWrittenHash) {
+				return;
+			}
+			void loadFromHash(currentHash);
+		};
+
+		window.addEventListener('hashchange', onHashChange);
+		return () => {
+			window.removeEventListener('hashchange', onHashChange);
+			if (linkCopiedTimer !== undefined) {
+				clearTimeout(linkCopiedTimer);
+			}
+			if (mobileMenuCloseTimer !== undefined) {
+				clearTimeout(mobileMenuCloseTimer);
+			}
+		};
+	});
 </script>
 
 <svelte:window onkeydown={handleWindowKeydown} />
@@ -363,6 +464,27 @@
 						<span class="lg:hidden">AI</span>
 					</Button>
 				</Tooltip>
+				<Tooltip
+					content="Copy shareable link (includes circuit, units & unknown problem)"
+					side="bottom"
+				>
+					<Button
+						variant="ghost"
+						size="sm"
+						class="relative h-9 px-2.5 text-xs font-medium text-foreground/85 after:absolute after:-inset-y-1 after:inset-x-0 hover:bg-accent hover:text-foreground lg:h-7 lg:px-2 lg:after:hidden"
+						aria-label="Copy shareable circuit link"
+						onclick={handleCopyShareLink}
+					>
+						{#if linkCopied}
+							<Check class="text-success" />
+							<span>Copied</span>
+						{:else}
+							<Link2 />
+							<span class="hidden xl:inline">Copy Link</span>
+							<span class="xl:hidden">Link</span>
+						{/if}
+					</Button>
+				</Tooltip>
 
 				<Separator orientation="vertical" class="mx-1 h-4" />
 
@@ -567,6 +689,28 @@
 				<ScanLine class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 				<span>AI Import</span>
 			</button>
+			<button
+				type="button"
+				role="menuitem"
+				onclick={async () => {
+					await handleCopyShareLink();
+					if (mobileMenuCloseTimer !== undefined) {
+						clearTimeout(mobileMenuCloseTimer);
+					}
+					mobileMenuCloseTimer = setTimeout(() => {
+						mobileMenuOpen = false;
+					}, 600);
+				}}
+				class="flex min-h-11 w-full cursor-pointer items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm font-medium text-foreground transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			>
+				{#if linkCopied}
+					<Check class="size-4 shrink-0 text-success" aria-hidden="true" />
+					<span>Link Copied!</span>
+				{:else}
+					<Link2 class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+					<span>Copy Share Link</span>
+				{/if}
+			</button>
 			<Separator class="my-1" />
 			<button
 				type="button"
@@ -579,6 +723,21 @@
 			>
 				<Settings class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 				<span>Settings</span>
+			</button>
+			<Separator class="my-1" />
+			<button
+				type="button"
+				role="menuitem"
+				disabled={circuit.document.components.length === 0 && circuit.document.wires.length === 0}
+				onclick={() => {
+					circuit.clearCircuit();
+					mobileMenuOpen = false;
+					mobileTab = 'canvas';
+				}}
+				class="flex min-h-11 w-full cursor-pointer items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm font-medium text-destructive transition-colors duration-150 hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
+			>
+				<Eraser class="size-4 shrink-0" aria-hidden="true" />
+				<span>Clear Canvas</span>
 			</button>
 		</div>
 	{/if}
@@ -867,6 +1026,8 @@
 	bind:open={jsonOpen}
 	document={circuit.document}
 	onImportDocument={handleImportDocument}
+	onCopyShareLink={handleCopyShareLink}
+	{linkCopied}
 />
 <ImportFromAIDialog bind:open={aiOpen} onImportDocument={handleImportDocument} />
 <SettingsDialog bind:open={settingsOpen} />

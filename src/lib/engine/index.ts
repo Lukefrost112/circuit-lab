@@ -12,3 +12,4 @@ export { solveMesh } from './methods/mesh';
 export { solveSuperposition } from './methods/superposition';
 export { solveSourceTransform } from './methods/source-transform';
 export { solveTheveninNorton, resolveTheveninTarget } from './methods/thevenin-norton';
+export * from './share';
