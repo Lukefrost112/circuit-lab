@@ -1,0 +1,12 @@
+node_modules/
+.svelte-kit/
+build/
+.agent/
+.agents/
+.claude/
+.gemini/
+.opencode/
+qa-screenshots/
+test-results/
+.env*
+*.log
