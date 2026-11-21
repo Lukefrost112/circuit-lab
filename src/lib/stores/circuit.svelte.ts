@@ -19,7 +19,8 @@ import {
 	type GridPoint,
 	type MethodId,
 	type Rotation,
-	type TheveninTarget
+	type TheveninTarget,
+	type UnknownProblemSpec
 } from '$lib/engine';
 import type { SourceMode } from '$lib/components/symbols';
 import { settings } from './settings.svelte';
@@ -72,6 +73,7 @@ function cloneDocument(doc: CircuitDocument): CircuitDocument {
 		mode: doc.mode,
 		frequencyHz: doc.frequencyHz,
 		acMagnitudeMode: doc.acMagnitudeMode,
+		unitSystem: doc.unitSystem,
 		components: doc.components.map((c) => ({
 			...c,
 			controlRef: c.controlRef ? { ...c.controlRef } : undefined
@@ -79,7 +81,13 @@ function cloneDocument(doc: CircuitDocument): CircuitDocument {
 		wires: doc.wires.map((w) => ({
 			id: w.id,
 			points: w.points.map((p) => ({ x: p.x, y: p.y }))
-		}))
+		})),
+		unknownProblem: doc.unknownProblem
+			? {
+					...doc.unknownProblem,
+					constraint: { ...doc.unknownProblem.constraint }
+				}
+			: undefined
 	};
 }
 
@@ -517,9 +525,16 @@ class CircuitStore {
 		if (!this._document.components.some((c) => c.id === id)) return;
 		this.recordSnapshot();
 
+		const up = this._document.unknownProblem;
+		const shouldClearUnknown =
+			up !== undefined &&
+			(up.componentId === id ||
+				(up.constraint.kind !== 'node_voltage' && up.constraint.targetId === id));
+
 		this._document = {
 			...this._document,
-			components: this._document.components.filter((c) => c.id !== id)
+			components: this._document.components.filter((c) => c.id !== id),
+			unknownProblem: shouldClearUnknown ? undefined : this._document.unknownProblem
 		};
 
 		if (this._selectedComponentId === id) {
@@ -666,6 +681,62 @@ class CircuitStore {
 
 	clearTheveninTarget(): void {
 		this._theveninTarget = undefined;
+	}
+
+	setUnknownProblem(problem: UnknownProblemSpec | undefined): void {
+		this.recordSnapshot();
+		this._document = {
+			...this._document,
+			unknownProblem: problem
+				? {
+						...problem,
+						constraint: { ...problem.constraint }
+					}
+				: undefined
+		};
+	}
+
+	clearUnknownProblem(): void {
+		if (!this._document.unknownProblem) return;
+		this.recordSnapshot();
+		this._document = {
+			...this._document,
+			unknownProblem: undefined
+		};
+	}
+
+	/**
+	 * Writes the solved unknown value directly into the target component and clears
+	 * `unknownProblem` in a single undoable step.
+	 */
+	applySolvedUnknown(solutionIndex = 0): boolean {
+		const unknownRes = this._solution.unknownSolution;
+		if (!unknownRes || !unknownRes.valid) return false;
+		const candidate = unknownRes.solutions[solutionIndex];
+		if (!candidate) return false;
+
+		const target = this._document.components.find((c) => c.id === unknownRes.componentId);
+		if (!target) return false;
+
+		this.recordSnapshot();
+		const nextValue = candidate.valueString;
+		const nextNumeric = parseEngineeringNumber(nextValue) ?? undefined;
+
+		this._document = {
+			...this._document,
+			unknownProblem: undefined,
+			components: this._document.components.map((c) =>
+				c.id === target.id
+					? {
+							...c,
+							value: nextValue,
+							numericValue: nextNumeric,
+							phaseDeg: undefined
+						}
+					: c
+			)
+		};
+		return true;
 	}
 
 	/** Resets the store cleanly back to initial PRESETS[0] with empty undo/redo stacks (for tests). */

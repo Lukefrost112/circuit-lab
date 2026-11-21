@@ -4,6 +4,7 @@ export * from './units';
 export * from './linalg';
 export * from './graph';
 export * from './mna';
+export * from './unknown-solver';
 export * from './solve';
 export { solveKclKvl } from './methods/kcl-kvl';
 export { solveNodal } from './methods/nodal';

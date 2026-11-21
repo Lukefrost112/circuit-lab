@@ -74,6 +74,51 @@ export interface CircuitWire {
 	points: GridPoint[];
 }
 
+export type ConstraintKind = 'node_voltage' | 'branch_voltage' | 'branch_current' | 'branch_power';
+
+export interface CircuitConstraint {
+	kind: ConstraintKind;
+	/** For node_voltage: nodeId (e.g. "N2"); for branch_*: componentId */
+	targetId: string;
+	/** Target value string (e.g. "6", "2m", "12m", "10∠30°") */
+	value: string;
+	/** Optional display label (e.g. "V_o", "I_x", "P_R2") */
+	label?: string;
+}
+
+export interface UnknownProblemSpec {
+	/** ID of the component whose value is unknown (voltage_source, current_source, resistor, capacitor, inductor) */
+	componentId: string;
+	/** Optional symbol name shown on schematic/results (e.g. "V", "Vs", "Rx") */
+	symbol?: string;
+	/** Known measurement constraint that uniquely determines the unknown */
+	constraint: CircuitConstraint;
+}
+
+export interface UnknownSolutionCandidate {
+	/** Complex value for sources, real scalar in base SI (Ω, F, H) for passives */
+	value: Complex;
+	/** Formatted canonical value string ready to substitute into CircuitComponent.value */
+	valueString: string;
+	/** Absolute discrepancy |y(solved) - y_target| verified via full MNA re-solve */
+	discrepancy: number;
+	verified: boolean;
+}
+
+export interface UnknownSolveResult {
+	valid: boolean;
+	componentId: string;
+	componentLabel: string;
+	componentKind: ComponentKind;
+	symbol: string;
+	constraint: CircuitConstraint;
+	methodName: string;
+	/** 1 solution for linear targets, up to 2 valid solutions for quadratic power targets */
+	solutions: UnknownSolutionCandidate[];
+	error?: string;
+	steps: SolutionStep[];
+}
+
 export interface CircuitDocument {
 	schemaVersion: 1;
 	id?: string;
@@ -84,6 +129,7 @@ export interface CircuitDocument {
 	unitSystem?: UnitSystemId;
 	components: CircuitComponent[];
 	wires: CircuitWire[];
+	unknownProblem?: UnknownProblemSpec;
 }
 
 export interface NetlistElement {
@@ -245,6 +291,7 @@ export interface FullSolveResult {
 	mna: MnaSolution;
 	methods: Partial<Record<MethodId, MethodResult>>;
 	theveninNorton?: TheveninNortonResult;
+	unknownSolution?: UnknownSolveResult;
 	allVerified: boolean;
 	maxDiscrepancy: number;
 }

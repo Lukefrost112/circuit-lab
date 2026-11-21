@@ -11,6 +11,7 @@ import type {
 	CircuitDocument,
 	CircuitWire,
 	ComponentKind,
+	ConstraintKind,
 	Rotation
 } from './types';
 import { parseComplexValue, parseEngineeringNumber } from './units';
@@ -146,6 +147,20 @@ export function exportCircuitJson(doc: CircuitDocument): string {
 	if (doc.acMagnitudeMode !== undefined) out.acMagnitudeMode = doc.acMagnitudeMode;
 	out.components = normalizedComponents;
 	out.wires = normalizedWires;
+	if (doc.unknownProblem !== undefined) {
+		out.unknownProblem = {
+			componentId: doc.unknownProblem.componentId,
+			...(doc.unknownProblem.symbol ? { symbol: doc.unknownProblem.symbol } : {}),
+			constraint: {
+				kind: doc.unknownProblem.constraint.kind,
+				targetId: doc.unknownProblem.constraint.targetId,
+				value: doc.unknownProblem.constraint.value,
+				...(doc.unknownProblem.constraint.label
+					? { label: doc.unknownProblem.constraint.label }
+					: {})
+			}
+		};
+	}
 
 	return JSON.stringify(out, null, 2);
 }
@@ -434,6 +449,37 @@ function parseCircuitDocumentFormat(obj: Record<string, unknown>): CircuitImport
 	if (typeof obj.id === 'string' && obj.id.trim() !== '') document.id = obj.id.trim();
 	if (typeof obj.name === 'string' && obj.name.trim() !== '') document.name = obj.name.trim();
 	if (acMagnitudeMode) document.acMagnitudeMode = acMagnitudeMode;
+	if (isPlainObject(obj.unknownProblem)) {
+		const up = obj.unknownProblem;
+		const c = up.constraint;
+		const validConstraintKinds: ConstraintKind[] = [
+			'node_voltage',
+			'branch_voltage',
+			'branch_current',
+			'branch_power'
+		];
+		if (
+			isPlainObject(c) &&
+			typeof up.componentId === 'string' &&
+			up.componentId.trim() !== '' &&
+			typeof c.kind === 'string' &&
+			validConstraintKinds.includes(c.kind as ConstraintKind) &&
+			typeof c.targetId === 'string' &&
+			c.targetId.trim() !== '' &&
+			typeof c.value === 'string'
+		) {
+			document.unknownProblem = {
+				componentId: up.componentId.trim(),
+				symbol: typeof up.symbol === 'string' && up.symbol.trim() ? up.symbol.trim() : undefined,
+				constraint: {
+					kind: c.kind as ConstraintKind,
+					targetId: c.targetId.trim(),
+					value: c.value.trim(),
+					label: typeof c.label === 'string' && c.label.trim() ? c.label.trim() : undefined
+				}
+			};
+		}
+	}
 
 	return {
 		ok: true,

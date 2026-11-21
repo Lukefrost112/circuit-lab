@@ -11,13 +11,15 @@ import { solveNodal } from './methods/nodal';
 import { solveSourceTransform } from './methods/source-transform';
 import { solveSuperposition } from './methods/superposition';
 import { solveTheveninNorton } from './methods/thevenin-norton';
+import { solveUnknownParameter, substituteUnknownValue } from './unknown-solver';
 import type {
 	CircuitDocument,
 	FullSolveResult,
 	MethodId,
 	MethodResult,
 	TheveninNortonResult,
-	TheveninTarget
+	TheveninTarget,
+	UnknownSolveResult
 } from './types';
 
 export interface SolveCircuitOptions extends SolveMnaOptions {
@@ -37,20 +39,39 @@ const ALL_METHODS: MethodId[] = [
 /**
  * Solves a CircuitDocument using MNA and all requested pedagogical methods,
  * verifying every applicable method independently against MNA (< 1e-8).
+ * If `doc.unknownProblem` is present, solves for the unknown parameter first
+ * and substitutes the primary solution into the working circuit.
  */
 export function solveCircuit(
 	doc: CircuitDocument,
 	options?: SolveCircuitOptions
 ): FullSolveResult {
-	const mna = solveMNA(doc, {
+	const mnaOpts: SolveMnaOptions = {
 		frequencyHz: options?.frequencyHz,
 		acMagnitudeMode: options?.acMagnitudeMode
-	});
+	};
+
+	let workingDoc = doc;
+	let unknownSolution: UnknownSolveResult | undefined;
+
+	if (doc.unknownProblem) {
+		unknownSolution = solveUnknownParameter(doc, doc.unknownProblem, mnaOpts);
+		if (unknownSolution.valid && unknownSolution.solutions.length > 0) {
+			workingDoc = substituteUnknownValue(
+				doc,
+				doc.unknownProblem.componentId,
+				unknownSolution.solutions[0].valueString
+			);
+		}
+	}
+
+	const mna = solveMNA(workingDoc, mnaOpts);
 
 	if (!mna.valid) {
 		return {
 			mna,
 			methods: {},
+			unknownSolution,
 			allVerified: false,
 			maxDiscrepancy: 0
 		};
@@ -63,22 +84,22 @@ export function solveCircuit(
 	for (const methodId of requested) {
 		switch (methodId) {
 			case 'kcl_kvl':
-				methods.kcl_kvl = solveKclKvl(doc, mna);
+				methods.kcl_kvl = solveKclKvl(workingDoc, mna);
 				break;
 			case 'nodal':
-				methods.nodal = solveNodal(doc, mna);
+				methods.nodal = solveNodal(workingDoc, mna);
 				break;
 			case 'mesh':
-				methods.mesh = solveMesh(doc, mna);
+				methods.mesh = solveMesh(workingDoc, mna);
 				break;
 			case 'superposition':
-				methods.superposition = solveSuperposition(doc, mna);
+				methods.superposition = solveSuperposition(workingDoc, mna);
 				break;
 			case 'source_transform':
-				methods.source_transform = solveSourceTransform(doc, mna);
+				methods.source_transform = solveSourceTransform(workingDoc, mna);
 				break;
 			case 'thevenin_norton': {
-				const res = solveTheveninNorton(doc, mna, options?.theveninTarget);
+				const res = solveTheveninNorton(workingDoc, mna, options?.theveninTarget);
 				methods.thevenin_norton = res.methodResult;
 				theveninNorton = res.theveninNorton;
 				break;
@@ -88,6 +109,21 @@ export function solveCircuit(
 
 	let allVerified = true;
 	let maxDiscrepancy = 0;
+
+	if (unknownSolution) {
+		if (!unknownSolution.valid) {
+			allVerified = false;
+		} else {
+			for (const cand of unknownSolution.solutions) {
+				if (!cand.verified) {
+					allVerified = false;
+				}
+				if (Number.isFinite(cand.discrepancy) && cand.discrepancy > maxDiscrepancy) {
+					maxDiscrepancy = cand.discrepancy;
+				}
+			}
+		}
+	}
 
 	for (const res of Object.values(methods)) {
 		if (!res || !res.applicable) continue;
@@ -103,6 +139,7 @@ export function solveCircuit(
 		mna,
 		methods,
 		theveninNorton,
+		unknownSolution,
 		allVerified,
 		maxDiscrepancy
 	};

@@ -10,6 +10,7 @@
 	import FinalAnswersCard from './FinalAnswersCard.svelte';
 	import MethodStepsPanel from './MethodStepsPanel.svelte';
 	import PhasorDiagram from './PhasorDiagram.svelte';
+	import UnknownSolutionCard from './UnknownSolutionCard.svelte';
 
 	type Props = {
 		solution: FullSolveResult | null;
@@ -18,6 +19,7 @@
 		activeMethod?: MethodId;
 		onSelectComponent?: (id: string) => void;
 		onSelectTheveninComponent?: (id: string) => void;
+		onApplyUnknownSolution?: (solutionIndex: number) => void;
 		class?: string;
 	};
 
@@ -28,6 +30,7 @@
 		activeMethod = $bindable<MethodId>('nodal'),
 		onSelectComponent,
 		onSelectTheveninComponent,
+		onApplyUnknownSolution,
 		class: className
 	}: Props = $props();
 
@@ -57,6 +60,16 @@
 			</p>
 		</div>
 	{:else}
+		<!-- 0. Unknown Parameter Solution (at very top when active) -->
+		{#if solution.unknownSolution}
+			<UnknownSolutionCard
+				unknownSolution={solution.unknownSolution}
+				{document}
+				mode={solution.mna.mode}
+				onApplySolution={onApplyUnknownSolution}
+			/>
+		{/if}
+
 		<!-- Validation Diagnostics Banner -->
 		{#if errorDiags.length > 0 || warningDiags.length > 0 || infoDiags.length > 0}
 			<div class="flex flex-col divide-y divide-border" aria-label="Circuit Diagnostics">

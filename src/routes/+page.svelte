@@ -650,6 +650,7 @@
 						bind:activeMethod={circuit.activeMethod}
 						onSelectComponent={(id) => circuit.selectComponent(id)}
 						onSelectTheveninComponent={(id) => circuit.setTheveninComponent(id)}
+						onApplyUnknownSolution={(idx) => circuit.applySolvedUnknown(idx)}
 					/>
 				</div>
 			</section>
@@ -723,6 +724,7 @@
 								bind:activeMethod={circuit.activeMethod}
 								onSelectComponent={(id) => circuit.selectComponent(id)}
 								onSelectTheveninComponent={(id) => circuit.setTheveninComponent(id)}
+								onApplyUnknownSolution={(idx) => circuit.applySolvedUnknown(idx)}
 							/>
 						</TabsContent>
 

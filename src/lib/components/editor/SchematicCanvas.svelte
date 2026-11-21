@@ -21,6 +21,7 @@
 	import { Button, Separator, Tooltip } from '$lib/components/ui';
 	import {
 		Complex,
+		getDefaultUnknownSymbol,
 		getPinPositions,
 		type CircuitComponent,
 		type CircuitWire,
@@ -1951,9 +1952,30 @@
 				{@const isThevenin =
 					circuit.theveninTarget?.kind === 'component' &&
 					circuit.theveninTarget.componentId === comp.id}
+				{@const isUnknownComp = circuit.document.unknownProblem?.componentId === comp.id}
+				{@const unknownSym =
+					circuit.document.unknownProblem?.symbol?.trim() || getDefaultUnknownSymbol(comp.kind)}
+				{@const unknownSolvedVal =
+					isUnknownComp &&
+					circuit.solution.unknownSolution?.valid &&
+					circuit.solution.unknownSolution.solutions.length > 0
+						? formatComponentDisplayValue(
+								{
+									...comp,
+									value: circuit.solution.unknownSolution.solutions[0].valueString,
+									phaseDeg: undefined
+								},
+								circuit.document.mode,
+								settings.unitSystem
+							)
+						: null}
 				{@const pins = getPinPositions(renderComp)}
 				{@const labelLayout = getComponentLabelLayout(renderComp)}
-				{@const displayVal = formatComponentDisplayValue(comp, circuit.document.mode, settings.unitSystem)}
+				{@const displayVal = isUnknownComp
+					? unknownSolvedVal
+						? `${unknownSym}? (${unknownSolvedVal})`
+						: `${unknownSym} = ?`
+					: formatComponentDisplayValue(comp, circuit.document.mode, settings.unitSystem)}
 				{@const isVertical = comp.rotation === 90 || comp.rotation === 270}
 				{@const isOnePinComp = comp.kind === 'ground' || comp.kind === 'terminal'}
 				{@const hitHalfW = isOnePinComp ? 18 : isVertical ? 18 : 34}
@@ -2041,9 +2063,10 @@
 								x={labelLayout.valueX}
 								y={labelLayout.valueY}
 								text-anchor={labelLayout.anchor}
-								fill="var(--muted-foreground)"
+								fill={isUnknownComp ? 'var(--warning)' : 'var(--muted-foreground)'}
 								font-family="var(--font-mono)"
 								font-size="10"
+								font-weight={isUnknownComp ? '600' : undefined}
 								style="font-variant-numeric: tabular-nums;"
 							>
 								{displayVal}

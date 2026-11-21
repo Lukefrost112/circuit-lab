@@ -2,7 +2,13 @@
 	import { RotateCw, Target, Trash2 } from 'lucide-svelte';
 	import { CircuitSymbol } from '$lib/components/symbols';
 	import { Button, Input, Label, Select, Switch } from '$lib/components/ui';
-	import { formatEngineering, parseComplexValue, type ComponentKind } from '$lib/engine';
+	import {
+		formatEngineering,
+		getDefaultUnknownSymbol,
+		parseComplexValue,
+		type ComponentKind,
+		type ConstraintKind
+	} from '$lib/engine';
 	import { circuit } from '$lib/stores/circuit.svelte';
 	import { settings } from '$lib/stores/settings.svelte';
 	import EngineeringInput from './EngineeringInput.svelte';
@@ -33,6 +39,7 @@
 	let phaseDraft = $state('0');
 	let sourceFreqDraft = $state('');
 	let globalFreqDraft = $state(String(circuit.document.frequencyHz));
+	let unknownSymbolDraft = $state('');
 
 	$effect(() => {
 		if (selectedComp) {
@@ -77,6 +84,182 @@
 			circuit.theveninTarget?.kind === 'component' &&
 			circuit.theveninTarget.componentId === selectedComp.id
 	);
+
+	const activeUnknownProblem = $derived(circuit.document.unknownProblem);
+	const isUnknownComp = $derived(
+		selectedComp !== null && activeUnknownProblem?.componentId === selectedComp.id
+	);
+
+	$effect(() => {
+		if (selectedComp && isUnknownComp && activeUnknownProblem) {
+			unknownSymbolDraft =
+				activeUnknownProblem.symbol ?? getDefaultUnknownSymbol(selectedComp.kind);
+		} else if (selectedComp) {
+			unknownSymbolDraft = getDefaultUnknownSymbol(selectedComp.kind);
+		}
+	});
+
+	const CONSTRAINT_KIND_OPTIONS: Array<{ value: ConstraintKind; label: string }> = [
+		{ value: 'branch_current', label: 'Branch Current (I)' },
+		{ value: 'branch_voltage', label: 'Branch Voltage (V)' },
+		{ value: 'node_voltage', label: 'Node Voltage (V)' },
+		{ value: 'branch_power', label: 'Branch Power (P)' }
+	];
+
+	const twoTerminalComponents = $derived(
+		circuit.document.components.filter((c) => c.kind !== 'ground' && c.kind !== 'terminal')
+	);
+
+	const constraintTargetOptions = $derived.by(() => {
+		if (!activeUnknownProblem) return [];
+		if (activeUnknownProblem.constraint.kind === 'node_voltage') {
+			return circuit.graph.nonRefNodeIds.map((nid) => ({
+				value: nid,
+				label: `Node ${nid}`
+			}));
+		}
+		return twoTerminalComponents.map((c) => ({
+			value: c.id,
+			label: `${c.label} (${KIND_LABELS[c.kind]})`
+		}));
+	});
+
+	const constraintUnit = $derived.by(() => {
+		const k = activeUnknownProblem?.constraint.kind;
+		if (k === 'branch_current') return 'A';
+		if (k === 'branch_power') return 'W';
+		return 'V';
+	});
+
+	function formatBaselineConstraintValue(kind: ConstraintKind, targetId: string): string {
+		const mna = circuit.solution.mna;
+		if (!mna.valid) {
+			return kind === 'branch_current' ? '1m' : kind === 'branch_power' ? '10m' : '5';
+		}
+		if (kind === 'node_voltage') {
+			const v = mna.nodeVoltages[targetId]?.voltage;
+			if (!v) return '5';
+			if (circuit.document.mode === 'dc' || v.isReal(1e-12)) {
+				return formatEngineering(v.re, '', 4);
+			}
+			const magStr = formatEngineering(v.abs(), '', 4);
+			const degStr = Number(v.argDeg().toPrecision(4)).toString();
+			return `${magStr}∠${degStr}°`;
+		}
+		const br = mna.branches[targetId];
+		if (!br) return kind === 'branch_current' ? '1m' : kind === 'branch_power' ? '10m' : '5';
+		if (kind === 'branch_power') {
+			return formatEngineering(br.realPower, '', 4);
+		}
+		const cVal = kind === 'branch_current' ? br.current : br.voltage;
+		if (circuit.document.mode === 'dc' || cVal.isReal(1e-12)) {
+			return formatEngineering(cVal.re, '', 4);
+		}
+		const magStr = formatEngineering(cVal.abs(), '', 4);
+		const degStr = Number(cVal.argDeg().toPrecision(4)).toString();
+		return `${magStr}∠${degStr}°`;
+	}
+
+	function pickDefaultTargetForKind(kind: ConstraintKind, unknownCompId: string): string {
+		if (kind === 'node_voltage') {
+			return circuit.graph.nonRefNodeIds[0] ?? 'N1';
+		}
+		const otherResistor = twoTerminalComponents.find(
+			(c) => c.id !== unknownCompId && c.kind === 'resistor'
+		);
+		if (otherResistor) return otherResistor.id;
+		const otherBranch = twoTerminalComponents.find((c) => c.id !== unknownCompId);
+		if (otherBranch) return otherBranch.id;
+		return unknownCompId;
+	}
+
+	function handleToggleUnknown(checked: boolean) {
+		if (!selectedComp || !isTwoTerminal) return;
+		if (!checked) {
+			if (isUnknownComp) {
+				circuit.clearUnknownProblem();
+			}
+			return;
+		}
+		const defaultKind: ConstraintKind = 'branch_current';
+		const defaultTargetId = pickDefaultTargetForKind(defaultKind, selectedComp.id);
+		const defaultValue = formatBaselineConstraintValue(defaultKind, defaultTargetId);
+		const defaultSym = getDefaultUnknownSymbol(selectedComp.kind);
+		circuit.setUnknownProblem({
+			componentId: selectedComp.id,
+			symbol: defaultSym,
+			constraint: {
+				kind: defaultKind,
+				targetId: defaultTargetId,
+				value: defaultValue
+			}
+		});
+	}
+
+	function commitUnknownSymbol() {
+		if (!selectedComp || !isUnknownComp || !activeUnknownProblem) return;
+		const trimmed = unknownSymbolDraft.trim() || getDefaultUnknownSymbol(selectedComp.kind);
+		unknownSymbolDraft = trimmed;
+		if (trimmed !== (activeUnknownProblem.symbol ?? getDefaultUnknownSymbol(selectedComp.kind))) {
+			circuit.setUnknownProblem({
+				...activeUnknownProblem,
+				symbol: trimmed
+			});
+		}
+	}
+
+	function handleConstraintKindChange(nextKind: ConstraintKind) {
+		if (!selectedComp || !isUnknownComp || !activeUnknownProblem) return;
+		const prevKind = activeUnknownProblem.constraint.kind;
+		if (nextKind === prevKind) return;
+
+		const isPrevNode = prevKind === 'node_voltage';
+		const isNextNode = nextKind === 'node_voltage';
+		const nextTargetId =
+			isPrevNode === isNextNode
+				? activeUnknownProblem.constraint.targetId
+				: pickDefaultTargetForKind(nextKind, selectedComp.id);
+
+		const nextValue = formatBaselineConstraintValue(nextKind, nextTargetId);
+		circuit.setUnknownProblem({
+			...activeUnknownProblem,
+			constraint: {
+				...activeUnknownProblem.constraint,
+				kind: nextKind,
+				targetId: nextTargetId,
+				value: nextValue
+			}
+		});
+	}
+
+	function handleConstraintTargetChange(nextTargetId: string) {
+		if (!isUnknownComp || !activeUnknownProblem || !nextTargetId) return;
+		if (nextTargetId === activeUnknownProblem.constraint.targetId) return;
+		const nextValue = formatBaselineConstraintValue(
+			activeUnknownProblem.constraint.kind,
+			nextTargetId
+		);
+		circuit.setUnknownProblem({
+			...activeUnknownProblem,
+			constraint: {
+				...activeUnknownProblem.constraint,
+				targetId: nextTargetId,
+				value: nextValue
+			}
+		});
+	}
+
+	function handleConstraintValueCommit(nextValue: string) {
+		if (!isUnknownComp || !activeUnknownProblem) return;
+		if (nextValue === activeUnknownProblem.constraint.value) return;
+		circuit.setUnknownProblem({
+			...activeUnknownProblem,
+			constraint: {
+				...activeUnknownProblem.constraint,
+				value: nextValue
+			}
+		});
+	}
 
 	const selectedWireNodeId = $derived.by(() => {
 		if (!selectedWire || selectedWire.points.length === 0) return null;
@@ -284,6 +467,88 @@
 				</p>
 			{/if}
 		</div>
+
+		<!-- Solve for Unknown (?) Section -->
+		{#if isTwoTerminal}
+			<div class="flex flex-col gap-3 px-4 py-3.5">
+				<div class="flex min-h-11 items-center justify-between gap-2 py-0.5 lg:min-h-0 lg:py-0">
+					<div class="flex flex-col gap-0.5">
+						<Label for="comp-unknown-toggle">Solve for Unknown (?)</Label>
+						<span class="text-[11px] text-muted-foreground">
+							Mark value as Unknown (?)
+						</span>
+					</div>
+					<Switch
+						id="comp-unknown-toggle"
+						aria-label="Mark value as Unknown (?)"
+						checked={isUnknownComp}
+						onCheckedChange={handleToggleUnknown}
+					/>
+				</div>
+
+				{#if isUnknownComp && activeUnknownProblem}
+					<div class="flex flex-col gap-2.5 border-t border-border pt-3">
+						<div class="flex flex-col gap-1.5">
+							<Label for="unknown-symbol">Unknown Symbol</Label>
+							<Input
+								id="unknown-symbol"
+								tabular
+								placeholder="e.g. V, Vs, Rx"
+								bind:value={unknownSymbolDraft}
+								onblur={commitUnknownSymbol}
+								onkeydown={(e) => {
+									if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
+								}}
+							/>
+						</div>
+
+						<div class="flex flex-col gap-1.5">
+							<Label for="unknown-constraint-kind">Given Measurement</Label>
+							<Select
+								id="unknown-constraint-kind"
+								value={activeUnknownProblem.constraint.kind}
+								options={CONSTRAINT_KIND_OPTIONS}
+								onchange={(e) => {
+									const val = (e.currentTarget as HTMLSelectElement).value as ConstraintKind;
+									handleConstraintKindChange(val);
+								}}
+							/>
+						</div>
+
+						<div class="flex flex-col gap-1.5">
+							<Label for="unknown-constraint-target">
+								{activeUnknownProblem.constraint.kind === 'node_voltage'
+									? 'Measured Node'
+									: 'Measured Element'}
+							</Label>
+							<Select
+								id="unknown-constraint-target"
+								value={activeUnknownProblem.constraint.targetId}
+								options={constraintTargetOptions}
+								onchange={(e) => {
+									const val = (e.currentTarget as HTMLSelectElement).value;
+									handleConstraintTargetChange(val);
+								}}
+							/>
+						</div>
+
+						<div class="flex flex-col gap-1.5">
+							<Label for="unknown-constraint-value">Target Value</Label>
+							<EngineeringInput
+								id="unknown-constraint-value"
+								value={activeUnknownProblem.constraint.value}
+								unit={constraintUnit}
+								allowComplex={isAcMode &&
+									activeUnknownProblem.constraint.kind !== 'branch_power'}
+								positiveOnly={false}
+								allowZero={true}
+								onCommit={handleConstraintValueCommit}
+							/>
+						</div>
+					</div>
+				{/if}
+			</div>
+		{/if}
 
 		<!-- Component Actions -->
 		<div class="flex flex-col gap-2 px-4 py-3.5">
