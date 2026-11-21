@@ -1394,7 +1394,7 @@
 		const obstacles = buildSchematicObstacles(
 			circuit.document.components,
 			circuit.document.wires,
-			(c) => formatComponentDisplayValue(c, circuit.document.mode),
+			(c) => formatComponentDisplayValue(c, circuit.document.mode, settings.unitSystem),
 			theveninCompId
 		);
 		const placedPills: LayoutRect[] = [];
@@ -1415,7 +1415,8 @@
 			const formattedI = formatComplexOverlay(displayCurrent, 'A', circuit.document.mode, {
 				precision: settings.precision,
 				angleDisplay: settings.angleDisplay,
-				showDcFractions: settings.showDcFractions
+				showDcFractions: settings.showDcFractions,
+				unitSystem: settings.unitSystem
 			});
 			const pillWidth = Math.max(40, formattedI.length * 6.0 + 12);
 			const pillHeight = 16;
@@ -1465,7 +1466,8 @@
 				: formatComplexOverlay(node.voltage, 'V', circuit.document.mode, {
 						precision: settings.precision,
 						angleDisplay: settings.angleDisplay,
-						showDcFractions: settings.showDcFractions
+						showDcFractions: settings.showDcFractions,
+						unitSystem: settings.unitSystem
 					});
 			const text = node.isReference ? 'GND · 0 V' : `${node.nodeId}: ${formattedV}`;
 			const pillWidth = Math.max(42, text.length * 6.2 + 12);
@@ -1542,7 +1544,8 @@
 				: formatComplexOverlay(res.voltage, 'V', circuit.document.mode, {
 						precision: settings.precision,
 						angleDisplay: settings.angleDisplay,
-						showDcFractions: settings.showDcFractions
+						showDcFractions: settings.showDcFractions,
+						unitSystem: settings.unitSystem
 					})
 		};
 	});
@@ -1950,7 +1953,7 @@
 					circuit.theveninTarget.componentId === comp.id}
 				{@const pins = getPinPositions(renderComp)}
 				{@const labelLayout = getComponentLabelLayout(renderComp)}
-				{@const displayVal = formatComponentDisplayValue(comp, circuit.document.mode)}
+				{@const displayVal = formatComponentDisplayValue(comp, circuit.document.mode, settings.unitSystem)}
 				{@const isVertical = comp.rotation === 90 || comp.rotation === 270}
 				{@const isOnePinComp = comp.kind === 'ground' || comp.kind === 'terminal'}
 				{@const hitHalfW = isOnePinComp ? 18 : isVertical ? 18 : 34}

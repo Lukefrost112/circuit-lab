@@ -417,6 +417,31 @@
 					]}
 				/>
 			</div>
+
+			<div class="flex flex-col gap-1.5">
+				<Label for="inspector-unit-system">Unit System</Label>
+				<Select
+					id="inspector-unit-system"
+					value={settings.unitSystem}
+					onchange={(e) => {
+						const val = (e.currentTarget as HTMLSelectElement).value;
+						if (
+							val === 'auto' ||
+							val === 'ohm-v-a' ||
+							val === 'kohm-v-ma' ||
+							val === 'mohm-v-ua'
+						) {
+							settings.unitSystem = val;
+						}
+					}}
+					options={[
+						{ value: 'auto', label: 'Auto SI (Best-fit Prefixes)' },
+						{ value: 'ohm-v-a', label: 'Ω · V · A · W (Base SI)' },
+						{ value: 'kohm-v-ma', label: 'kΩ · V · mA · mW (Electronics)' },
+						{ value: 'mohm-v-ua', label: 'MΩ · V · µA · µW (High-Z)' }
+					]}
+				/>
+			</div>
 		</div>
 
 		<!-- Canvas Display Toggles -->

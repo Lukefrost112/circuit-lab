@@ -122,6 +122,7 @@
 		const mna = solution.mna;
 		const prec = settings.precision;
 		const angleDisplay = settings.angleDisplay;
+		const unitSystem = settings.unitSystem;
 
 		const rawVoltages = Object.values(mna.nodeVoltages)
 			.filter((n) => !n.isReference && n.voltage.abs() > 1e-12)
@@ -173,9 +174,10 @@
 					y2: CY - r * Math.sin(rad),
 					formatted: formatComplexValue(node.voltage, 'V', 'ac', {
 						precision: prec,
-						angleDisplay
+						angleDisplay,
+						unitSystem
 					}),
-					formattedPolar: formatPolarQuantity(node.voltage, 'V', prec)
+					formattedPolar: formatPolarQuantity(node.voltage, 'V', prec, unitSystem)
 				});
 			}
 		}
@@ -201,9 +203,10 @@
 					y2: CY - r * Math.sin(rad),
 					formatted: formatComplexValue(branch.current, 'A', 'ac', {
 						precision: prec,
-						angleDisplay
+						angleDisplay,
+						unitSystem
 					}),
-					formattedPolar: formatPolarQuantity(branch.current, 'A', prec)
+					formattedPolar: formatPolarQuantity(branch.current, 'A', prec, unitSystem)
 				});
 			}
 		}

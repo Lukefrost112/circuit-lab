@@ -1,14 +1,17 @@
 import {
 	Complex,
 	formatEngineering,
+	formatEngineeringWithSystem,
 	formatRational,
+	getFixedUnitPrefix,
 	getPinPositions,
 	parseComplexValue,
 	parseEngineeringNumber,
 	type AnalysisMode,
 	type CircuitComponent,
 	type CircuitWire,
-	type GridPoint
+	type GridPoint,
+	type UnitSystemId
 } from '$lib/engine';
 import type { AngleDisplay, DisplayPrecision } from '$lib/stores/settings.svelte';
 
@@ -126,9 +129,21 @@ export function isPointNearSegment(
 	return Math.hypot(px - projX, py - projY) <= tolerance;
 }
 
+function formatScaledScalar(n: number, prec: number): string {
+	const cleaned = Math.abs(n) < 1e-12 ? 0 : n;
+	if (cleaned === 0) return '0';
+	const rounded = Number(cleaned.toPrecision(prec));
+	const abs = Math.abs(rounded);
+	if (abs >= 1e-4 && abs < 1e6) {
+		return rounded.toString();
+	}
+	return rounded.toExponential().replace(/e\+?/, 'e');
+}
+
 export function formatComponentDisplayValue(
 	comp: CircuitComponent,
-	mode: AnalysisMode
+	mode: AnalysisMode,
+	unitSystem: UnitSystemId = 'auto'
 ): string {
 	if (comp.kind === 'ground') return '';
 	if (comp.kind === 'terminal') return '';
@@ -145,7 +160,7 @@ export function formatComponentDisplayValue(
 	if (comp.kind === 'resistor' || comp.kind === 'capacitor' || comp.kind === 'inductor') {
 		const num = parseEngineeringNumber(comp.value);
 		if (num !== null && num > 0) {
-			return formatEngineering(num, unit, 3);
+			return formatEngineeringWithSystem(num, unit, 3, unitSystem);
 		}
 		return unit ? `${comp.value} ${unit}` : comp.value;
 	}
@@ -157,7 +172,7 @@ export function formatComponentDisplayValue(
 	}
 
 	if (mode === 'dc') {
-		return formatEngineering(parsed.re, unit, 3);
+		return formatEngineeringWithSystem(parsed.re, unit, 3, unitSystem);
 	}
 
 	const hasExplicitAngleOrJ = /[∠@j]/i.test(raw);
@@ -167,16 +182,23 @@ export function formatComponentDisplayValue(
 			: parsed;
 
 	if (effective.isReal(1e-12) && effective.re >= 0 && !hasExplicitAngleOrJ && comp.phaseDeg === undefined) {
-		return formatEngineering(effective.re, unit, 3);
+		return formatEngineeringWithSystem(effective.re, unit, 3, unitSystem);
 	}
 
+	const fixed = getFixedUnitPrefix(unit, unitSystem);
 	const mag = effective.abs();
 	if (mag < 1e-12) {
-		return unit ? `0 ${unit}` : '0';
+		const zeroUnit = fixed ? `${fixed.symbol}${unit}` : unit;
+		return zeroUnit ? `0 ${zeroUnit}` : '0';
 	}
-	const magStr = formatEngineering(mag, '', 3);
 	const deg = Math.abs(effective.argDeg()) < 1e-9 ? 0 : effective.argDeg();
 	const degStr = Number(deg.toPrecision(3)).toString();
+	if (fixed) {
+		const magStr = formatScaledScalar(mag / fixed.factor, 3);
+		const unitWithPrefix = `${fixed.symbol}${unit}`;
+		return unitWithPrefix ? `${magStr}∠${degStr}° ${unitWithPrefix}` : `${magStr}∠${degStr}°`;
+	}
+	const magStr = formatEngineering(mag, '', 3);
 	return unit ? `${magStr}∠${degStr}° ${unit}` : `${magStr}∠${degStr}°`;
 }
 
@@ -188,31 +210,44 @@ export function formatComplexOverlay(
 		precision: DisplayPrecision;
 		angleDisplay: AngleDisplay;
 		showDcFractions: boolean;
+		unitSystem?: UnitSystemId;
 	}
 ): string {
+	const unitSystem = opts.unitSystem ?? 'auto';
+	const fixed = getFixedUnitPrefix(unit, unitSystem);
+	const unitWithPrefix = fixed ? `${fixed.symbol}${unit}` : unit;
+
 	if (mode === 'dc') {
 		const real = Math.abs(value.re) < 1e-12 ? 0 : value.re;
-		if (real === 0) return `0 ${unit}`;
+		if (real === 0) return `0 ${unitWithPrefix}`;
 
-		if (opts.showDcFractions && Math.abs(real) >= 0.01 && Math.abs(real) <= 1000) {
-			const rat = formatRational(real, 100);
-			if (rat && rat.includes('/')) {
-				return `${rat} ${unit}`;
+		if (opts.showDcFractions) {
+			const targetVal = fixed ? real / fixed.factor : real;
+			if (Math.abs(targetVal) >= 0.01 && Math.abs(targetVal) <= 1000) {
+				const rat = formatRational(targetVal, 100);
+				if (rat && rat.includes('/')) {
+					return `${rat} ${unitWithPrefix}`;
+				}
 			}
 		}
-		return formatEngineering(real, unit, opts.precision);
+		return formatEngineeringWithSystem(real, unit, opts.precision, unitSystem);
 	}
 
 	const mag = value.abs();
-	if (mag < 1e-12) return `0 ${unit}`;
+	if (mag < 1e-12) return `0 ${unitWithPrefix}`;
 
 	if (opts.angleDisplay === 'rectangular') {
-		return `${value.formatRect(opts.precision)} ${unit}`;
+		const scaled = fixed ? value.scale(1 / fixed.factor) : value;
+		return `${scaled.formatRect(opts.precision)} ${unitWithPrefix}`;
 	}
 
-	const magStr = formatEngineering(mag, '', opts.precision);
 	const deg = Math.abs(value.argDeg()) < 1e-9 ? 0 : value.argDeg();
 	const degStr = Number(deg.toPrecision(opts.precision)).toString();
+	if (fixed) {
+		const magStr = formatScaledScalar(mag / fixed.factor, opts.precision);
+		return `${magStr}∠${degStr}° ${unitWithPrefix}`;
+	}
+	const magStr = formatEngineering(mag, '', opts.precision);
 	return `${magStr}∠${degStr}° ${unit}`;
 }
 

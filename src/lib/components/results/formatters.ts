@@ -1,6 +1,10 @@
 import { Complex, formatRational } from '$lib/engine/complex';
-import type { AnalysisMode } from '$lib/engine/types';
-import { formatEngineering } from '$lib/engine/units';
+import type { AnalysisMode, UnitSystemId } from '$lib/engine/types';
+import {
+	formatEngineering,
+	formatEngineeringWithSystem,
+	getFixedUnitPrefix
+} from '$lib/engine/units';
 import {
 	settings,
 	type AngleDisplay,
@@ -11,6 +15,7 @@ export interface FormatOptions {
 	angleDisplay?: AngleDisplay;
 	precision?: DisplayPrecision;
 	showDcFractions?: boolean;
+	unitSystem?: UnitSystemId;
 }
 
 export interface FormattedValueParts {
@@ -37,7 +42,8 @@ function resolveOptions(opts?: FormatOptions): Required<FormatOptions> {
 	return {
 		angleDisplay: opts?.angleDisplay ?? settings.angleDisplay,
 		precision: opts?.precision ?? settings.precision,
-		showDcFractions: opts?.showDcFractions ?? settings.showDcFractions
+		showDcFractions: opts?.showDcFractions ?? settings.showDcFractions,
+		unitSystem: opts?.unitSystem ?? settings.unitSystem
 	};
 }
 
@@ -79,11 +85,29 @@ function hasNonTerminatingDenominator(rat: string): boolean {
  * is enabled and a clean repeating fraction exists.
  */
 export function formatDcQuantity(value: number, unit: string, opts?: FormatOptions): string {
-	const { precision, showDcFractions } = resolveOptions(opts);
+	const { precision, showDcFractions, unitSystem } = resolveOptions(opts);
 	const cleaned = Math.abs(value) < ZERO_EPS ? 0 : value;
-	const eng = formatEngineering(cleaned, unit, precision);
+	const fixed = getFixedUnitPrefix(unit, unitSystem);
+	const eng = formatEngineeringWithSystem(cleaned, unit, precision, unitSystem);
 
-	if (!showDcFractions || cleaned === 0 || Math.abs(cleaned) < 1e-3 || Math.abs(cleaned) > 1e4) {
+	if (!showDcFractions || cleaned === 0) {
+		return eng;
+	}
+
+	if (fixed) {
+		const scaled = cleaned / fixed.factor;
+		if (Math.abs(scaled) < 1e-3 || Math.abs(scaled) > 1e4) {
+			return eng;
+		}
+		const rat = formatRational(scaled, 250);
+		if (rat && hasNonTerminatingDenominator(rat)) {
+			const unitWithPrefix = `${fixed.symbol}${unit}`;
+			return unitWithPrefix ? `${rat} ${unitWithPrefix} = ${eng}` : `${rat} = ${eng}`;
+		}
+		return eng;
+	}
+
+	if (Math.abs(cleaned) < 1e-3 || Math.abs(cleaned) > 1e4) {
 		return eng;
 	}
 
@@ -102,15 +126,27 @@ export function formatDcQuantity(value: number, unit: string, opts?: FormatOptio
 export function formatPolarQuantity(
 	c: Complex,
 	unit: string,
-	prec: number = settings.precision
+	prec: number = settings.precision,
+	unitSystem: UnitSystemId = settings.unitSystem
 ): string {
+	const fixed = getFixedUnitPrefix(unit, unitSystem);
 	const mag = c.abs();
 	if (mag < ZERO_EPS) {
-		return unit ? `0∠0° ${unit}` : '0∠0°';
+		const zeroUnit = fixed ? `${fixed.symbol}${unit}` : unit;
+		return zeroUnit ? `0∠0° ${zeroUnit}` : '0∠0°';
 	}
 
 	const deg = Math.abs(c.argDeg()) < ZERO_EPS ? 0 : c.argDeg();
 	const degStr = formatScalar(deg, prec);
+
+	if (fixed) {
+		const magStr = formatScalar(mag / fixed.factor, prec);
+		const unitWithPrefix = `${fixed.symbol}${unit}`;
+		return unitWithPrefix
+			? `${magStr}∠${degStr}° ${unitWithPrefix}`
+			: `${magStr}∠${degStr}°`;
+	}
+
 	const tier = pickSiPrefix(mag);
 
 	if (!tier) {
@@ -141,18 +177,28 @@ export function formatPolarQuantity(
 export function formatRectangularQuantity(
 	c: Complex,
 	unit: string,
-	prec: number = settings.precision
+	prec: number = settings.precision,
+	unitSystem: UnitSystemId = settings.unitSystem
 ): string {
+	const fixed = getFixedUnitPrefix(unit, unitSystem);
 	const reZero = Math.abs(c.re) < ZERO_EPS;
 	const imZero = Math.abs(c.im) < ZERO_EPS;
 	if (reZero && imZero) {
-		return unit ? `0 ${unit}` : '0';
+		const zeroUnit = fixed ? `${fixed.symbol}${unit}` : unit;
+		return zeroUnit ? `0 ${zeroUnit}` : '0';
 	}
 
-	const dominant = Math.max(Math.abs(c.re), Math.abs(c.im));
-	const tier = pickSiPrefix(dominant);
-	const factor = tier ? tier.factor : 1;
-	const prefix = tier ? tier.symbol : '';
+	let factor: number;
+	let prefix: string;
+	if (fixed) {
+		factor = fixed.factor;
+		prefix = fixed.symbol;
+	} else {
+		const dominant = Math.max(Math.abs(c.re), Math.abs(c.im));
+		const tier = pickSiPrefix(dominant);
+		factor = tier ? tier.factor : 1;
+		prefix = tier ? tier.symbol : '';
+	}
 
 	const reScaled = c.re / factor;
 	const imScaled = c.im / factor;
@@ -193,8 +239,8 @@ export function formatComplexParts(
 		return { primary: formatDcQuantity(c.re, unit, resolved) };
 	}
 
-	const polar = formatPolarQuantity(c, unit, resolved.precision);
-	const rect = formatRectangularQuantity(c, unit, resolved.precision);
+	const polar = formatPolarQuantity(c, unit, resolved.precision, resolved.unitSystem);
+	const rect = formatRectangularQuantity(c, unit, resolved.precision, resolved.unitSystem);
 
 	if (resolved.angleDisplay === 'polar') {
 		return { primary: polar };
@@ -219,21 +265,21 @@ export function formatComplexValue(
 }
 
 export function formatRealPower(watts: number, opts?: FormatOptions): string {
-	const { precision } = resolveOptions(opts);
+	const { precision, unitSystem } = resolveOptions(opts);
 	const cleaned = Math.abs(watts) < ZERO_EPS ? 0 : watts;
-	return formatEngineering(cleaned, 'W', precision);
+	return formatEngineeringWithSystem(cleaned, 'W', precision, unitSystem);
 }
 
 export function formatReactivePower(vars: number, opts?: FormatOptions): string {
-	const { precision } = resolveOptions(opts);
+	const { precision, unitSystem } = resolveOptions(opts);
 	const cleaned = Math.abs(vars) < ZERO_EPS ? 0 : vars;
-	return formatEngineering(cleaned, 'VAR', precision);
+	return formatEngineeringWithSystem(cleaned, 'VAR', precision, unitSystem);
 }
 
 export function formatApparentPower(va: number, opts?: FormatOptions): string {
-	const { precision } = resolveOptions(opts);
+	const { precision, unitSystem } = resolveOptions(opts);
 	const cleaned = Math.abs(va) < ZERO_EPS ? 0 : va;
-	return formatEngineering(cleaned, 'VA', precision);
+	return formatEngineeringWithSystem(cleaned, 'VA', precision, unitSystem);
 }
 
 export function formatPowerFactor(

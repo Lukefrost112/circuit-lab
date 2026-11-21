@@ -8,6 +8,7 @@ import type { Complex } from './complex';
 export type SchematicStandard = 'ieee' | 'iec';
 export type AnalysisMode = 'dc' | 'ac';
 export type AcMagnitudeMode = 'rms' | 'peak';
+export type UnitSystemId = 'auto' | 'ohm-v-a' | 'kohm-v-ma' | 'mohm-v-ua';
 
 export type ComponentKind =
 	| 'resistor'
@@ -80,6 +81,7 @@ export interface CircuitDocument {
 	mode: AnalysisMode;
 	frequencyHz: number;
 	acMagnitudeMode?: AcMagnitudeMode;
+	unitSystem?: UnitSystemId;
 	components: CircuitComponent[];
 	wires: CircuitWire[];
 }
@@ -103,6 +105,7 @@ export interface AINetlistDocument {
 	mode?: AnalysisMode;
 	frequencyHz?: number;
 	acMagnitudeMode?: AcMagnitudeMode;
+	unitSystem?: UnitSystemId;
 	groundNode?: string;
 	elements: NetlistElement[];
 }

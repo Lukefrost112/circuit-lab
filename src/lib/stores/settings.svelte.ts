@@ -1,10 +1,14 @@
+import type { UnitSystemId } from '$lib/engine/types';
+
 export type SchematicStandard = 'ieee' | 'iec';
 export type AngleDisplay = 'polar' | 'rectangular' | 'both';
 export type DisplayPrecision = 2 | 3 | 4;
 export type AcMagnitudeMode = 'rms' | 'peak';
+export type { UnitSystemId };
 
 export interface CircuitLabSettings {
 	schematicStandard: SchematicStandard;
+	unitSystem: UnitSystemId;
 	angleDisplay: AngleDisplay;
 	precision: DisplayPrecision;
 	showDcFractions: boolean;
@@ -18,6 +22,7 @@ export const SETTINGS_STORAGE_KEY = 'circuit-lab:settings:v1';
 
 export const DEFAULT_SETTINGS: Readonly<CircuitLabSettings> = Object.freeze({
 	schematicStandard: 'ieee',
+	unitSystem: 'auto',
 	angleDisplay: 'polar',
 	precision: 3,
 	showDcFractions: true,
@@ -39,6 +44,13 @@ function sanitizeSettings(raw: unknown): CircuitLabSettings {
 			input.schematicStandard === 'ieee' || input.schematicStandard === 'iec'
 				? input.schematicStandard
 				: DEFAULT_SETTINGS.schematicStandard,
+		unitSystem:
+			input.unitSystem === 'auto' ||
+			input.unitSystem === 'ohm-v-a' ||
+			input.unitSystem === 'kohm-v-ma' ||
+			input.unitSystem === 'mohm-v-ua'
+				? input.unitSystem
+				: DEFAULT_SETTINGS.unitSystem,
 		angleDisplay:
 			input.angleDisplay === 'polar' ||
 			input.angleDisplay === 'rectangular' ||
@@ -111,6 +123,14 @@ class SettingsStore {
 	}
 	set schematicStandard(value: SchematicStandard) {
 		this.state.schematicStandard = value;
+		persistSettings(this.state);
+	}
+
+	get unitSystem(): UnitSystemId {
+		return this.state.unitSystem;
+	}
+	set unitSystem(value: UnitSystemId) {
+		this.state.unitSystem = value;
 		persistSettings(this.state);
 	}
 

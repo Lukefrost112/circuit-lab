@@ -2,12 +2,14 @@
 	import { RotateCcw } from 'lucide-svelte';
 	import { CircuitSymbol } from '$lib/components/symbols';
 	import { Button, Dialog, Label, Separator, Switch } from '$lib/components/ui';
+	import { UNIT_SYSTEMS } from '$lib/engine';
 	import {
 		settings,
 		type AcMagnitudeMode,
 		type AngleDisplay,
 		type DisplayPrecision,
-		type SchematicStandard
+		type SchematicStandard,
+		type UnitSystemId
 	} from '$lib/stores/settings.svelte';
 	import { cn } from '$lib/utils';
 
@@ -20,6 +22,13 @@
 	const SYMBOL_OPTIONS: Array<{ value: SchematicStandard; title: string; subtitle: string }> = [
 		{ value: 'ieee', title: 'IEEE / ANSI', subtitle: 'Zigzag resistor (Default)' },
 		{ value: 'iec', title: 'IEC 60617', subtitle: 'Rectangular resistor' }
+	];
+
+	const UNIT_SYSTEM_OPTIONS: Array<{ value: UnitSystemId; title: string; subtitle: string }> = [
+		{ value: 'auto', title: 'Auto SI', subtitle: 'Best-fit prefixes' },
+		{ value: 'ohm-v-a', title: 'Ω · V · A', subtitle: 'Base SI (W)' },
+		{ value: 'kohm-v-ma', title: 'kΩ · V · mA', subtitle: 'Electronics (mW)' },
+		{ value: 'mohm-v-ua', title: 'MΩ · V · µA', subtitle: 'High-Z (µW)' }
 	];
 
 	const ANGLE_OPTIONS: Array<{ value: AngleDisplay; label: string; example: string }> = [
@@ -71,6 +80,34 @@
 							standard={opt.value}
 							class="h-6 w-14 shrink-0 text-foreground"
 						/>
+					</button>
+				{/each}
+			</div>
+		</section>
+
+		<Separator />
+
+		<!-- Unit System -->
+		<section class="flex flex-col gap-2">
+			<Label>Unit System</Label>
+			<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+				{#each UNIT_SYSTEM_OPTIONS as opt (opt.value)}
+					{@const active = settings.unitSystem === opt.value}
+					<button
+						type="button"
+						onclick={() => (settings.unitSystem = opt.value)}
+						aria-pressed={active}
+						title={UNIT_SYSTEMS[opt.value].description}
+						class={cn(
+							'flex min-h-11 cursor-pointer flex-col justify-center gap-0.5 rounded-[4px] border px-2.5 py-2 text-left transition-colors duration-150 sm:min-h-0',
+							'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+							active
+								? 'border-primary bg-primary/8 text-foreground'
+								: 'border-border bg-background/50 text-muted-foreground hover:border-foreground/25 hover:bg-accent/40 hover:text-foreground'
+						)}
+					>
+						<span class="font-engineering text-xs font-semibold text-foreground">{opt.title}</span>
+						<span class="text-[11px] text-muted-foreground">{opt.subtitle}</span>
 					</button>
 				{/each}
 			</div>

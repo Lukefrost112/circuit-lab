@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { Complex } from '$lib/engine/complex';
 import {
+	formatApparentPower,
 	formatComplexParts,
 	formatComplexValue,
 	formatDcQuantity,
 	formatFrequency,
 	formatPolarQuantity,
 	formatPowerFactor,
+	formatReactivePower,
 	formatRealPower,
 	formatRectangularQuantity
 } from './formatters';
@@ -60,5 +62,123 @@ describe('results formatters', () => {
 		expect(formatPowerFactor(0.85, 'lagging')).toBe('0.85 lag');
 		expect(formatPowerFactor(null)).toBe('—');
 		expect(formatFrequency(1000)).toBe('1 kHz');
+	});
+
+	it('honors all four unit systems for DC quantities including scaled rational fractions', () => {
+		// 2/3 mA = 0.0006666... A
+		const twoThirdsMa = 2 / 3000;
+		expect(
+			formatDcQuantity(twoThirdsMa, 'A', {
+				precision: 3,
+				showDcFractions: true,
+				unitSystem: 'kohm-v-ma'
+			})
+		).toBe('2/3 mA = 0.667 mA');
+
+		expect(
+			formatDcQuantity(twoThirdsMa, 'A', {
+				precision: 3,
+				showDcFractions: false,
+				unitSystem: 'kohm-v-ma'
+			})
+		).toBe('0.667 mA');
+
+		expect(
+			formatDcQuantity(0.05, 'A', {
+				precision: 3,
+				showDcFractions: true,
+				unitSystem: 'ohm-v-a'
+			})
+		).toBe('0.05 A');
+
+		expect(
+			formatDcQuantity(1500, 'Ω', {
+				precision: 3,
+				showDcFractions: true,
+				unitSystem: 'ohm-v-a'
+			})
+		).toBe('1500 Ω');
+
+		expect(
+			formatDcQuantity(470, 'Ω', {
+				precision: 3,
+				showDcFractions: true,
+				unitSystem: 'kohm-v-ma'
+			})
+		).toBe('0.47 kΩ');
+
+		expect(
+			formatDcQuantity(2.5e-5, 'A', {
+				precision: 3,
+				showDcFractions: true,
+				unitSystem: 'mohm-v-ua'
+			})
+		).toBe('25 µA');
+
+		expect(
+			formatDcQuantity(0, 'A', {
+				precision: 3,
+				showDcFractions: true,
+				unitSystem: 'kohm-v-ma'
+			})
+		).toBe('0 mA');
+
+		// Pass-through unit (F) stays auto SI
+		expect(
+			formatDcQuantity(4.7e-6, 'F', {
+				precision: 3,
+				showDcFractions: true,
+				unitSystem: 'kohm-v-ma'
+			})
+		).toBe('4.7 µF');
+	});
+
+	it('honors unit systems for AC polar and rectangular quantities', () => {
+		const iPhasor = Complex.fromPolar(0.0124, -36.9);
+		expect(formatPolarQuantity(iPhasor, 'A', 3, 'auto')).toBe('12.4∠-36.9° mA');
+		expect(formatPolarQuantity(iPhasor, 'A', 3, 'ohm-v-a')).toBe('0.0124∠-36.9° A');
+		expect(formatPolarQuantity(iPhasor, 'A', 3, 'kohm-v-ma')).toBe('12.4∠-36.9° mA');
+		expect(formatPolarQuantity(iPhasor, 'A', 3, 'mohm-v-ua')).toBe('12400∠-36.9° µA');
+
+		const iRect = Complex.from(0.003, -0.004);
+		expect(formatRectangularQuantity(iRect, 'A', 3, 'auto')).toBe('3 - j4 mA');
+		expect(formatRectangularQuantity(iRect, 'A', 3, 'ohm-v-a')).toBe('0.003 - j0.004 A');
+		expect(formatRectangularQuantity(iRect, 'A', 3, 'kohm-v-ma')).toBe('3 - j4 mA');
+		expect(formatRectangularQuantity(iRect, 'A', 3, 'mohm-v-ua')).toBe('3000 - j4000 µA');
+
+		const z = Complex.from(1500, 2000);
+		expect(
+			formatComplexValue(z, 'Ω', 'ac', {
+				angleDisplay: 'rectangular',
+				precision: 3,
+				unitSystem: 'ohm-v-a'
+			})
+		).toBe('1500 + j2000 Ω');
+		expect(
+			formatComplexValue(z, 'Ω', 'ac', {
+				angleDisplay: 'rectangular',
+				precision: 3,
+				unitSystem: 'kohm-v-ma'
+			})
+		).toBe('1.5 + j2 kΩ');
+
+		// Zero complex honors fixed unit prefix
+		expect(formatPolarQuantity(Complex.zero(), 'A', 3, 'kohm-v-ma')).toBe('0∠0° mA');
+		expect(formatRectangularQuantity(Complex.zero(), 'A', 3, 'mohm-v-ua')).toBe('0 µA');
+	});
+
+	it('honors unit systems for real, reactive, and apparent power', () => {
+		expect(formatRealPower(0.045, { precision: 3, unitSystem: 'auto' })).toBe('45 mW');
+		expect(formatRealPower(0.045, { precision: 3, unitSystem: 'ohm-v-a' })).toBe('0.045 W');
+		expect(formatRealPower(0.045, { precision: 3, unitSystem: 'kohm-v-ma' })).toBe('45 mW');
+		expect(formatRealPower(0.045, { precision: 3, unitSystem: 'mohm-v-ua' })).toBe('45000 µW');
+
+		expect(formatReactivePower(-0.012, { precision: 3, unitSystem: 'ohm-v-a' })).toBe('-0.012 VAR');
+		expect(formatReactivePower(-0.012, { precision: 3, unitSystem: 'kohm-v-ma' })).toBe('-12 mVAR');
+		expect(formatReactivePower(-5e-5, { precision: 3, unitSystem: 'mohm-v-ua' })).toBe('-50 µVAR');
+
+		expect(formatApparentPower(0.5, { precision: 3, unitSystem: 'ohm-v-a' })).toBe('0.5 VA');
+		expect(formatApparentPower(0.5, { precision: 3, unitSystem: 'kohm-v-ma' })).toBe('500 mVA');
+		expect(formatApparentPower(2e-4, { precision: 3, unitSystem: 'mohm-v-ua' })).toBe('200 µVA');
 	});
 });

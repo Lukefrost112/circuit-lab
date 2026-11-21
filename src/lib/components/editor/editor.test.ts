@@ -96,6 +96,38 @@ describe('editor geometry & formatting helpers', () => {
 				showDcFractions: true
 			})
 		).toBe('120∠-30° V');
+
+		// Defined unit systems on component labels & overlays
+		expect(formatComponentDisplayValue(r1, 'dc', 'ohm-v-a')).toBe('2000 Ω');
+		expect(formatComponentDisplayValue(r1, 'dc', 'kohm-v-ma')).toBe('2 kΩ');
+		expect(formatComponentDisplayValue(r1, 'dc', 'mohm-v-ua')).toBe('0.002 MΩ');
+
+		expect(
+			formatComplexOverlay(Complex.from(2 / 3000, 0), 'A', 'dc', {
+				precision: 3,
+				angleDisplay: 'polar',
+				showDcFractions: true,
+				unitSystem: 'kohm-v-ma'
+			})
+		).toBe('2/3 mA');
+
+		expect(
+			formatComplexOverlay(Complex.from(0.004, 0), 'A', 'dc', {
+				precision: 3,
+				angleDisplay: 'polar',
+				showDcFractions: true,
+				unitSystem: 'ohm-v-a'
+			})
+		).toBe('0.004 A');
+
+		expect(
+			formatComplexOverlay(Complex.fromPolar(0.015, 45), 'A', 'ac', {
+				precision: 3,
+				angleDisplay: 'polar',
+				showDcFractions: true,
+				unitSystem: 'kohm-v-ma'
+			})
+		).toBe('15∠45° mA');
 	});
 
 	it('computes pinch-to-zoom centered on midpoint without drift', () => {

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { formatEngineering, parseComplexValue, parseEngineeringNumber } from '../units';
+import {
+	UNIT_SYSTEMS,
+	formatEngineering,
+	formatEngineeringWithSystem,
+	getFixedUnitPrefix,
+	parseComplexValue,
+	parseEngineeringNumber
+} from '../units';
 
 describe('units', () => {
 	it('parses SI prefixes and optional units', () => {
@@ -73,5 +80,68 @@ describe('units', () => {
 		expect(formatEngineering(0.025, 'A', 3)).toBe('25 mA');
 		expect(formatEngineering(0, 'V', 3)).toBe('0 V');
 		expect(formatEngineering(-1500, 'W', 3)).toBe('-1.5 kW');
+	});
+
+	it('defines all four engineering unit systems and resolves fixed prefixes', () => {
+		expect(Object.keys(UNIT_SYSTEMS)).toEqual(['auto', 'ohm-v-a', 'kohm-v-ma', 'mohm-v-ua']);
+		expect(getFixedUnitPrefix('Ω', 'auto')).toBeNull();
+		expect(getFixedUnitPrefix('A', 'auto')).toBeNull();
+
+		expect(getFixedUnitPrefix('Ω', 'ohm-v-a')).toEqual({ symbol: '', factor: 1 });
+		expect(getFixedUnitPrefix('A', 'ohm-v-a')).toEqual({ symbol: '', factor: 1 });
+		expect(getFixedUnitPrefix('W', 'ohm-v-a')).toEqual({ symbol: '', factor: 1 });
+
+		expect(getFixedUnitPrefix('Ω', 'kohm-v-ma')).toEqual({ symbol: 'k', factor: 1e3 });
+		expect(getFixedUnitPrefix('V', 'kohm-v-ma')).toEqual({ symbol: '', factor: 1 });
+		expect(getFixedUnitPrefix('A', 'kohm-v-ma')).toEqual({ symbol: 'm', factor: 1e-3 });
+		expect(getFixedUnitPrefix('W', 'kohm-v-ma')).toEqual({ symbol: 'm', factor: 1e-3 });
+		expect(getFixedUnitPrefix('VAR', 'kohm-v-ma')).toEqual({ symbol: 'm', factor: 1e-3 });
+		expect(getFixedUnitPrefix('VA', 'kohm-v-ma')).toEqual({ symbol: 'm', factor: 1e-3 });
+
+		expect(getFixedUnitPrefix('Ω', 'mohm-v-ua')).toEqual({ symbol: 'M', factor: 1e6 });
+		expect(getFixedUnitPrefix('A', 'mohm-v-ua')).toEqual({ symbol: 'µ', factor: 1e-6 });
+		expect(getFixedUnitPrefix('W', 'mohm-v-ua')).toEqual({ symbol: 'µ', factor: 1e-6 });
+
+		// Unsupported units fall back to null so auto SI is used
+		expect(getFixedUnitPrefix('F', 'kohm-v-ma')).toBeNull();
+		expect(getFixedUnitPrefix('H', 'kohm-v-ma')).toBeNull();
+		expect(getFixedUnitPrefix('Hz', 'mohm-v-ua')).toBeNull();
+		expect(getFixedUnitPrefix('', 'ohm-v-a')).toBeNull();
+	});
+
+	it('formats values across auto, ohm-v-a, kohm-v-ma, and mohm-v-ua unit systems', () => {
+		// auto delegates directly to formatEngineering
+		expect(formatEngineeringWithSystem(1500, 'Ω', 3, 'auto')).toBe('1.5 kΩ');
+		expect(formatEngineeringWithSystem(0.0025, 'A', 3, 'auto')).toBe('2.5 mA');
+
+		// ohm-v-a (base SI)
+		expect(formatEngineeringWithSystem(1500, 'Ω', 3, 'ohm-v-a')).toBe('1500 Ω');
+		expect(formatEngineeringWithSystem(0.5, 'A', 3, 'ohm-v-a')).toBe('0.5 A');
+		expect(formatEngineeringWithSystem(0.05, 'A', 3, 'ohm-v-a')).toBe('0.05 A');
+		expect(formatEngineeringWithSystem(0.0025, 'W', 3, 'ohm-v-a')).toBe('0.0025 W');
+		expect(formatEngineeringWithSystem(5e-5, 'A', 3, 'ohm-v-a')).toBe('5e-5 A');
+		expect(formatEngineeringWithSystem(0, 'A', 3, 'ohm-v-a')).toBe('0 A');
+
+		// kohm-v-ma (electronics scale)
+		expect(formatEngineeringWithSystem(1500, 'Ω', 3, 'kohm-v-ma')).toBe('1.5 kΩ');
+		expect(formatEngineeringWithSystem(470, 'Ω', 3, 'kohm-v-ma')).toBe('0.47 kΩ');
+		expect(formatEngineeringWithSystem(2 / 3000, 'A', 3, 'kohm-v-ma')).toBe('0.667 mA');
+		expect(formatEngineeringWithSystem(12, 'V', 3, 'kohm-v-ma')).toBe('12 V');
+		expect(formatEngineeringWithSystem(0.015, 'W', 3, 'kohm-v-ma')).toBe('15 mW');
+		expect(formatEngineeringWithSystem(-0.0042, 'VAR', 3, 'kohm-v-ma')).toBe('-4.2 mVAR');
+		expect(formatEngineeringWithSystem(0.025, 'VA', 3, 'kohm-v-ma')).toBe('25 mVA');
+		expect(formatEngineeringWithSystem(0, 'A', 3, 'kohm-v-ma')).toBe('0 mA');
+
+		// mohm-v-ua (high-impedance scale)
+		expect(formatEngineeringWithSystem(2.2e6, 'Ω', 3, 'mohm-v-ua')).toBe('2.2 MΩ');
+		expect(formatEngineeringWithSystem(470e3, 'Ω', 3, 'mohm-v-ua')).toBe('0.47 MΩ');
+		expect(formatEngineeringWithSystem(1.5e-5, 'A', 3, 'mohm-v-ua')).toBe('15 µA');
+		expect(formatEngineeringWithSystem(2.5e-4, 'W', 3, 'mohm-v-ua')).toBe('250 µW');
+		expect(formatEngineeringWithSystem(0, 'A', 3, 'mohm-v-ua')).toBe('0 µA');
+
+		// Pass-through units (F, H, Hz) always use clean auto SI prefixes
+		expect(formatEngineeringWithSystem(4.7e-6, 'F', 3, 'kohm-v-ma')).toBe('4.7 µF');
+		expect(formatEngineeringWithSystem(100e-3, 'H', 3, 'mohm-v-ua')).toBe('100 mH');
+		expect(formatEngineeringWithSystem(1000, 'Hz', 3, 'ohm-v-a')).toBe('1 kHz');
 	});
 });

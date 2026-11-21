@@ -43,7 +43,8 @@
 	const formatOpts = $derived({
 		angleDisplay: settings.angleDisplay,
 		precision: settings.precision,
-		showDcFractions: settings.showDcFractions
+		showDcFractions: settings.showDcFractions,
+		unitSystem: settings.unitSystem
 	});
 
 	const sortedNodes = $derived.by<NodeResult[]>(() => {
@@ -110,7 +111,7 @@
 			{#if mna.powerBalance.balanced}
 				<span class="inline-flex items-center gap-1.5 text-foreground">
 					<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-branch-current" aria-hidden="true"></span>
-					<span>ΣP = 0 W</span>
+					<span>ΣP = {formatRealPower(0, formatOpts)}</span>
 				</span>
 			{:else}
 				<span class="inline-flex items-center gap-1.5 text-warning">

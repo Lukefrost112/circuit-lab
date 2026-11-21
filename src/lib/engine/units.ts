@@ -3,6 +3,71 @@
  */
 
 import { Complex } from './complex';
+import type { UnitSystemId } from './types';
+
+export interface FixedUnitPrefix {
+	symbol: string;
+	factor: number;
+}
+
+export interface UnitSystemDefinition {
+	id: UnitSystemId;
+	label: string;
+	shortLabel: string;
+	description: string;
+	prefixes?: Record<string, FixedUnitPrefix>;
+}
+
+export const UNIT_SYSTEMS: Record<UnitSystemId, UnitSystemDefinition> = {
+	auto: {
+		id: 'auto',
+		label: 'Auto SI',
+		shortLabel: 'Auto SI',
+		description: 'Best-fit engineering prefixes (Ω/kΩ, V, A/mA/µA)'
+	},
+	'ohm-v-a': {
+		id: 'ohm-v-a',
+		label: 'Ω · V · A · W',
+		shortLabel: 'Ω / V / A',
+		description: 'Base SI units (ohms, volts, amperes, watts)',
+		prefixes: {
+			Ω: { symbol: '', factor: 1 },
+			V: { symbol: '', factor: 1 },
+			A: { symbol: '', factor: 1 },
+			W: { symbol: '', factor: 1 },
+			VAR: { symbol: '', factor: 1 },
+			VA: { symbol: '', factor: 1 }
+		}
+	},
+	'kohm-v-ma': {
+		id: 'kohm-v-ma',
+		label: 'kΩ · V · mA · mW',
+		shortLabel: 'kΩ / V / mA',
+		description: 'Electronics scale (kiloohms, volts, milliamperes, milliwatts)',
+		prefixes: {
+			Ω: { symbol: 'k', factor: 1e3 },
+			V: { symbol: '', factor: 1 },
+			A: { symbol: 'm', factor: 1e-3 },
+			W: { symbol: 'm', factor: 1e-3 },
+			VAR: { symbol: 'm', factor: 1e-3 },
+			VA: { symbol: 'm', factor: 1e-3 }
+		}
+	},
+	'mohm-v-ua': {
+		id: 'mohm-v-ua',
+		label: 'MΩ · V · µA · µW',
+		shortLabel: 'MΩ / V / µA',
+		description: 'High-impedance scale (megaohms, volts, microamperes, microwatts)',
+		prefixes: {
+			Ω: { symbol: 'M', factor: 1e6 },
+			V: { symbol: '', factor: 1 },
+			A: { symbol: 'µ', factor: 1e-6 },
+			W: { symbol: 'µ', factor: 1e-6 },
+			VAR: { symbol: 'µ', factor: 1e-6 },
+			VA: { symbol: 'µ', factor: 1e-6 }
+		}
+	}
+};
 
 const SI_PREFIXES: Record<string, number> = {
 	f: 1e-15,
@@ -233,4 +298,61 @@ export function formatEngineering(value: number, unit = '', prec = 3): string {
 
 	const numStr = rounded.toString();
 	return unit ? `${numStr} ${chosen.symbol}${unit}` : `${numStr}${chosen.symbol}`;
+}
+
+/**
+ * Returns the fixed SI prefix for a given electrical unit under a defined unit system,
+ * or `null` when `unitSystem` is `'auto'` or the unit (e.g. `F`, `H`, `Hz`) is not fixed.
+ */
+export function getFixedUnitPrefix(
+	unit: string,
+	unitSystem: UnitSystemId
+): FixedUnitPrefix | null {
+	if (unitSystem === 'auto' || !unit) {
+		return null;
+	}
+	const def = UNIT_SYSTEMS[unitSystem];
+	if (!def?.prefixes) {
+		return null;
+	}
+	return def.prefixes[unit] ?? null;
+}
+
+/**
+ * Formats a real scalar value honoring an active defined engineering unit system.
+ * Delegates to `formatEngineering` when `unitSystem === 'auto'` or the unit has no
+ * fixed prefix in the selected system (e.g. `F`, `H`, `Hz`).
+ */
+export function formatEngineeringWithSystem(
+	value: number,
+	unit = '',
+	prec = 3,
+	unitSystem: UnitSystemId = 'auto'
+): string {
+	if (!Number.isFinite(value)) return String(value);
+
+	const fixed = getFixedUnitPrefix(unit, unitSystem);
+	if (!fixed) {
+		return formatEngineering(value, unit, prec);
+	}
+
+	const unitWithPrefix = `${fixed.symbol}${unit}`;
+	if (value === 0 || Math.abs(value) < 1e-18) {
+		return `0 ${unitWithPrefix}`;
+	}
+
+	const scaled = value / fixed.factor;
+	const rounded = Number(scaled.toPrecision(prec));
+	const absRounded = Math.abs(rounded);
+
+	let numStr: string;
+	if (rounded === 0) {
+		numStr = '0';
+	} else if (absRounded >= 1e-4 && absRounded < 1e6) {
+		numStr = rounded.toString();
+	} else {
+		numStr = rounded.toExponential().replace(/e\+?/, 'e');
+	}
+
+	return `${numStr} ${unitWithPrefix}`;
 }
