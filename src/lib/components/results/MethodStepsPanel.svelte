@@ -19,6 +19,10 @@
 		class?: string;
 	};
 
+	// Opaque equivalent of `bg-background/60` over the accordion's `bg-card`, so MathBlock's
+	// scroll fades blend into the step boxes instead of showing a card-colored band.
+	const STEP_SURFACE_BG = 'color-mix(in srgb, var(--background) 60%, var(--card))';
+
 	const METHOD_TABS: Array<{ id: MethodId; label: string }> = [
 		{ id: 'kcl_kvl', label: 'KCL / KVL' },
 		{ id: 'nodal', label: 'Nodal' },
@@ -189,7 +193,7 @@
 							{/if}
 
 							{#if step.latex && step.latex.length > 0}
-								<div class="flex min-w-0 flex-col gap-1 overflow-hidden rounded-sm bg-background/60 px-2.5 py-1.5">
+								<div class="flex min-w-0 flex-col gap-1 overflow-hidden rounded-sm bg-background/60 px-2.5 py-1.5" style="--math-fade-bg: {STEP_SURFACE_BG};">
 									{#each step.latex as eq, eqIdx (`${itemId}-eq-${eqIdx}`)}
 										<MathBlock latex={eq} />
 									{/each}
@@ -197,7 +201,7 @@
 							{/if}
 
 							{#if step.matrixLatex}
-								<div class="min-w-0 overflow-hidden rounded-sm border border-border/70 bg-background/60 px-2.5 py-1.5">
+								<div class="min-w-0 overflow-hidden rounded-sm border border-border/70 bg-background/60 px-2.5 py-1.5" style="--math-fade-bg: {STEP_SURFACE_BG};">
 									<MathBlock latex={step.matrixLatex} />
 								</div>
 							{/if}

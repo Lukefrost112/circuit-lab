@@ -911,29 +911,66 @@
 		};
 	}
 
-	function getSelectionRect(comp: CircuitComponent): {
+	interface SelRect {
 		x: number;
 		y: number;
 		width: number;
 		height: number;
-	} {
+	}
+
+	function unionRects(rects: SelRect[], pad = 0): SelRect {
+		const x1 = Math.min(...rects.map((r) => r.x)) - pad;
+		const y1 = Math.min(...rects.map((r) => r.y)) - pad;
+		const x2 = Math.max(...rects.map((r) => r.x + r.width)) + pad;
+		const y2 = Math.max(...rects.map((r) => r.y + r.height)) + pad;
+		return { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
+	}
+
+	// Approximate glyph advance of the 11px mono designator text drawn by the canvas.
+	const DESIGNATOR_CHAR_W = 6.6;
+
+	function getSelectionRect(comp: CircuitComponent): SelRect {
 		const cx = comp.x * GRID_SIZE;
 		const cy = comp.y * GRID_SIZE;
+		const labelW = comp.label.length * DESIGNATOR_CHAR_W + 4;
+
 		if (comp.kind === 'ground') {
-			if (comp.rotation === 90) return { x: cx - 22, y: cy - 14, width: 28, height: 28 };
-			if (comp.rotation === 180) return { x: cx - 14, y: cy - 22, width: 28, height: 28 };
-			if (comp.rotation === 270) return { x: cx - 6, y: cy - 14, width: 28, height: 28 };
-			return { x: cx - 14, y: cy - 6, width: 28, height: 28 };
+			let glyph: SelRect;
+			if (comp.rotation === 90) glyph = { x: cx - 22, y: cy - 14, width: 28, height: 28 };
+			else if (comp.rotation === 180) glyph = { x: cx - 14, y: cy - 22, width: 28, height: 28 };
+			else if (comp.rotation === 270) glyph = { x: cx - 6, y: cy - 14, width: 28, height: 28 };
+			else glyph = { x: cx - 14, y: cy - 6, width: 28, height: 28 };
+			// Upright designator: start-anchored at (+16, baseline +11), see getComponentLabelLayout
+			const label: SelRect = { x: cx + 14, y: cy + 1, width: labelW + 2, height: 14 };
+			return unionRects([glyph, label], 2);
 		}
+
 		if (comp.kind === 'terminal') {
-			return { x: cx - 12, y: cy - 12, width: 24, height: 24 };
+			const glyph: SelRect = { x: cx - 12, y: cy - 12, width: 24, height: 24 };
+			// Upright designator: middle-anchored at (0, baseline -14)
+			const label: SelRect = { x: cx - labelW / 2, y: cy - 25, width: labelW, height: 14 };
+			// The symbol's own terminal-name text sits at (10.5, -7) and rotates with the symbol
+			const name = comp.terminalName || comp.label;
+			const nameW = name.length * 5.4 + 4;
+			const rad = (comp.rotation * Math.PI) / 180;
+			const [px, py] = [10.5, -10.5]; // glyph-box center of that text in the symbol frame
+			const ncx = px * Math.cos(rad) - py * Math.sin(rad);
+			const ncy = px * Math.sin(rad) + py * Math.cos(rad);
+			const rotated = comp.rotation === 90 || comp.rotation === 270;
+			const nw = rotated ? 11 : nameW;
+			const nh = rotated ? nameW : 11;
+			const nameRect: SelRect = { x: cx + ncx - nw / 2, y: cy + ncy - nh / 2, width: nw, height: nh };
+			return unionRects([glyph, label, nameRect], 2);
 		}
+
+		// Two-terminal parts: ±18 across clears the source circles (r=15 + stroke) and matches the
+		// click hitbox; the long axis spans both pins.
 		const isVertical = comp.rotation === 90 || comp.rotation === 270;
 		return {
-			x: cx - (isVertical ? 16 : 42),
-			y: cy - (isVertical ? 42 : 16),
-			width: isVertical ? 32 : 84,
-			height: isVertical ? 84 : 32
+			x: cx - (isVertical ? 18 : 42),
+			y: cy - (isVertical ? 42 : 18),
+			width: isVertical ? 36 : 84,
+			height: isVertical ? 84 : 36
 		};
 	}
 
@@ -1612,7 +1649,7 @@
 			{:else if circuit.solution.mna.valid}
 				<span class="h-2 w-2 shrink-0 rounded-full bg-branch-current"></span>
 				<span class="text-foreground">
-					Solved{#if circuit.solution.allVerified}<span class="xl:hidden">{' · Verified'}</span>{/if}<span class="hidden xl:inline">{' '}({circuit.solution.allVerified ? 'All methods verified' : 'MNA ready'})</span>
+					Solved<span class="xl:hidden">{circuit.solution.allVerified ? ' · Verified' : ' · MNA'}</span><span class="hidden xl:inline">{' '}({circuit.solution.allVerified ? 'All methods verified' : 'MNA ready'})</span>
 				</span>
 			{:else}
 				<span class="h-2 w-2 shrink-0 rounded-full bg-warning"></span>
