@@ -1,0 +1,321 @@
+import { describe, expect, it } from 'vitest';
+import { Complex } from '../complex';
+import { solveCircuit } from '../solve';
+import type { CircuitComponent, CircuitDocument } from '../types';
+
+function comp(
+	id: string,
+	kind: CircuitComponent['kind'],
+	x: number,
+	y: number,
+	rotation: CircuitComponent['rotation'],
+	value: string,
+	extra?: Partial<CircuitComponent>
+): CircuitComponent {
+	return { id, kind, label: id, x, y, rotation, value, ...extra };
+}
+
+function wire(id: string, ...pts: Array<[number, number]>) {
+	return { id, points: pts.map(([x, y]) => ({ x, y })) };
+}
+
+describe('All 6 Pedagogical Method Solvers + Cross-Verification Gate', () => {
+	it('1. DC Supernode Network: all 6 methods agree with MNA (< 1e-8)', () => {
+		// V1=10V (0,0)-(0,4), R1=2Ω (0,0)-(4,0), R2=4Ω (4,0)-(4,4),
+		// Floating V2=6V (4,0)-(8,0), R3=6Ω (8,0)-(8,4), I1=3A (12,4)->(12,0)
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', 0, 2, 90, '10'),
+				comp('R1', 'resistor', 2, 0, 0, '2'),
+				comp('R2', 'resistor', 4, 2, 90, '4'),
+				comp('V2', 'voltage_source', 6, 0, 0, '6'),
+				comp('R3', 'resistor', 8, 2, 90, '6'),
+				comp('I1', 'current_source', 12, 2, 270, '3'),
+				comp('G1', 'ground', 0, 4, 0, '0')
+			],
+			wires: [wire('w_n3', [8, 0], [12, 0]), wire('w_gnd', [0, 4], [12, 4])]
+		};
+
+		const full = solveCircuit(doc, {
+			theveninTarget: { kind: 'component', componentId: 'R3' }
+		});
+		expect(full.mna.valid).toBe(true);
+		expect(full.allVerified).toBe(true);
+		expect(full.maxDiscrepancy).toBeLessThan(1e-8);
+
+		for (const id of [
+			'kcl_kvl',
+			'nodal',
+			'mesh',
+			'superposition',
+			'source_transform',
+			'thevenin_norton'
+		] as const) {
+			const res = full.methods[id]!;
+			expect(res.applicable).toBe(true);
+			expect(res.verifiedAgainstMna).toBe(true);
+			expect(res.maxDiscrepancy!).toBeLessThan(1e-8);
+			expect(res.steps.length).toBeGreaterThan(0);
+		}
+
+		// Verify supernode step explicitly emitted in Nodal
+		expect(full.methods.nodal!.steps.some((s) => s.title.includes('Supernode'))).toBe(true);
+	});
+
+	it('2. DC Supermesh Circuit (shared current source between two meshes): all 6 methods agree (< 1e-8)', () => {
+		// Mesh 1 (left): V1=12V (0,0)-(0,4), R1=4Ω (0,0)-(4,0), I1=2A (4,4)->(4,0) shared with Mesh 2
+		// Mesh 2 (right): R2=2Ω (4,0)-(8,0), R3=6Ω (8,0)-(8,4), bottom wire (0,4)-(8,4)
+		// Hand solution: V(N2) [at (4,0)]: (V2 - 12)/4 + V2/(2+6) = 2 => (1/4+1/8)V2 = 5 => (3/8)V2 = 5 => V2 = 40/3 V
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', 0, 2, 90, '12'),
+				comp('R1', 'resistor', 2, 0, 0, '4'),
+				comp('I1', 'current_source', 4, 2, 270, '2'),
+				comp('R2', 'resistor', 6, 0, 0, '2'),
+				comp('R3', 'resistor', 8, 2, 90, '6'),
+				comp('G1', 'ground', 0, 4, 0, '0')
+			],
+			wires: [wire('w_gnd', [0, 4], [8, 4])]
+		};
+
+		const full = solveCircuit(doc);
+		expect(full.mna.valid).toBe(true);
+		expect(full.mna.branches['R3'].voltage.re).toBeCloseTo(10, 9); // 6/(2+6) * 40/3 = 10V
+		expect(full.allVerified).toBe(true);
+		expect(full.maxDiscrepancy).toBeLessThan(1e-8);
+
+		// Verify Mesh detected the Supermesh
+		expect(full.methods.mesh!.applicable).toBe(true);
+		expect(full.methods.mesh!.steps.some((s) => s.title.includes('Supermesh'))).toBe(true);
+	});
+
+	it('3. DC Wheatstone Bridge (3 meshes) + Thévenin across bridge resistor R5', () => {
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', 0, 4, 90, '24'),
+				comp('R1', 'resistor', 4, 2, 90, '6'),
+				comp('R2', 'resistor', 4, 6, 90, '3'),
+				comp('R3', 'resistor', 8, 2, 90, '4'),
+				comp('R4', 'resistor', 8, 6, 90, '12'),
+				comp('R5', 'resistor', 6, 4, 0, '2'),
+				comp('G1', 'ground', 0, 8, 0, '0')
+			],
+			wires: [
+				wire('w_top', [0, 2], [0, 0], [8, 0]),
+				wire('w_bot', [0, 6], [0, 8], [8, 8])
+			]
+		};
+
+		const full = solveCircuit(doc, {
+			theveninTarget: { kind: 'component', componentId: 'R5' }
+		});
+		expect(full.mna.valid).toBe(true);
+		expect(full.allVerified).toBe(true);
+		expect(full.maxDiscrepancy).toBeLessThan(1e-8);
+
+		// Hand-derived Thévenin across R5 (A=(4,4), B=(8,4)):
+		// V_A_open = 24 * 3/9 = 8V, V_B_open = 24 * 12/16 = 18V => V_th = 8 - 18 = -10V
+		// R_th = (6||3) + (4||12) = 2 + 3 = 5Ω
+		// I_L = -10 / (5 + 2) = -10/7 A!
+		const tn = full.theveninNorton!;
+		expect(tn.vth.re).toBeCloseTo(-10, 9);
+		expect(tn.zth!.re).toBeCloseTo(5, 9);
+		expect(tn.isc!.re).toBeCloseTo(-2, 9);
+		expect(tn.maxPowerTransfer!.optimalLoadImpedance.re).toBeCloseTo(5, 9);
+		expect(tn.maxPowerTransfer!.maxRealPowerW).toBeCloseTo(100 / 20, 9); // (-10)^2 / (4*5) = 5W
+	});
+
+	it('4. DC Source Transformation Ladder (multi-stage V->I and I->V reductions)', () => {
+		// V1=12V (0,0)-(0,4), R1=4Ω (0,0)-(4,0), R2=4Ω (4,0)-(4,4), R3=2Ω (4,0)-(8,0),
+		// I1=2A (8,4)->(8,0), R4=4Ω (12,0)-(12,4)
+		// Hand solve: V1/R1 = 3A || 4Ω -> with R2=4Ω => 3A || 2Ω -> Vth=6V + 2Ω + R3(2Ω) = 6V + 4Ω -> 1.5A || 4Ω
+		// Combine with I1=2A => 3.5A || 4Ω -> with R4=4Ω => 3.5A || 2Ω => V(N_right) = 7V!
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', 0, 2, 90, '12'),
+				comp('R1', 'resistor', 2, 0, 0, '4'),
+				comp('R2', 'resistor', 4, 2, 90, '4'),
+				comp('R3', 'resistor', 6, 0, 0, '2'),
+				comp('I1', 'current_source', 8, 2, 270, '2'),
+				comp('R4', 'resistor', 12, 2, 90, '4'),
+				comp('G1', 'ground', 0, 4, 0, '0')
+			],
+			wires: [wire('w_top2', [8, 0], [12, 0]), wire('w_gnd', [0, 4], [12, 4])]
+		};
+
+		const full = solveCircuit(doc);
+		expect(full.mna.valid).toBe(true);
+		expect(full.mna.branches['R4'].voltage.re).toBeCloseTo(7, 9);
+		expect(full.allVerified).toBe(true);
+		expect(full.maxDiscrepancy).toBeLessThan(1e-8);
+		expect(full.methods.source_transform!.steps.length).toBeGreaterThanOrEqual(4);
+	});
+
+	it('5. AC Multi-Source Supernode & Supermesh Phasor Network: all 6 methods agree (< 1e-8)', () => {
+		const freq = 1000 / (2 * Math.PI); // omega = 1000
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'ac',
+			frequencyHz: freq,
+			components: [
+				comp('V1', 'voltage_source', 0, 2, 90, '10∠0°'),
+				comp('R1', 'resistor', 2, 0, 0, '10'),
+				comp('L1', 'inductor', 4, 2, 90, '10m'), // j10
+				comp('V2', 'voltage_source', 6, 0, 0, '5∠90°'), // floating AC source -> supernode!
+				comp('C1', 'capacitor', 8, 2, 90, '100u'), // -j10
+				comp('I1', 'current_source', 12, 2, 270, '1∠-30°'),
+				comp('R2', 'resistor', 16, 2, 90, '20'),
+				comp('G1', 'ground', 0, 4, 0, '0')
+			],
+			wires: [wire('w_top', [8, 0], [16, 0]), wire('w_gnd', [0, 4], [16, 4])]
+		};
+
+		const full = solveCircuit(doc, {
+			theveninTarget: { kind: 'component', componentId: 'R2' }
+		});
+		expect(full.mna.valid).toBe(true);
+		expect(full.allVerified).toBe(true);
+		expect(full.maxDiscrepancy).toBeLessThan(1e-8);
+
+		for (const id of [
+			'kcl_kvl',
+			'nodal',
+			'mesh',
+			'superposition',
+			'source_transform',
+			'thevenin_norton'
+		] as const) {
+			expect(full.methods[id]!.applicable).toBe(true);
+			expect(full.methods[id]!.verifiedAgainstMna).toBe(true);
+			expect(full.methods[id]!.maxDiscrepancy!).toBeLessThan(1e-8);
+		}
+	});
+
+	it('6. AC RLC Series-Parallel Thévenin & Conjugate Max Power Transfer', () => {
+		const freq = 1000 / (2 * Math.PI); // omega = 1000
+		// V1=50∠0° V, R1=30Ω, L1=40mH (j40 Ω) in series, load R_L=20Ω
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'ac',
+			frequencyHz: freq,
+			components: [
+				comp('V1', 'voltage_source', 0, 2, 90, '50∠0°'),
+				comp('R1', 'resistor', 2, 0, 0, '30'),
+				comp('L1', 'inductor', 6, 0, 0, '40m'),
+				comp('RL', 'resistor', 8, 2, 90, '20'),
+				comp('G1', 'ground', 0, 4, 0, '0')
+			],
+			wires: [wire('w_gnd', [0, 4], [8, 4])]
+		};
+
+		const full = solveCircuit(doc, {
+			theveninTarget: { kind: 'component', componentId: 'RL' }
+		});
+		expect(full.allVerified).toBe(true);
+
+		const tn = full.theveninNorton!;
+		expect(tn.vth.equals(Complex.from(50, 0), 1e-9)).toBe(true);
+		expect(tn.zth!.equals(Complex.from(30, 40), 1e-9)).toBe(true);
+		// Conjugate optimal load Z_L,opt = 30 - j40
+		expect(tn.maxPowerTransfer!.optimalLoadImpedance.equals(Complex.from(30, -40), 1e-9)).toBe(
+			true
+		);
+		// P_max = 50^2 / (4 * 30) = 2500 / 120 = 20.833333... W
+		expect(tn.maxPowerTransfer!.maxRealPowerW).toBeCloseTo(2500 / 120, 9);
+	});
+
+	it('7. Multi-Frequency AC Superposition (60 Hz + 120 Hz -> time-domain & RMS synthesis)', () => {
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'ac',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', 0, 2, 90, '10∠0°', { frequencyHz: 60 }),
+				comp('R1', 'resistor', 2, 0, 0, '10'),
+				comp('R2', 'resistor', 4, 2, 90, '10'),
+				comp('V2', 'voltage_source', 8, 2, 90, '6∠90°', { frequencyHz: 120 }),
+				comp('R3', 'resistor', 6, 0, 0, '10'),
+				comp('G1', 'ground', 0, 4, 0, '0')
+			],
+			wires: [wire('w_gnd', [0, 4], [8, 4])]
+		};
+
+		const full = solveCircuit(doc, { methods: ['superposition'] });
+		const sup = full.methods.superposition!;
+		expect(sup.applicable).toBe(true);
+		expect(sup.verifiedAgainstMna).toBe(true);
+		const lastStep = sup.steps[sup.steps.length - 1];
+		expect(lastStep.title).toContain('Multi-Frequency');
+		const allLatex = lastStep.latex!.join('\n');
+		expect(allLatex).toContain('\\cos(');
+		expect(allLatex).toContain('V_{N2,\\text{rms}}');
+	});
+
+	it('8. Non-Planar K_{3,3} Graph: Mesh returns applicable=false while Nodal & KCL/KVL solve accurately', () => {
+		// Bipartite K_{3,3}: left nodes L0='0', L1=(0,2), L2=(0,4); right nodes R0=(4,0), R1=(4,2), R2=(4,4)
+		// Connect all 9 pairs via resistors + 1 voltage source V1 across (L1, 0)
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('G1', 'ground', 0, 0, 0, '0'),
+				comp('V1', 'voltage_source', 0, 10, 90, '10'), // +:(0,8) [L1], -:(0,12) [0]
+				// 9 resistors connecting {L0(0,0), L1(0,8), L2(0,16)} to {R0(10,0), R1(10,8), R2(10,16)}
+				comp('R_00', 'resistor', 20, 0, 0, '10'),
+				comp('R_01', 'resistor', 20, 4, 0, '10'),
+				comp('R_02', 'resistor', 20, 8, 0, '10'),
+				comp('R_10', 'resistor', 20, 12, 0, '10'),
+				comp('R_11', 'resistor', 20, 16, 0, '10'),
+				comp('R_12', 'resistor', 20, 20, 0, '10'),
+				comp('R_20', 'resistor', 20, 24, 0, '10'),
+				comp('R_21', 'resistor', 20, 28, 0, '10'),
+				comp('R_22', 'resistor', 20, 32, 0, '10')
+			],
+			wires: [
+				// L0 = (0,0) = ground, tie V1- (0,12) to (0,0)
+				wire('wl0_g', [0, 12], [-2, 12], [-2, 0], [0, 0]),
+				// L0 -> R_00, R_01, R_02 pins at x=18, y=0,4,8
+				wire('wl0_a', [0, 0], [18, 0]),
+				wire('wl0_b', [18, 0], [18, 8]),
+				// L1 = (0,8) -> R_10, R_11, R_12 pins at x=18, y=12,16,20
+				wire('wl1_a', [0, 8], [16, 8], [16, 12], [18, 12]),
+				wire('wl1_b', [18, 12], [18, 20]),
+				// L2 = (0,16) -> R_20, R_21, R_22 pins at x=18, y=24,28,32
+				wire('wl2_a', [0, 16], [14, 16], [14, 24], [18, 24]),
+				wire('wl2_b', [18, 24], [18, 32]),
+				// R0 -> right pins of R_00 (22,0), R_10 (22,12), R_20 (22,24)
+				wire('wr0_a', [22, 0], [26, 0], [26, 24], [22, 24]),
+				wire('wr0_b', [22, 12], [26, 12]),
+				// R1 -> right pins of R_01 (22,4), R_11 (22,16), R_21 (22,28)
+				wire('wr1_a', [22, 4], [28, 4], [28, 28], [22, 28]),
+				wire('wr1_b', [22, 16], [28, 16]),
+				// R2 -> right pins of R_02 (22,8), R_12 (22,20), R_22 (22,32)
+				wire('wr2_a', [22, 8], [30, 8], [30, 32], [22, 32]),
+				wire('wr2_b', [22, 20], [30, 20])
+			]
+		};
+
+		const full = solveCircuit(doc, { methods: ['kcl_kvl', 'nodal', 'mesh'] });
+		expect(full.mna.valid).toBe(true);
+		expect(full.methods.mesh!.applicable).toBe(false);
+		expect(full.methods.mesh!.inapplicableReason).toContain('non-planar');
+		expect(full.methods.nodal!.applicable).toBe(true);
+		expect(full.methods.nodal!.verifiedAgainstMna).toBe(true);
+		expect(full.methods.kcl_kvl!.applicable).toBe(true);
+		expect(full.methods.kcl_kvl!.verifiedAgainstMna).toBe(true);
+		expect(full.allVerified).toBe(true);
+	});
+});
