@@ -3,6 +3,7 @@
 	import {
 		BarChart3,
 		BookOpen,
+		ChevronDown,
 		CircuitBoard,
 		FileCode2,
 		Moon,
@@ -23,6 +24,7 @@
 		SettingsDialog
 	} from '$lib/components/dialogs';
 	import {
+		AC_FREQUENCY_PRESETS,
 		ComponentPalette,
 		PropertyInspector,
 		SchematicCanvas
@@ -152,7 +154,7 @@
 
 <div class="flex h-dvh w-full flex-col overflow-hidden bg-background text-foreground">
 	<!-- Top Toolbar -->
-	<header class="flex h-14 shrink-0 items-center justify-between gap-1 border-b border-border bg-surface-rail px-1.5 sm:gap-2 sm:px-3 lg:h-11">
+	<header class="flex h-12 shrink-0 items-center justify-between gap-1 border-b border-border bg-surface-rail px-2 sm:gap-2 sm:px-3 lg:h-11">
 		<!-- Left: Rail Toggle, Brand, Mode & Telemetry -->
 		<div class="flex min-w-0 items-center gap-1 sm:gap-2">
 			<Tooltip
@@ -216,7 +218,7 @@
 			<div
 				role="radiogroup"
 				aria-label="Analysis mode"
-				class="inline-flex h-11 shrink-0 items-center rounded-[4px] border border-border bg-muted/80 p-0 lg:h-7 lg:p-0.5"
+				class="inline-flex h-8 shrink-0 items-center rounded-[4px] border border-border bg-muted/80 p-0.5 lg:h-7"
 			>
 				<button
 					type="button"
@@ -224,10 +226,10 @@
 					aria-checked={circuit.document.mode === 'dc'}
 					onclick={() => circuit.setMode('dc')}
 					class={cn(
-						'inline-flex h-11 cursor-pointer items-center justify-center rounded-[3px] border px-2 text-xs transition-colors duration-150 sm:px-2.5 lg:h-full lg:px-2.5',
+						'relative inline-flex h-full cursor-pointer items-center justify-center rounded-[3px] border px-2.5 text-xs transition-colors duration-150 after:absolute after:-inset-y-3 after:inset-x-0 lg:after:hidden',
 						'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
 						circuit.document.mode === 'dc'
-							? 'border-border/80 bg-card font-semibold text-foreground'
+							? 'border-border/80 bg-card font-semibold text-foreground shadow-2xs'
 							: 'border-transparent font-medium text-muted-foreground hover:text-foreground'
 					)}
 				>
@@ -239,10 +241,10 @@
 					aria-checked={circuit.document.mode === 'ac'}
 					onclick={() => circuit.setMode('ac')}
 					class={cn(
-						'inline-flex h-11 cursor-pointer items-center justify-center rounded-[3px] border px-2 text-xs transition-colors duration-150 sm:px-2.5 lg:h-full lg:px-2.5',
+						'relative inline-flex h-full cursor-pointer items-center justify-center rounded-[3px] border px-2.5 text-xs transition-colors duration-150 after:absolute after:-inset-y-3 after:inset-x-0 lg:after:hidden',
 						'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
 						circuit.document.mode === 'ac'
-							? 'border-border/80 bg-card font-semibold text-foreground'
+							? 'border-border/80 bg-card font-semibold text-foreground shadow-2xs'
 							: 'border-transparent font-medium text-muted-foreground hover:text-foreground'
 					)}
 				>
@@ -261,10 +263,11 @@
 						mobileMenuOpen = false;
 						freqPopoverOpen = !freqPopoverOpen;
 					}}
-					class="inline-flex min-h-11 shrink-0 cursor-pointer items-center rounded-[4px] border border-input bg-card px-1.5 font-engineering text-[11px] text-foreground transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-2 sm:text-xs md:hidden"
+					class="relative inline-flex h-8 shrink-0 cursor-pointer items-center gap-1 rounded-[4px] border border-input bg-card px-2 font-engineering text-xs text-foreground transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring after:absolute after:-inset-y-2 after:inset-x-0 md:hidden"
 				>
 					<span class="sm:hidden">{formatFrequency(circuit.document.frequencyHz).replace(/\s+/g, '')}</span>
 					<span class="hidden sm:inline">{formatFrequency(circuit.document.frequencyHz)}</span>
+					<ChevronDown class="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
 				</button>
 
 				<!-- Inline AC Frequency Input (md+) -->
@@ -280,7 +283,7 @@
 						onkeydown={(e) => {
 							if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
 						}}
-						class="h-11 w-24 pr-7 text-base md:text-sm lg:h-7 lg:w-24 lg:text-xs"
+						class="h-8 w-24 pr-7 text-sm lg:h-7 lg:w-24 lg:text-xs"
 					/>
 					<span class="pointer-events-none absolute right-2 font-engineering text-[11px] text-muted-foreground">
 						Hz
@@ -326,7 +329,7 @@
 					<Button
 						variant="ghost"
 						size="sm"
-						class="h-11 px-2.5 text-xs font-medium text-foreground/85 hover:bg-accent hover:text-foreground lg:h-7 lg:px-2"
+						class="relative h-9 px-2.5 text-xs font-medium text-foreground/85 after:absolute after:-inset-y-1 after:inset-x-0 hover:bg-accent hover:text-foreground lg:h-7 lg:px-2 lg:after:hidden"
 						onclick={() => (presetsOpen = true)}
 					>
 						<BookOpen />
@@ -337,7 +340,7 @@
 					<Button
 						variant="ghost"
 						size="sm"
-						class="h-11 px-2.5 text-xs font-medium text-foreground/85 hover:bg-accent hover:text-foreground lg:h-7 lg:px-2"
+						class="relative h-9 px-2.5 text-xs font-medium text-foreground/85 after:absolute after:-inset-y-1 after:inset-x-0 hover:bg-accent hover:text-foreground lg:h-7 lg:px-2 lg:after:hidden"
 						onclick={() => (jsonOpen = true)}
 					>
 						<FileCode2 />
@@ -348,7 +351,7 @@
 					<Button
 						variant="ghost"
 						size="sm"
-						class="h-11 px-2.5 text-xs font-medium text-foreground/85 hover:bg-accent hover:text-foreground lg:h-7 lg:px-2"
+						class="relative h-9 px-2.5 text-xs font-medium text-foreground/85 after:absolute after:-inset-y-1 after:inset-x-0 hover:bg-accent hover:text-foreground lg:h-7 lg:px-2 lg:after:hidden"
 						onclick={() => (aiOpen = true)}
 					>
 						<ScanLine />
@@ -363,7 +366,7 @@
 					<Button
 						variant="ghost"
 						size="icon"
-						class="h-11 w-11 lg:h-7 lg:w-7"
+						class="relative h-9 w-9 after:absolute after:-inset-1 lg:h-7 lg:w-7 lg:after:hidden"
 						aria-label="Workbench settings"
 						onclick={() => (settingsOpen = true)}
 					>
@@ -376,7 +379,7 @@
 				<Button
 					variant="ghost"
 					size="icon"
-					class="h-11 w-11 lg:h-7 lg:w-7"
+					class="relative h-9 w-9 after:absolute after:-inset-1 sm:h-10 sm:w-10 lg:h-7 lg:w-7 lg:after:hidden"
 					aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
 					onclick={toggleMode}
 				>
@@ -392,7 +395,7 @@
 			<Button
 				variant="ghost"
 				size="icon"
-				class="h-11 w-11 md:hidden"
+				class="relative h-9 w-9 after:absolute after:-inset-1 sm:h-10 sm:w-10 md:hidden"
 				aria-label="More actions"
 				aria-haspopup="menu"
 				aria-expanded={mobileMenuOpen}
@@ -440,42 +443,72 @@
 		<div
 			role="dialog"
 			aria-label="AC frequency settings"
-			class="fixed top-[60px] right-2 left-2 z-50 rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-xl sm:right-auto sm:left-3 sm:w-72 md:hidden"
+			class="fixed top-[52px] right-2 left-2 z-50 rounded-[4px] border border-border bg-popover p-3 text-popover-foreground shadow-lg sm:right-auto sm:left-3 sm:w-80 md:hidden"
 		>
-			<div class="mb-2 flex items-center justify-between gap-2">
-				<span class="text-xs font-semibold text-foreground">AC Source Frequency (Hz)</span>
+			<div class="mb-2.5 flex items-center justify-between gap-2">
+				<span class="text-xs font-semibold text-foreground">AC Drive Frequency</span>
 				<span class="font-engineering text-xs text-muted-foreground">
 					{formatFrequency(circuit.document.frequencyHz)}
 				</span>
 			</div>
+
+			<div class="mb-2.5 grid grid-cols-4 gap-1.5" role="group" aria-label="Standard lab frequencies">
+				{#each AC_FREQUENCY_PRESETS as preset (preset.hz)}
+					{@const isActive = Math.abs(circuit.document.frequencyHz - preset.hz) < 1e-6}
+					<button
+						type="button"
+						aria-pressed={isActive}
+						onclick={() => {
+							circuit.setFrequency(preset.hz);
+							freqPopoverOpen = false;
+						}}
+						class={cn(
+							'inline-flex h-11 min-h-11 cursor-pointer items-center justify-center rounded-[4px] border font-engineering text-xs transition-colors duration-150',
+							'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+							isActive
+								? 'border-primary/60 bg-primary/8 font-semibold text-foreground'
+								: 'border-border bg-card font-medium text-muted-foreground hover:bg-accent hover:text-foreground'
+						)}
+					>
+						{preset.label}
+					</button>
+				{/each}
+			</div>
+
 			<div class="flex items-center gap-2">
-				<Input
-					type="number"
-					min="0.001"
-					step="any"
-					tabular
-					aria-label="AC frequency in Hertz"
-					bind:value={freqDraft}
-					onkeydown={(e) => {
-						if (e.key === 'Enter') {
-							commitToolbarFrequency();
-							freqPopoverOpen = false;
-						} else if (e.key === 'Escape') {
-							freqPopoverOpen = false;
-						}
-					}}
-					class="h-11 text-base sm:text-base"
-				/>
-				<Button
-					variant="default"
-					class="h-11 shrink-0 px-4"
+				<div class="relative flex-1">
+					<Input
+						type="number"
+						inputmode="decimal"
+						min="0.001"
+						step="any"
+						tabular
+						aria-label="AC frequency in Hertz"
+						bind:value={freqDraft}
+						onkeydown={(e) => {
+							if (e.key === 'Enter') {
+								commitToolbarFrequency();
+								freqPopoverOpen = false;
+							} else if (e.key === 'Escape') {
+								freqPopoverOpen = false;
+							}
+						}}
+						class="h-11 pr-9 text-base sm:text-base"
+					/>
+					<span class="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 font-engineering text-xs text-muted-foreground">
+						Hz
+					</span>
+				</div>
+				<button
+					type="button"
 					onclick={() => {
 						commitToolbarFrequency();
 						freqPopoverOpen = false;
 					}}
+					class="inline-flex h-11 shrink-0 cursor-pointer items-center justify-center rounded-[4px] bg-foreground px-4 text-xs font-medium text-background transition-colors duration-150 hover:bg-foreground/90 active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
 				>
 					Apply
-				</Button>
+				</button>
 			</div>
 		</div>
 	{/if}
@@ -492,7 +525,7 @@
 		<div
 			role="menu"
 			aria-label="More actions"
-			class="fixed top-[60px] right-2 z-50 flex w-56 flex-col gap-0.5 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl md:hidden"
+			class="fixed top-[52px] right-2 z-50 flex w-56 flex-col gap-0.5 rounded-[4px] border border-border bg-popover p-1.5 text-popover-foreground shadow-lg md:hidden"
 		>
 			<button
 				type="button"
