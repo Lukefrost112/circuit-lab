@@ -1,0 +1,161 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+	--font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+	--font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+	--color-background: var(--background);
+	--color-foreground: var(--foreground);
+	--color-surface-rail: var(--surface-rail);
+	--color-card: var(--card);
+	--color-card-foreground: var(--card-foreground);
+	--color-popover: var(--popover);
+	--color-popover-foreground: var(--popover-foreground);
+	--color-primary: var(--primary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-secondary: var(--secondary);
+	--color-secondary-foreground: var(--secondary-foreground);
+	--color-muted: var(--muted);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-accent: var(--accent);
+	--color-accent-foreground: var(--accent-foreground);
+	--color-destructive: var(--destructive);
+	--color-destructive-foreground: var(--destructive-foreground);
+	--color-success: var(--success);
+	--color-success-foreground: var(--success-foreground);
+	--color-warning: var(--warning);
+	--color-warning-foreground: var(--warning-foreground);
+	--color-voltage: var(--voltage);
+	--color-branch-current: var(--current);
+	--color-border: var(--border);
+	--color-input: var(--input);
+	--color-ring: var(--ring);
+
+	--radius-sm: calc(var(--radius) - 2px);
+	--radius-md: var(--radius);
+	--radius-lg: calc(var(--radius) + 2px);
+}
+
+:root {
+	--radius: 0.375rem;
+	--background: #f8fafc;
+	--foreground: #0f172a;
+	--surface-rail: #f1f5f9;
+	--card: #ffffff;
+	--card-foreground: #0f172a;
+	--popover: #ffffff;
+	--popover-foreground: #0f172a;
+	--primary: #1d4ed8;
+	--primary-foreground: #f8fafc;
+	--secondary: #e2e8f0;
+	--secondary-foreground: #0f172a;
+	--muted: #f1f5f9;
+	--muted-foreground: #475569;
+	--accent: #e2e8f0;
+	--accent-foreground: #0f172a;
+	--destructive: #be123c;
+	--destructive-foreground: #ffffff;
+	--success: #0f766e;
+	--success-foreground: #ffffff;
+	--warning: #b45309;
+	--warning-foreground: #ffffff;
+	--voltage: #1d4ed8;
+	--current: #0f766e;
+	--border: #e2e8f0;
+	--input: #cbd5e1;
+	--ring: #1d4ed8;
+	--canvas-dot: #cbd5e1;
+	--canvas-major: #e2e8f0;
+}
+
+.dark {
+	--background: #0b0f14;
+	--foreground: #f1f5f9;
+	--surface-rail: #111827;
+	--card: #161f2c;
+	--card-foreground: #f1f5f9;
+	--popover: #161f2c;
+	--popover-foreground: #f1f5f9;
+	--primary: #60a5fa;
+	--primary-foreground: #0b0f14;
+	--secondary: #1f2937;
+	--secondary-foreground: #f1f5f9;
+	--muted: #1e293b;
+	--muted-foreground: #94a3b8;
+	--accent: #1f2937;
+	--accent-foreground: #f1f5f9;
+	--destructive: #fb7185;
+	--destructive-foreground: #0b0f14;
+	--success: #2dd4bf;
+	--success-foreground: #0b0f14;
+	--warning: #fbbf24;
+	--warning-foreground: #0b0f14;
+	--voltage: #60a5fa;
+	--current: #2dd4bf;
+	--border: #1f2937;
+	--input: #334155;
+	--ring: #60a5fa;
+	--canvas-dot: #263244;
+	--canvas-major: #16202e;
+}
+
+@layer base {
+	* {
+		border-color: var(--border);
+	}
+
+	html {
+		color-scheme: light;
+		font-family: var(--font-sans);
+	}
+
+	html.dark {
+		color-scheme: dark;
+	}
+
+	body {
+		background-color: var(--background);
+		color: var(--foreground);
+		font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+	}
+
+	::selection {
+		background-color: color-mix(in srgb, var(--primary) 22%, transparent);
+		color: var(--foreground);
+	}
+
+	input,
+	textarea,
+	select {
+		caret-color: var(--primary);
+	}
+}
+
+.engineering-grid {
+	background-color: var(--background);
+	background-image:
+		linear-gradient(to right, var(--canvas-major) 1px, transparent 1px),
+		linear-gradient(to bottom, var(--canvas-major) 1px, transparent 1px),
+		radial-gradient(circle, var(--canvas-dot) 1px, transparent 1px);
+	background-size:
+		100px 100px,
+		100px 100px,
+		20px 20px;
+	background-position:
+		-1px -1px,
+		-1px -1px,
+		-1px -1px;
+}
+
+.font-engineering {
+	font-family: var(--font-mono);
+	font-variant-numeric: tabular-nums;
+}
+
+/* Subtle engineering scrollbars */
+* {
+	scrollbar-width: thin;
+	scrollbar-color: var(--input) transparent;
+}
