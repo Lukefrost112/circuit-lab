@@ -190,7 +190,20 @@ export function solveNodal(doc: CircuitDocument, mna: MnaSolution): MethodResult
 
 		const labelPrefix =
 			group.length > 1 ? `\\text{Supernode } \\{${group.join(', ')}\\}:\\; ` : `\\text{Node } ${group[0]}:\\; `;
-		kclLatex.push(`${labelPrefix}${eqTerms.join(' + ').replace(/\+ -/g, '- ')} = 0`);
+		if (eqTerms.length > 2) {
+			const cleanTerms = eqTerms.map((t, i) =>
+				i === 0 ? t : t.startsWith('- ') || t.startsWith('+ ') ? t : `+ ${t}`
+			);
+			const lines: string[] = [];
+			for (let i = 0; i < cleanTerms.length; i += 2) {
+				lines.push(cleanTerms.slice(i, i + 2).join(' '));
+			}
+			kclLatex.push(
+				`\\begin{aligned} ${labelPrefix}&${lines.join(' \\\\ &')} = 0 \\end{aligned}`
+			);
+		} else {
+			kclLatex.push(`${labelPrefix}${eqTerms.join(' + ').replace(/\+ -/g, '- ')} = 0`);
+		}
 		row++;
 
 		// Voltage constraint equations for floating sources inside this supernode
@@ -369,7 +382,10 @@ export function solveNodal(doc: CircuitDocument, mna: MnaSolution): MethodResult
 		title,
 		applicable: true,
 		steps,
-		summaryLatex: solvedLatex.slice(0, 4).join(',\\quad '),
+		summaryLatex: `\\begin{aligned} ${solvedLatex
+			.slice(0, 6)
+			.map((s) => s.replace(' = ', ' &= '))
+			.join(' \\\\ ')} \\end{aligned}`,
 		...verification
 	};
 }

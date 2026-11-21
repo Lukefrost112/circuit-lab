@@ -162,10 +162,10 @@
 						<TableCell class="max-w-[200px] truncate text-[11px] text-muted-foreground">
 							{formatAttachmentList(node)}
 						</TableCell>
-						<TableCell tabular class="text-right font-medium text-voltage">
-							<div>{vParts.primary}</div>
+						<TableCell tabular class="whitespace-nowrap text-right font-medium text-voltage">
+							<div class="whitespace-nowrap">{vParts.primary}</div>
 							{#if vParts.secondary}
-								<div class="text-[11px] font-normal text-muted-foreground">
+								<div class="whitespace-nowrap text-[11px] font-normal text-muted-foreground">
 									{vParts.secondary}
 								</div>
 							{/if}
@@ -189,15 +189,10 @@
 		<Table>
 			<TableHeader>
 				<TableRow class="hover:bg-transparent">
-					<TableHead>Element</TableHead>
-					<TableHead>Nodes</TableHead>
-					<TableHead class="text-right">Voltage (V)</TableHead>
-					<TableHead class="text-right">Current (I)</TableHead>
-					<TableHead class="text-right">Power (P)</TableHead>
-					{#if isAc}
-						<TableHead class="text-right">Q</TableHead>
-						<TableHead class="text-right">PF</TableHead>
-					{/if}
+					<TableHead class="px-1.5">Element</TableHead>
+					<TableHead class="px-1.5 text-right">Voltage</TableHead>
+					<TableHead class="px-1.5 text-right">Current</TableHead>
+					<TableHead class="px-1.5 text-right">Power</TableHead>
 				</TableRow>
 			</TableHeader>
 			<TableBody>
@@ -221,49 +216,51 @@
 							}
 						}}
 					>
-						<TableCell class="font-engineering font-semibold">
-							{branch.label}
+						<TableCell class="px-1.5 py-2">
+							<div class="font-engineering font-semibold text-foreground">{branch.label}</div>
+							<div class="font-engineering whitespace-nowrap text-[10px] text-muted-foreground">
+								{branch.nodeA} → {branch.nodeB}
+							</div>
 						</TableCell>
-						<TableCell class="font-engineering text-[11px] text-muted-foreground">
-							{branch.nodeA} → {branch.nodeB}
-						</TableCell>
-						<TableCell tabular class="text-right text-voltage">
-							<div>{vParts.primary}</div>
+						<TableCell tabular class="px-1.5 py-2 text-right text-[11px] whitespace-nowrap text-voltage">
+							<div class="whitespace-nowrap">{vParts.primary}</div>
 							{#if vParts.secondary}
-								<div class="text-[11px] text-muted-foreground">{vParts.secondary}</div>
+								<div class="whitespace-nowrap text-[10px] text-muted-foreground">{vParts.secondary}</div>
 							{/if}
 						</TableCell>
-						<TableCell tabular class="text-right text-branch-current">
-							<div>{iParts.primary}</div>
+						<TableCell tabular class="px-1.5 py-2 text-right text-[11px] whitespace-nowrap text-branch-current">
+							<div class="whitespace-nowrap">{iParts.primary}</div>
 							{#if iParts.secondary}
-								<div class="text-[11px] text-muted-foreground">{iParts.secondary}</div>
+								<div class="whitespace-nowrap text-[10px] text-muted-foreground">{iParts.secondary}</div>
 							{/if}
 						</TableCell>
-						<TableCell tabular class="text-right">
-							<span
-								class={cn(
-									'font-medium',
-									isSupplied ? 'text-branch-current' : 'text-foreground'
-								)}
-							>
-								{formatRealPower(branch.realPower, formatOpts)}
-							</span>
-							<span class="block text-[10px] text-muted-foreground">
-								{Math.abs(branch.realPower) < 1e-12
-									? 'Zero'
-									: isSupplied
-										? 'Supplied'
-										: 'Absorbed'}
-							</span>
+						<TableCell tabular class="px-1.5 py-2 text-right text-[11px] whitespace-nowrap">
+							<div class="whitespace-nowrap">
+								<span
+									class={cn(
+										'font-medium',
+										isSupplied ? 'text-branch-current' : 'text-foreground'
+									)}
+								>
+									{formatRealPower(branch.realPower, formatOpts)}
+								</span>
+								<span class="ml-0.5 text-[10px] text-muted-foreground">
+									{Math.abs(branch.realPower) < 1e-12
+										? '· 0'
+										: isSupplied
+											? 'Supplied'
+											: 'Absorbed'}
+								</span>
+							</div>
+							{#if isAc}
+								<div class="whitespace-nowrap text-[10px] text-muted-foreground">
+									Q: {formatReactivePower(branch.reactivePower, formatOpts)}
+								</div>
+								<div class="whitespace-nowrap text-[10px] text-muted-foreground">
+									PF: {formatPowerFactor(branch.powerFactor, branch.powerFactorType)}
+								</div>
+							{/if}
 						</TableCell>
-						{#if isAc}
-							<TableCell tabular class="text-right text-muted-foreground">
-								{formatReactivePower(branch.reactivePower, formatOpts)}
-							</TableCell>
-							<TableCell tabular class="text-right text-muted-foreground">
-								{formatPowerFactor(branch.powerFactor, branch.powerFactorType)}
-							</TableCell>
-						{/if}
 					</TableRow>
 				{/each}
 			</TableBody>
@@ -305,47 +302,57 @@
 				</div>
 			{/snippet}
 
-			<div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-				<div class="rounded-md border border-border bg-surface-rail/60 px-3 py-2">
-					<div class="text-[11px] font-medium text-muted-foreground">
-						Open-Circuit Voltage (V_th)
+			<div class="grid grid-cols-1 gap-2">
+				<div class="flex items-center justify-between gap-3 rounded-md border border-border bg-surface-rail/60 px-3 py-2">
+					<div class="text-xs font-medium text-muted-foreground">
+						Open-Circuit Voltage (V<sub>th</sub>)
 					</div>
-					<div class="font-engineering mt-1 text-sm font-semibold text-voltage">
-						{vthParts.primary}
-					</div>
-					{#if vthParts.secondary}
-						<div class="font-engineering text-[11px] text-muted-foreground">
-							{vthParts.secondary}
+					<div class="text-right">
+						<div class="font-engineering whitespace-nowrap text-sm font-semibold text-voltage">
+							{vthParts.primary}
 						</div>
-					{/if}
+						{#if vthParts.secondary}
+							<div class="font-engineering whitespace-nowrap text-[11px] text-muted-foreground">
+								{vthParts.secondary}
+							</div>
+						{/if}
+					</div>
 				</div>
 
-				<div class="rounded-md border border-border bg-surface-rail/60 px-3 py-2">
-					<div class="text-[11px] font-medium text-muted-foreground">
-						Norton Current (I_N)
+				<div class="flex items-center justify-between gap-3 rounded-md border border-border bg-surface-rail/60 px-3 py-2">
+					<div class="text-xs font-medium text-muted-foreground">
+						Norton Current (I<sub>N</sub>)
 					</div>
-					<div class="font-engineering mt-1 text-sm font-semibold text-branch-current">
-						{iscParts ? iscParts.primary : 'Undefined (Z_th = 0)'}
-					</div>
-					{#if iscParts?.secondary}
-						<div class="font-engineering text-[11px] text-muted-foreground">
-							{iscParts.secondary}
+					<div class="text-right">
+						<div class="font-engineering whitespace-nowrap text-sm font-semibold text-branch-current">
+							{#if iscParts}
+								{iscParts.primary}
+							{:else}
+								Undefined (Z<sub>th</sub> = 0)
+							{/if}
 						</div>
-					{/if}
+						{#if iscParts?.secondary}
+							<div class="font-engineering whitespace-nowrap text-[11px] text-muted-foreground">
+								{iscParts.secondary}
+							</div>
+						{/if}
+					</div>
 				</div>
 
-				<div class="rounded-md border border-border bg-surface-rail/60 px-3 py-2">
-					<div class="text-[11px] font-medium text-muted-foreground">
-						Equivalent {isAc ? 'Impedance (Z_th)' : 'Resistance (R_th)'}
+				<div class="flex items-center justify-between gap-3 rounded-md border border-border bg-surface-rail/60 px-3 py-2">
+					<div class="text-xs font-medium text-muted-foreground">
+						Equivalent {#if isAc}Impedance (Z<sub>th</sub>){:else}Resistance (R<sub>th</sub>){/if}
 					</div>
-					<div class="font-engineering mt-1 text-sm font-semibold text-foreground">
-						{zthParts ? zthParts.primary : 'Open / Dependent'}
-					</div>
-					{#if zthParts?.secondary}
-						<div class="font-engineering text-[11px] text-muted-foreground">
-							{zthParts.secondary}
+					<div class="text-right">
+						<div class="font-engineering whitespace-nowrap text-sm font-semibold text-foreground">
+							{zthParts ? zthParts.primary : 'Open / Dependent'}
 						</div>
-					{/if}
+						{#if zthParts?.secondary}
+							<div class="font-engineering whitespace-nowrap text-[11px] text-muted-foreground">
+								{zthParts.secondary}
+							</div>
+						{/if}
+					</div>
 				</div>
 			</div>
 
@@ -360,13 +367,13 @@
 					class="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs"
 				>
 					<span class="font-medium text-muted-foreground">Maximum Power Transfer</span>
-					<div class="font-engineering flex flex-wrap items-center gap-3 text-foreground">
-						<span>
-							{isAc ? 'Z_L,opt' : 'R_L,opt'} = {zOptParts.primary}
+					<div class="font-engineering flex flex-wrap items-center gap-x-3 gap-y-1 text-foreground">
+						<span class="whitespace-nowrap">
+							{#if isAc}Z<sub>L,opt</sub>{:else}R<sub>L,opt</sub>{/if} = {zOptParts.primary}
 						</span>
-						<span class="text-border">|</span>
-						<span class="font-semibold text-branch-current">
-							P_max = {formatRealPower(tn.maxPowerTransfer.maxRealPowerW, formatOpts)}
+						<span class="text-border" aria-hidden="true">|</span>
+						<span class="whitespace-nowrap font-semibold text-branch-current">
+							P<sub>max</sub> = {formatRealPower(tn.maxPowerTransfer.maxRealPowerW, formatOpts)}
 						</span>
 					</div>
 				</div>

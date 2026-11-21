@@ -364,9 +364,9 @@ export function solveTheveninNorton(
 	}
 
 	const summaryParts = [
-		`V_{th} = ${formatLatexValue(vth, mode)}\\text{ V}`,
-		zth !== null ? `Z_{th} = ${formatLatexValue(zth, mode)}\\;\\Omega` : 'Z_{th} = \\infty',
-		isc !== null ? `I_N = ${formatLatexValue(isc, mode)}\\text{ A}` : 'I_N = \\infty'
+		`V_{th} &= ${formatLatexValue(vth, mode)}\\text{ V}`,
+		zth !== null ? `Z_{th} &= ${formatLatexValue(zth, mode)}\\;\\Omega` : 'Z_{th} &= \\infty',
+		isc !== null ? `I_N &= ${formatLatexValue(isc, mode)}\\text{ A}` : 'I_N &= \\infty'
 	];
 
 	return {
@@ -375,7 +375,7 @@ export function solveTheveninNorton(
 			title,
 			applicable: true,
 			steps,
-			summaryLatex: summaryParts.join(',\\quad '),
+			summaryLatex: `\\begin{aligned} ${summaryParts.join(' \\\\ ')} \\end{aligned}`,
 			verifiedAgainstMna,
 			maxDiscrepancy
 		},

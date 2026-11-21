@@ -38,9 +38,36 @@
 	let showCurrents = $state(true);
 	let hoveredKey = $state<string | null>(null);
 
-	const CX = 150;
-	const CY = 150;
-	const MAX_R = 108;
+	const CX = 160;
+	const CY = 160;
+	const MAX_R = 96;
+
+	function normalizeDeg(deg: number): number {
+		let d = deg % 360;
+		if (d > 180) d -= 360;
+		if (d <= -180) d += 360;
+		return d;
+	}
+
+	function angleDiffDeg(a: number, b: number): number {
+		return Math.abs(normalizeDeg(a - b));
+	}
+
+	interface SvgRect {
+		x1: number;
+		y1: number;
+		x2: number;
+		y2: number;
+	}
+
+	function svgRectsOverlap(a: SvgRect, b: SvgRect, pad = 3): boolean {
+		return !(
+			a.x2 + pad <= b.x1 ||
+			b.x2 + pad <= a.x1 ||
+			a.y2 + pad <= b.y1 ||
+			b.y2 + pad <= a.y1
+		);
+	}
 
 	const phasorData = $derived.by(() => {
 		const mna = solution.mna;
@@ -59,28 +86,98 @@
 		const maxI = rawCurrents.reduce((m, b) => Math.max(m, b.current.abs()), 0);
 
 		const entries: PhasorEntry[] = [];
+		const placedLabels: SvgRect[] = [
+			// Axis labels (0°, 90°, 180°, -90°) + origin dot
+			{ x1: CX + MAX_R + 10, y1: CY - 8, x2: CX + MAX_R + 30, y2: CY + 8 },
+			{ x1: CX - 14, y1: CY - MAX_R - 24, x2: CX + 14, y2: CY - MAX_R - 6 },
+			{ x1: CX - MAX_R - 36, y1: CY - 8, x2: CX - MAX_R - 10, y2: CY + 8 },
+			{ x1: CX - 16, y1: CY + MAX_R + 8, x2: CX + 16, y2: CY + MAX_R + 25 },
+			{ x1: CX - 8, y1: CY - 8, x2: CX + 8, y2: CY + 8 }
+		];
+
+		function placeVectorLabel(label: string, r: number, rad: number, deg: number): { lx: number; ly: number } {
+			const labelW = label.length * 5.8 + 4;
+			const labelH = 12;
+			const nearCardinal = [0, 90, 180, -180, -90].some((c) => angleDiffDeg(deg, c) < 14);
+
+			const offsets: Array<{ dr: number; dDeg: number; bias: number }> = [
+				{ dr: 16, dDeg: nearCardinal ? 14 : 0, bias: 0 },
+				{ dr: 16, dDeg: -14, bias: 1 },
+				{ dr: 16, dDeg: 18, bias: 2 },
+				{ dr: 27, dDeg: nearCardinal ? 12 : 0, bias: 4 },
+				{ dr: 14, dDeg: -24, bias: 5 },
+				{ dr: 14, dDeg: 24, bias: 6 },
+				{ dr: -14, dDeg: 16, bias: 8 },
+				{ dr: -14, dDeg: -16, bias: 9 },
+				{ dr: 30, dDeg: -16, bias: 11 },
+				{ dr: 30, dDeg: 16, bias: 12 },
+				{ dr: 16, dDeg: 36, bias: 14 },
+				{ dr: 16, dDeg: -36, bias: 15 }
+			];
+
+			let bestX = CX + (r + 16) * Math.cos(rad);
+			let bestY = CY - (r + 16) * Math.sin(rad);
+			let bestScore = Infinity;
+
+			for (const off of offsets) {
+				const candR = Math.max(22, Math.min(MAX_R + 28, r + off.dr));
+				const candRad = rad + (off.dDeg * Math.PI) / 180;
+				const lx = CX + candR * Math.cos(candRad);
+				const ly = CY - candR * Math.sin(candRad);
+				const rect: SvgRect = {
+					x1: lx - labelW / 2,
+					y1: ly - labelH / 2,
+					x2: lx + labelW / 2,
+					y2: ly + labelH / 2
+				};
+
+				let score = off.bias;
+				if (rect.x1 < 6 || rect.x2 > 314 || rect.y1 < 6 || rect.y2 > 314) {
+					score += 5000;
+				}
+				for (const other of placedLabels) {
+					if (svgRectsOverlap(rect, other, 3)) {
+						score += 1000;
+					}
+				}
+				if (score < bestScore) {
+					bestScore = score;
+					bestX = lx;
+					bestY = ly;
+				}
+			}
+
+			placedLabels.push({
+				x1: bestX - labelW / 2,
+				y1: bestY - labelH / 2,
+				x2: bestX + labelW / 2,
+				y2: bestY + labelH / 2
+			});
+			return { lx: bestX, ly: bestY };
+		}
 
 		if (showVoltages && maxV > 0) {
 			for (const node of rawVoltages) {
 				const mag = node.voltage.abs();
 				const deg = node.voltage.argDeg();
 				const rad = node.voltage.argRad();
-				const norm = Math.max(0.14, mag / maxV);
+				const norm = Math.max(0.18, mag / maxV);
 				const r = norm * MAX_R;
 				const x2 = CX + r * Math.cos(rad);
 				const y2 = CY - r * Math.sin(rad);
-				const labelR = Math.min(MAX_R + 18, r + 14);
+				const label = `V_${node.nodeId}`;
+				const { lx, ly } = placeVectorLabel(label, r, rad, deg);
 				entries.push({
 					key: `V:${node.nodeId}`,
-					label: `V_${node.nodeId}`,
+					label,
 					category: 'voltage',
 					magnitude: mag,
 					angleDeg: deg,
 					normalizedRadius: norm,
 					x2,
 					y2,
-					labelX: CX + labelR * Math.cos(rad),
-					labelY: CY - labelR * Math.sin(rad),
+					labelX: lx,
+					labelY: ly,
 					formatted: formatComplexValue(node.voltage, 'V', 'ac', {
 						precision: prec,
 						angleDisplay
@@ -95,14 +192,15 @@
 				const mag = branch.current.abs();
 				const deg = branch.current.argDeg();
 				const rad = branch.current.argRad();
-				const norm = Math.max(0.14, mag / maxI);
+				const norm = Math.max(0.18, mag / maxI);
 				const r = norm * MAX_R;
 				const x2 = CX + r * Math.cos(rad);
 				const y2 = CY - r * Math.sin(rad);
-				const labelR = Math.min(MAX_R + 18, r + 14);
+				const label = `I_${branch.label}`;
+				const { lx, ly } = placeVectorLabel(label, r, rad, deg);
 				entries.push({
 					key: `I:${branch.componentId}`,
-					label: `I_${branch.label}`,
+					label,
 					category: 'current',
 					componentId: branch.componentId,
 					magnitude: mag,
@@ -110,8 +208,8 @@
 					normalizedRadius: norm,
 					x2,
 					y2,
-					labelX: CX + labelR * Math.cos(rad),
-					labelY: CY - labelR * Math.sin(rad),
+					labelX: lx,
+					labelY: ly,
 					formatted: formatComplexValue(branch.current, 'A', 'ac', {
 						precision: prec,
 						angleDisplay
@@ -195,10 +293,10 @@
 		{/if}
 	</div>
 
-	<div class="grid grid-cols-1 items-center gap-4 sm:grid-cols-[260px_1fr]">
-		<div class="mx-auto w-full max-w-[260px]">
+	<div class="flex flex-col gap-3">
+		<div class="mx-auto w-full max-w-[280px]">
 			<svg
-				viewBox="0 0 300 300"
+				viewBox="0 0 320 320"
 				role="img"
 				aria-label="AC Polar Phasor Diagram showing voltage and current phasors"
 				class="h-auto w-full rounded-md border border-border bg-background/60 select-none"
@@ -269,9 +367,9 @@
 
 				<!-- Primary 0° / 90° / 180° / -90° axes -->
 				<line
-					x1={CX - MAX_R - 8}
+					x1={CX - MAX_R - 10}
 					y1={CY}
-					x2={CX + MAX_R + 8}
+					x2={CX + MAX_R + 10}
 					y2={CY}
 					stroke="var(--muted-foreground)"
 					stroke-opacity="0.45"
@@ -279,9 +377,9 @@
 				/>
 				<line
 					x1={CX}
-					y1={CY - MAX_R - 8}
+					y1={CY - MAX_R - 10}
 					x2={CX}
-					y2={CY + MAX_R + 8}
+					y2={CY + MAX_R + 10}
 					stroke="var(--muted-foreground)"
 					stroke-opacity="0.45"
 					stroke-width="1"
@@ -294,10 +392,10 @@
 					font-size="10"
 					font-weight="500"
 				>
-					<text x={CX + MAX_R + 12} y={CY + 3} text-anchor="start">0°</text>
-					<text x={CX} y={CY - MAX_R - 12} text-anchor="middle">90°</text>
-					<text x={CX - MAX_R - 12} y={CY + 3} text-anchor="end">180°</text>
-					<text x={CX} y={CY + MAX_R + 19} text-anchor="middle">-90°</text>
+					<text x={CX + MAX_R + 14} y={CY + 3} text-anchor="start">0°</text>
+					<text x={CX} y={CY - MAX_R - 14} text-anchor="middle">90°</text>
+					<text x={CX - MAX_R - 14} y={CY + 3} text-anchor="end">180°</text>
+					<text x={CX} y={CY + MAX_R + 20} text-anchor="middle">-90°</text>
 				</g>
 
 				<!-- Phasor vectors -->
@@ -397,19 +495,19 @@
 									: 'border-border bg-surface-rail/50 hover:bg-muted'
 							)}
 						>
-							<span class="flex items-center gap-1.5 truncate">
+							<span class="flex shrink-0 items-center gap-2">
 								<span
 									class={cn(
-										'h-2 w-2 shrink-0 rounded-full',
+										'h-2.5 w-2.5 shrink-0 rounded-full',
 										entry.category === 'voltage' ? 'bg-voltage' : 'bg-branch-current'
 									)}
 									aria-hidden="true"
 								></span>
-								<span class="font-engineering font-semibold text-foreground">
+								<span class="font-engineering whitespace-nowrap font-semibold text-foreground">
 									{entry.label}
 								</span>
 							</span>
-							<span class="font-engineering shrink-0 text-[11px] text-muted-foreground">
+							<span class="font-engineering whitespace-nowrap text-[11px] text-muted-foreground">
 								{entry.formatted}
 							</span>
 						</button>

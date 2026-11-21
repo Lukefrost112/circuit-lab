@@ -239,6 +239,14 @@ export function solveKclKvl(doc: CircuitDocument, mna: MnaSolution): MethodResul
 		branchVoltages[br.comp.id] = solved.x[B + br.index];
 	}
 
+	const formatJoinedLines = (items: string[], perLine = 2): string[] => {
+		const lines: string[] = [];
+		for (let i = 0; i < items.length; i += perLine) {
+			lines.push(items.slice(i, i + perLine).join(' '));
+		}
+		return lines;
+	};
+
 	// Build Pedagogical KCL Steps (all nodes including reference "0" check)
 	const kclLatex: string[] = [];
 	const nodesForDisplay = [...nonRefNodes, '0'].filter((id) => graph.nodes[id]);
@@ -260,19 +268,22 @@ export function solveKclKvl(doc: CircuitDocument, mna: MnaSolution): MethodResul
 			.join('');
 
 		let residual = Complex.zero();
-		const numParts = terms
-			.map((t, idx) => {
-				const val = branchCurrents[t.br.comp.id];
-				residual = t.sign === 1 ? residual.add(val) : residual.sub(val);
-				const valTex = formatLatexTerm(val, mode);
-				if (idx === 0) return t.sign === 1 ? valTex : `-${valTex}`;
-				return t.sign === 1 ? ` + ${valTex}` : ` - ${valTex}`;
-			})
-			.join('');
+		const numTermArr = terms.map((t, idx) => {
+			const val = branchCurrents[t.br.comp.id];
+			residual = t.sign === 1 ? residual.add(val) : residual.sub(val);
+			const valTex = formatLatexTerm(val, mode);
+			if (idx === 0) return t.sign === 1 ? valTex : `-${valTex}`;
+			return t.sign === 1 ? `+ ${valTex}` : `- ${valTex}`;
+		});
 
 		const resStr = residual.isZero(1e-9) ? '0' : formatLatexValue(residual, mode);
+		const symLine = `&\\text{Node } ${nid}:\\; ${sym} = 0`;
+		const numLines = formatJoinedLines(numTermArr, mode === 'ac' ? 2 : 3);
+		const rhsBlock = numLines
+			.map((line, i) => (i === 0 ? `&\\implies ${line}` : `&\\quad ${line}`))
+			.join(' \\\\ ');
 		kclLatex.push(
-			`\\text{Node } ${nid}:\\; ${sym} = 0 \\implies ${numParts} = ${resStr}`
+			`\\begin{aligned} ${symLine} \\\\ ${rhsBlock} = ${resStr} \\end{aligned}`
 		);
 	}
 
@@ -288,26 +299,33 @@ export function solveKclKvl(doc: CircuitDocument, mna: MnaSolution): MethodResul
 			.join('');
 
 		let residual = Complex.zero();
-		const numParts = loop.terms
-			.map((t, i) => {
-				const br = branches[t.edgeIdx];
-				const val = branchVoltages[br.comp.id];
-				residual = t.dir === 1 ? residual.add(val) : residual.sub(val);
-				const valTex = formatLatexTerm(val, mode);
-				if (i === 0) return t.dir === 1 ? valTex : `-${valTex}`;
-				return t.dir === 1 ? ` + ${valTex}` : ` - ${valTex}`;
-			})
-			.join('');
+		const numTermArr = loop.terms.map((t, i) => {
+			const br = branches[t.edgeIdx];
+			const val = branchVoltages[br.comp.id];
+			residual = t.dir === 1 ? residual.add(val) : residual.sub(val);
+			const valTex = formatLatexTerm(val, mode);
+			if (i === 0) return t.dir === 1 ? valTex : `-${valTex}`;
+			return t.dir === 1 ? `+ ${valTex}` : `- ${valTex}`;
+		});
 
 		const resStr = residual.isZero(1e-9) ? '0' : formatLatexValue(residual, mode);
-		kvlLatex.push(`\\text{Loop } ${idx + 1}:\\; ${sym} = 0 \\implies ${numParts} = ${resStr}`);
+		const symLine = `&\\text{Loop } ${idx + 1}:\\; ${sym} = 0`;
+		const numLines = formatJoinedLines(numTermArr, mode === 'ac' ? 2 : 3);
+		const rhsBlock = numLines
+			.map((line, i) => (i === 0 ? `&\\implies ${line}` : `&\\quad ${line}`))
+			.join(' \\\\ ');
+		kvlLatex.push(
+			`\\begin{aligned} ${symLine} \\\\ ${rhsBlock} = ${resStr} \\end{aligned}`
+		);
 	});
 
 	const constitutiveLatex = branches.map((br) => {
 		const sub = latexSub(br.comp.label);
 		const vStr = formatLatexValue(branchVoltages[br.comp.id], mode);
 		const iStr = formatLatexValue(branchCurrents[br.comp.id], mode);
-		return `V_{${sub}} = ${vStr}\\text{ V},\\quad I_{${sub}} = ${iStr}\\text{ A}`;
+		return mode === 'ac'
+			? `\\begin{aligned} V_{${sub}} &= ${vStr}\\text{ V} \\\\ I_{${sub}} &= ${iStr}\\text{ A} \\end{aligned}`
+			: `V_{${sub}} = ${vStr}\\text{ V},\\; I_{${sub}} = ${iStr}\\text{ A}`;
 	});
 
 	const steps: SolutionStep[] = [
@@ -315,7 +333,7 @@ export function solveKclKvl(doc: CircuitDocument, mna: MnaSolution): MethodResul
 			title: '1. Spanning Tree & Topology Count',
 			description: `Identified ${N} electrical nodes and ${B} branches. A spanning tree uses ${treeEdges.length} tree branches and leaves ${chordEdges.length} fundamental loop(s).`,
 			latex: [
-				`N_{\\text{nodes}} = ${N},\\quad B = ${B},\\quad \\text{KCL eqs} = ${nonRefNodes.length},\\quad \\text{KVL loops} = ${fundamentalLoops.length}`
+				`\\begin{gathered} N_{\\text{nodes}} = ${N},\\quad B = ${B} \\\\ \\text{KCL eqs} = ${nonRefNodes.length},\\quad \\text{KVL loops} = ${fundamentalLoops.length} \\end{gathered}`
 			]
 		},
 		{
@@ -342,12 +360,21 @@ export function solveKclKvl(doc: CircuitDocument, mna: MnaSolution): MethodResul
 
 	const verification = verifyAgainstMna(mna, { branchVoltages, branchCurrents });
 
+	const summaryLines = branches.slice(0, 4).map((br) => {
+		const sub = latexSub(br.comp.label);
+		const vStr = formatLatexValue(branchVoltages[br.comp.id], mode);
+		const iStr = formatLatexValue(branchCurrents[br.comp.id], mode);
+		return mode === 'ac'
+			? `V_{${sub}} &= ${vStr}\\text{ V} \\\\ I_{${sub}} &= ${iStr}\\text{ A}`
+			: `V_{${sub}} &= ${vStr}\\text{ V},\\; I_{${sub}} = ${iStr}\\text{ A}`;
+	});
+
 	return {
 		methodId: 'kcl_kvl',
 		title,
 		applicable: true,
 		steps,
-		summaryLatex: constitutiveLatex.slice(0, 4).join(' \\\\ '),
+		summaryLatex: `\\begin{aligned} ${summaryLines.join(' \\\\ ')} \\end{aligned}`,
 		...verification
 	};
 }

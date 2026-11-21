@@ -621,7 +621,10 @@ export function solveSourceTransform(doc: CircuitDocument, mna: MnaSolution): Me
 		title,
 		applicable: true,
 		steps,
-		summaryLatex: finalLatex.slice(0, 4).join(',\\quad '),
+		summaryLatex: `\\begin{aligned} ${finalLatex
+			.slice(0, 6)
+			.map((s) => s.replace(' = ', ' &= '))
+			.join(' \\\\ ')} \\end{aligned}`,
 		...verification
 	};
 }

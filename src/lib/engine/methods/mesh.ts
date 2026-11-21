@@ -639,8 +639,17 @@ export function solveMesh(doc: CircuitDocument, mna: MnaSolution): MethodResult 
 			groupMeshIds.length > 1
 				? `\\text{Supermesh } \\{${groupMeshIds.map((m) => `m_{${m + 1}}`).join(', ')}\\}:\\; `
 				: `\\text{Mesh } ${groupMeshIds[0] + 1}:\\; `;
-		const eqBody = terms.join(' ').replace(/^\+\s*/, '') || '0';
-		kvlLatex.push(`${prefix}${eqBody} = 0`);
+		if (terms.length > 2) {
+			const cleanTerms = terms.map((t, i) => (i === 0 ? t.replace(/^\+\s*/, '') : t));
+			const lines: string[] = [];
+			for (let i = 0; i < cleanTerms.length; i += 2) {
+				lines.push(cleanTerms.slice(i, i + 2).join(' '));
+			}
+			kvlLatex.push(`\\begin{aligned} ${prefix}&${lines.join(' \\\\ &')} = 0 \\end{aligned}`);
+		} else {
+			const eqBody = terms.join(' ').replace(/^\+\s*/, '') || '0';
+			kvlLatex.push(`${prefix}${eqBody} = 0`);
+		}
 		row++;
 	};
 
@@ -777,7 +786,9 @@ export function solveMesh(doc: CircuitDocument, mna: MnaSolution): MethodResult 
 		title,
 		applicable: true,
 		steps,
-		summaryLatex: solvedMeshLatex.join(',\\quad '),
+		summaryLatex: `\\begin{aligned} ${solvedMeshLatex
+			.map((s) => s.replace(' = ', ' &= '))
+			.join(' \\\\ ')} \\end{aligned}`,
 		...verification
 	};
 }
