@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { MousePointer2 } from 'lucide-svelte';
+	import { MousePointer2, Search } from 'lucide-svelte';
 	import { CircuitSymbol, PALETTE_ITEMS, type PaletteItem, type SourceMode } from '$lib/components/symbols';
-	import { Accordion, AccordionItem, Badge, Input } from '$lib/components/ui';
+	import { Accordion, AccordionItem, Input } from '$lib/components/ui';
 	import type { ComponentKind } from '$lib/engine';
 	import { circuit, type EditorTool } from '$lib/stores/circuit.svelte';
 	import { cn } from '$lib/utils';
@@ -82,6 +82,14 @@
 		}
 		return PALETTE_ITEMS.find((i) => i.kind === tool)?.name ?? tool;
 	});
+
+	const accordionTriggerClass = $derived(
+		isSheet
+			? 'min-h-11 px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground'
+			: 'px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground lg:py-2'
+	);
+
+	const accordionContentClass = $derived(isSheet ? 'px-2 pt-0.5 pb-2.5' : 'px-2 pt-0.5 pb-2');
 </script>
 
 <aside
@@ -89,73 +97,92 @@
 	class={cn(
 		isSheet
 			? 'flex w-full flex-col border-r-0 bg-card'
-			: 'flex w-60 shrink-0 flex-col border-r border-border bg-surface-rail',
+			: 'flex w-56 shrink-0 flex-col border-r border-border bg-surface-rail',
 		className
 	)}
 >
 	<!-- Header & Filter -->
 	{#if isSheet}
 		<div class="sticky top-0 z-10 border-b border-border bg-card p-3">
-			<Input
-				type="search"
-				placeholder="Filter parts..."
-				bind:value={searchQuery}
-				aria-label="Filter components"
-				class="h-11 text-base sm:text-base"
-			/>
+			<div class="relative">
+				<Search
+					class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+					aria-hidden="true"
+				/>
+				<Input
+					type="search"
+					placeholder="Filter parts..."
+					bind:value={searchQuery}
+					aria-label="Filter components"
+					class="h-11 pl-9 text-base sm:text-base"
+				/>
+			</div>
 		</div>
 	{:else}
-		<div class="flex flex-col gap-2 border-b border-border p-3">
-			<div class="flex items-center justify-between">
-				<span class="text-xs font-semibold tracking-tight text-foreground">
-					Component Palette
-				</span>
-				<Badge variant="outline" class="font-engineering">
-					{PALETTE_ITEMS.length + 1}
-				</Badge>
+		<div class="flex flex-col gap-2 border-b border-border px-3 py-2.5">
+			<span class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+				Component Palette
+			</span>
+			<div class="relative">
+				<Search
+					class="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground"
+					aria-hidden="true"
+				/>
+				<Input
+					type="search"
+					placeholder="Filter parts or key..."
+					bind:value={searchQuery}
+					aria-label="Filter components"
+					class="h-7 pl-7 text-xs sm:h-7 sm:text-xs"
+				/>
 			</div>
-			<Input
-				type="search"
-				placeholder="Filter parts or key..."
-				bind:value={searchQuery}
-				aria-label="Filter components"
-			/>
 		</div>
 	{/if}
 
 	<!-- Tool & Component List -->
-	<div class={isSheet ? 'p-2 pb-4' : 'flex-1 overflow-y-auto p-2'}>
+	<div class={isSheet ? 'pb-4' : 'flex-1 overflow-y-auto'}>
 		{#if showSelectTool}
-			<div class="mb-2">
+			<div class={cn('border-b border-border', isSheet ? 'p-2' : 'px-2 py-1.5')}>
 				<button
 					type="button"
 					onclick={handleSelectMoveTool}
 					class={cn(
-						'flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border text-left transition-colors duration-150',
+						'relative flex w-full cursor-pointer items-center justify-between gap-2 rounded-[4px] border text-left transition-colors duration-150',
 						isSheet ? 'min-h-11 px-3 py-2 text-sm' : 'px-2 py-1.5 text-xs',
 						'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 						circuit.activeTool === 'select'
-							? 'border-warning/60 bg-warning/10 font-medium text-foreground'
-							: 'border-transparent text-foreground hover:bg-accent/70'
+							? 'border-border bg-card font-medium text-foreground'
+							: 'border-transparent text-foreground/90 hover:bg-accent/70 hover:text-foreground'
 					)}
 				>
+					{#if circuit.activeTool === 'select'}
+						<span
+							class="absolute top-1 bottom-1 left-0 w-0.5 rounded-r bg-primary"
+							aria-hidden="true"
+						></span>
+					{/if}
 					<span class={cn('flex min-w-0 items-center', isSheet ? 'gap-2.5' : 'gap-2')}>
-						<MousePointer2 class="size-4 shrink-0 text-foreground" aria-hidden="true" />
+						<MousePointer2 class="size-3.5 shrink-0 text-foreground" aria-hidden="true" />
 						<span class="truncate">Select / Move</span>
 					</span>
 					{#if !isSheet}
-						<kbd class="rounded border border-border bg-background px-1 py-0.5 font-engineering text-[10px] text-muted-foreground">
+						<span class="font-engineering shrink-0 text-[10px] text-muted-foreground/80">
 							Esc
-						</kbd>
+						</span>
 					{/if}
 				</button>
 			</div>
 		{/if}
 
-		<Accordion type="multiple" bind:value={openGroups}>
+		<Accordion variant="flush" type="multiple" bind:value={openGroups}>
 			{#if sourcesList.length > 0}
-				<AccordionItem value="sources" title="Sources">
-					<div class="flex flex-col gap-1">
+				<AccordionItem
+					value="sources"
+					title="Sources"
+					triggerClass={accordionTriggerClass}
+					contentClass={accordionContentClass}
+				>
+					<div class="flex flex-col gap-0.5">
 						{#each sourcesList as item (item.id)}
 							{@const active = isItemActive(item)}
 							<button
@@ -163,28 +190,34 @@
 								title={item.description}
 								onclick={() => handleSelectPaletteItem(item)}
 								class={cn(
-									'flex w-full cursor-pointer items-center justify-between rounded-md border text-left transition-colors duration-150',
-									isSheet ? 'min-h-11 gap-2 px-3 py-2 text-sm' : 'gap-1.5 px-1.5 py-1.5 text-xs',
+									'relative flex w-full cursor-pointer items-center justify-between rounded-[4px] border text-left transition-colors duration-150',
+									isSheet ? 'min-h-11 gap-2 px-3 py-2 text-sm' : 'gap-1.5 px-2 py-1.5 text-xs',
 									'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 									active
-										? 'border-warning/60 bg-warning/10 font-medium text-foreground'
-										: 'border-transparent text-foreground hover:bg-accent/70'
+										? 'border-border bg-card font-medium text-foreground'
+										: 'border-transparent text-foreground/90 hover:bg-accent/70 hover:text-foreground'
 								)}
 							>
+								{#if active}
+									<span
+										class="absolute top-1 bottom-1 left-0 w-0.5 rounded-r bg-primary"
+										aria-hidden="true"
+									></span>
+								{/if}
 								<span class={cn('flex min-w-0 items-center', isSheet ? 'gap-2.5' : 'gap-1.5')}>
 									<CircuitSymbol
 										kind={item.kind}
 										variant="icon"
 										sourceMode={item.sourceMode ?? 'dc'}
-										size={isSheet ? 22 : 20}
+										size={isSheet ? 22 : 18}
 										class="shrink-0 text-foreground"
 									/>
 									<span class="truncate">{item.name}</span>
 								</span>
 								{#if !isSheet}
-									<kbd class="rounded border border-border bg-background px-1 py-0.5 font-engineering text-[10px] text-muted-foreground">
+									<span class="font-engineering shrink-0 text-[10px] text-muted-foreground/80">
 										{item.shortcut}
-									</kbd>
+									</span>
 								{/if}
 							</button>
 						{/each}
@@ -193,8 +226,13 @@
 			{/if}
 
 			{#if passivesList.length > 0}
-				<AccordionItem value="passives" title="Passives">
-					<div class="flex flex-col gap-1">
+				<AccordionItem
+					value="passives"
+					title="Passives"
+					triggerClass={accordionTriggerClass}
+					contentClass={accordionContentClass}
+				>
+					<div class="flex flex-col gap-0.5">
 						{#each passivesList as item (item.id)}
 							{@const active = isItemActive(item)}
 							<button
@@ -202,27 +240,33 @@
 								title={item.description}
 								onclick={() => handleSelectPaletteItem(item)}
 								class={cn(
-									'flex w-full cursor-pointer items-center justify-between rounded-md border text-left transition-colors duration-150',
-									isSheet ? 'min-h-11 gap-2 px-3 py-2 text-sm' : 'gap-1.5 px-1.5 py-1.5 text-xs',
+									'relative flex w-full cursor-pointer items-center justify-between rounded-[4px] border text-left transition-colors duration-150',
+									isSheet ? 'min-h-11 gap-2 px-3 py-2 text-sm' : 'gap-1.5 px-2 py-1.5 text-xs',
 									'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 									active
-										? 'border-warning/60 bg-warning/10 font-medium text-foreground'
-										: 'border-transparent text-foreground hover:bg-accent/70'
+										? 'border-border bg-card font-medium text-foreground'
+										: 'border-transparent text-foreground/90 hover:bg-accent/70 hover:text-foreground'
 								)}
 							>
+								{#if active}
+									<span
+										class="absolute top-1 bottom-1 left-0 w-0.5 rounded-r bg-primary"
+										aria-hidden="true"
+									></span>
+								{/if}
 								<span class={cn('flex min-w-0 items-center', isSheet ? 'gap-2.5' : 'gap-1.5')}>
 									<CircuitSymbol
 										kind={item.kind}
 										variant="icon"
-										size={isSheet ? 22 : 20}
+										size={isSheet ? 22 : 18}
 										class="shrink-0 text-foreground"
 									/>
 									<span class="truncate">{item.name}</span>
 								</span>
 								{#if !isSheet}
-									<kbd class="rounded border border-border bg-background px-1 py-0.5 font-engineering text-[10px] text-muted-foreground">
+									<span class="font-engineering shrink-0 text-[10px] text-muted-foreground/80">
 										{item.shortcut}
-									</kbd>
+									</span>
 								{/if}
 							</button>
 						{/each}
@@ -231,8 +275,13 @@
 			{/if}
 
 			{#if connectionsList.length > 0}
-				<AccordionItem value="connections" title="Wiring & Ports">
-					<div class="flex flex-col gap-1">
+				<AccordionItem
+					value="connections"
+					title="Wiring & Ports"
+					triggerClass={accordionTriggerClass}
+					contentClass={accordionContentClass}
+				>
+					<div class="flex flex-col gap-0.5">
 						{#each connectionsList as item (item.id)}
 							{@const active = isItemActive(item)}
 							<button
@@ -240,28 +289,34 @@
 								title={item.description}
 								onclick={() => handleSelectPaletteItem(item)}
 								class={cn(
-									'flex w-full cursor-pointer items-center justify-between rounded-md border text-left transition-colors duration-150',
-									isSheet ? 'min-h-11 gap-2 px-3 py-2 text-sm' : 'gap-1.5 px-1.5 py-1.5 text-xs',
+									'relative flex w-full cursor-pointer items-center justify-between rounded-[4px] border text-left transition-colors duration-150',
+									isSheet ? 'min-h-11 gap-2 px-3 py-2 text-sm' : 'gap-1.5 px-2 py-1.5 text-xs',
 									'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 									active
-										? 'border-warning/60 bg-warning/10 font-medium text-foreground'
-										: 'border-transparent text-foreground hover:bg-accent/70'
+										? 'border-border bg-card font-medium text-foreground'
+										: 'border-transparent text-foreground/90 hover:bg-accent/70 hover:text-foreground'
 								)}
 							>
+								{#if active}
+									<span
+										class="absolute top-1 bottom-1 left-0 w-0.5 rounded-r bg-primary"
+										aria-hidden="true"
+									></span>
+								{/if}
 								<span class={cn('flex min-w-0 items-center', isSheet ? 'gap-2.5' : 'gap-1.5')}>
 									<CircuitSymbol
 										kind={item.kind}
 										variant="icon"
-										size={isSheet ? 22 : 20}
+										size={isSheet ? 22 : 18}
 										terminalLabel={item.kind === 'terminal' ? 'A' : undefined}
 										class="shrink-0 text-foreground"
 									/>
 									<span class="truncate">{item.name}</span>
 								</span>
 								{#if !isSheet}
-									<kbd class="rounded border border-border bg-background px-1 py-0.5 font-engineering text-[10px] text-muted-foreground">
+									<span class="font-engineering shrink-0 text-[10px] text-muted-foreground/80">
 										{item.shortcut}
-									</kbd>
+									</span>
 								{/if}
 							</button>
 						{/each}
@@ -271,26 +326,22 @@
 		</Accordion>
 
 		{#if !showSelectTool && filteredItems.length === 0}
-			<p class="px-2 py-4 text-center text-xs text-muted-foreground">
+			<p class="px-3 py-4 text-center text-xs text-muted-foreground">
 				No parts matching "{searchQuery}"
 			</p>
 		{/if}
 	</div>
 
-	<!-- Bottom Status Bar -->
+	<!-- Docked Bottom Footer (h-8 aligned with canvas status bar) -->
 	{#if !isSheet}
-		<div class="flex flex-col gap-1 border-t border-border px-3 py-2 text-[11px] text-muted-foreground">
-			<div class="flex items-center justify-between gap-2">
-				<span>Active tool</span>
-				<span class="truncate font-medium text-foreground">{activeToolLabel}</span>
-			</div>
-			<div class="font-engineering flex flex-wrap gap-x-1.5 gap-y-0.5 text-[10px] text-muted-foreground/90">
-				<span class="whitespace-nowrap">R / ]: Rotate</span>
-				<span aria-hidden="true">·</span>
-				<span class="whitespace-nowrap">Del: Remove</span>
-				<span aria-hidden="true">·</span>
-				<span class="whitespace-nowrap">Esc: Select</span>
-			</div>
+		<div class="flex h-8 shrink-0 items-center justify-between gap-2 border-t border-border px-3 text-[11px] text-muted-foreground">
+			<span class="truncate font-medium text-foreground">{activeToolLabel}</span>
+			<span
+				class="font-engineering shrink-0 text-[10px] text-muted-foreground/80"
+				title="R / ]: Rotate · Del: Remove · Esc: Select"
+			>
+				R: Rotate
+			</span>
 		</div>
 	{/if}
 </aside>

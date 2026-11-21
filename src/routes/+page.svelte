@@ -1,11 +1,9 @@
 <script lang="ts">
 	import { mode, toggleMode } from 'mode-watcher';
 	import {
-		AlertCircle,
 		BarChart3,
 		BookOpen,
-		CheckCircle2,
-		Cpu,
+		CircuitBoard,
 		FileCode2,
 		Moon,
 		MoreVertical,
@@ -13,9 +11,9 @@
 		PanelLeftOpen,
 		PanelRightClose,
 		PanelRightOpen,
+		ScanLine,
 		Settings,
 		SlidersHorizontal,
-		Sparkles,
 		Sun
 	} from 'lucide-svelte';
 	import {
@@ -154,8 +152,8 @@
 
 <div class="flex h-dvh w-full flex-col overflow-hidden bg-background text-foreground">
 	<!-- Top Toolbar -->
-	<header class="flex h-14 shrink-0 items-center justify-between gap-1.5 border-b border-border bg-surface-rail px-2 sm:gap-2 sm:px-3 lg:h-12">
-		<!-- Left: Rail Toggle, Brand, Mode & Verification -->
+	<header class="flex h-14 shrink-0 items-center justify-between gap-1.5 border-b border-border bg-surface-rail px-2 sm:gap-2 sm:px-3 lg:h-11">
+		<!-- Left: Rail Toggle, Brand, Mode & Telemetry -->
 		<div class="flex min-w-0 items-center gap-1.5 sm:gap-2">
 			<Tooltip
 				content={leftRailOpen ? 'Collapse component palette' : 'Expand component palette'}
@@ -165,6 +163,7 @@
 				<Button
 					variant="ghost"
 					size="icon"
+					class="h-7 w-7"
 					aria-label={leftRailOpen ? 'Collapse component palette' : 'Expand component palette'}
 					onclick={() => (leftRailOpen = !leftRailOpen)}
 				>
@@ -176,11 +175,24 @@
 				</Button>
 			</Tooltip>
 
-			<div class="flex min-w-0 items-center gap-1.5 sm:gap-2">
-				<div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-primary/30 bg-primary/10 text-primary">
-					<Cpu class="size-4" aria-hidden="true" />
-				</div>
-				<span class="truncate text-xs font-semibold tracking-tight text-foreground sm:shrink-0 sm:text-sm">
+			<div class="flex min-w-0 items-center gap-2">
+				<svg
+					width="18"
+					height="18"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="1.85"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+					class="size-[18px] shrink-0 text-foreground"
+				>
+					<path d="M3 12h3.5l1.75-4.5 2.5 9 2.5-9 2.5 9L17.5 12H21" />
+					<circle cx="3" cy="12" r="1.4" fill="currentColor" stroke="none" />
+					<circle cx="21" cy="12" r="1.4" fill="currentColor" stroke="none" />
+				</svg>
+				<span class="truncate text-[13px] font-semibold tracking-tight text-foreground sm:shrink-0">
 					Circuit Lab
 				</span>
 				{#if circuit.document.name}
@@ -195,16 +207,16 @@
 				role="status"
 				aria-label={statusInfo.label}
 				title={statusInfo.label}
-				class={cn('h-2.5 w-2.5 shrink-0 rounded-full sm:hidden', statusInfo.dotClass)}
+				class={cn('h-2 w-2 shrink-0 rounded-full sm:hidden', statusInfo.dotClass)}
 			></span>
 
-			<Separator orientation="vertical" class="mx-1 hidden h-5 sm:block" />
+			<Separator orientation="vertical" class="mx-1 hidden h-4 sm:block" />
 
 			<!-- DC / AC Segmented Mode Control -->
 			<div
 				role="radiogroup"
 				aria-label="Analysis mode"
-				class="inline-flex h-11 shrink-0 items-center overflow-hidden rounded-md border border-border bg-background p-0 lg:h-8 lg:p-0.5"
+				class="inline-flex h-11 shrink-0 items-center rounded-[4px] border border-border bg-muted/80 p-0 lg:h-7 lg:p-0.5"
 			>
 				<button
 					type="button"
@@ -212,11 +224,11 @@
 					aria-checked={circuit.document.mode === 'dc'}
 					onclick={() => circuit.setMode('dc')}
 					class={cn(
-						'inline-flex h-11 cursor-pointer items-center justify-center rounded-none px-2 text-xs font-medium transition-colors duration-150 sm:px-2.5 lg:h-7 lg:rounded-sm',
-						'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring lg:focus-visible:ring-offset-0',
+						'inline-flex h-11 cursor-pointer items-center justify-center rounded-[3px] border px-2.5 text-xs transition-colors duration-150 lg:h-full lg:px-2.5',
+						'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
 						circuit.document.mode === 'dc'
-							? 'bg-primary text-primary-foreground shadow-2xs'
-							: 'text-muted-foreground hover:text-foreground'
+							? 'border-border/80 bg-card font-semibold text-foreground'
+							: 'border-transparent font-medium text-muted-foreground hover:text-foreground'
 					)}
 				>
 					DC
@@ -227,11 +239,11 @@
 					aria-checked={circuit.document.mode === 'ac'}
 					onclick={() => circuit.setMode('ac')}
 					class={cn(
-						'inline-flex h-11 cursor-pointer items-center justify-center rounded-none px-2 text-xs font-medium transition-colors duration-150 sm:px-2.5 lg:h-7 lg:rounded-sm',
-						'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring lg:focus-visible:ring-offset-0',
+						'inline-flex h-11 cursor-pointer items-center justify-center rounded-[3px] border px-2.5 text-xs transition-colors duration-150 lg:h-full lg:px-2.5',
+						'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
 						circuit.document.mode === 'ac'
-							? 'bg-primary text-primary-foreground shadow-2xs'
-							: 'text-muted-foreground hover:text-foreground'
+							? 'border-border/80 bg-card font-semibold text-foreground'
+							: 'border-transparent font-medium text-muted-foreground hover:text-foreground'
 					)}
 				>
 					AC
@@ -249,7 +261,7 @@
 						mobileMenuOpen = false;
 						freqPopoverOpen = !freqPopoverOpen;
 					}}
-					class="inline-flex min-h-11 shrink-0 cursor-pointer items-center rounded-md border border-input bg-card px-1.5 font-engineering text-xs text-foreground transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-2 md:hidden"
+					class="inline-flex min-h-11 shrink-0 cursor-pointer items-center rounded-[4px] border border-input bg-card px-2 font-engineering text-xs text-foreground transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
 				>
 					{formatFrequency(circuit.document.frequencyHz)}
 				</button>
@@ -267,7 +279,7 @@
 						onkeydown={(e) => {
 							if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
 						}}
-						class="h-9 w-20 pr-7 text-xs lg:h-7 lg:w-24"
+						class="h-11 w-24 pr-7 text-base md:text-sm lg:h-7 lg:w-24 lg:text-xs"
 					/>
 					<span class="pointer-events-none absolute right-2 font-engineering text-[11px] text-muted-foreground">
 						Hz
@@ -275,32 +287,45 @@
 				</div>
 			{/if}
 
-			<!-- Live Verification Status Badge (sm+) -->
-			{#if isEmpty}
-				<Badge variant="secondary" class="hidden sm:inline-flex">Empty</Badge>
-			{:else if errorCount > 0 || !circuit.solution.mna.valid}
-				<Badge variant="destructive" class="hidden gap-1 sm:inline-flex">
-					<AlertCircle class="size-3" aria-hidden="true" />
-					{errorCount > 0 ? `${errorCount} ${errorCount === 1 ? 'Error' : 'Errors'}` : 'Invalid'}
-				</Badge>
-			{:else if isVerified}
-				<Badge variant="success" class="hidden gap-1 font-engineering sm:inline-flex">
-					<CheckCircle2 class="size-3" aria-hidden="true" />
-					<span>Verified<span class="hidden lg:inline">{' · ΣP = 0'}</span></span>
-				</Badge>
-			{:else}
-				<Badge variant="warning" class="hidden sm:inline-flex">Solved (MNA)</Badge>
-			{/if}
+			<Separator orientation="vertical" class="mx-0.5 hidden h-4 sm:block" />
+
+			<!-- Inline Hairline Telemetry Indicator (sm+) -->
+			<span
+				role="status"
+				aria-label={statusInfo.label}
+				title={statusInfo.label}
+				class="hidden shrink-0 items-center gap-1.5 font-engineering text-[11px] sm:inline-flex"
+			>
+				<span
+					class={cn('h-1.5 w-1.5 shrink-0 rounded-full', statusInfo.dotClass)}
+					aria-hidden="true"
+				></span>
+				{#if isEmpty}
+					<span class="text-muted-foreground">Empty</span>
+				{:else if errorCount > 0 || !circuit.solution.mna.valid}
+					<span class="font-medium text-destructive">
+						{errorCount > 0
+							? `${errorCount} ${errorCount === 1 ? 'Error' : 'Errors'}`
+							: 'Invalid'}
+					</span>
+				{:else if isVerified}
+					<span class="text-foreground">
+						Verified<span class="hidden text-muted-foreground lg:inline">{' · ΣP = 0'}</span>
+					</span>
+				{:else}
+					<span class="text-foreground">Solved (MNA)</span>
+				{/if}
+			</span>
 		</div>
 
 		<!-- Right: Dialog Launchers, Theme Toggle, Overflow Menu & Inspector Toggle -->
-		<div class="flex shrink-0 items-center gap-0.5 sm:gap-1.5">
-			<div class="hidden items-center gap-1.5 md:flex">
+		<div class="flex shrink-0 items-center gap-0.5 sm:gap-1">
+			<div class="hidden items-center gap-0.5 md:flex">
 				<Tooltip content="Browse curated DC & AC circuit presets" side="bottom">
 					<Button
-						variant="outline"
+						variant="ghost"
 						size="sm"
-						class="h-11 px-2.5 lg:h-7"
+						class="h-11 px-2.5 text-xs font-medium text-foreground/85 hover:bg-accent hover:text-foreground lg:h-7 lg:px-2"
 						onclick={() => (presetsOpen = true)}
 					>
 						<BookOpen />
@@ -309,9 +334,9 @@
 				</Tooltip>
 				<Tooltip content="Import or export Circuit Lab JSON" side="bottom">
 					<Button
-						variant="outline"
+						variant="ghost"
 						size="sm"
-						class="h-11 px-2.5 lg:h-7"
+						class="h-11 px-2.5 text-xs font-medium text-foreground/85 hover:bg-accent hover:text-foreground lg:h-7 lg:px-2"
 						onclick={() => (jsonOpen = true)}
 					>
 						<FileCode2 />
@@ -320,24 +345,24 @@
 				</Tooltip>
 				<Tooltip content="Convert circuit image or textbook netlist via AI" side="bottom">
 					<Button
-						variant="secondary"
+						variant="ghost"
 						size="sm"
-						class="h-11 px-2.5 lg:h-7"
+						class="h-11 px-2.5 text-xs font-medium text-foreground/85 hover:bg-accent hover:text-foreground lg:h-7 lg:px-2"
 						onclick={() => (aiOpen = true)}
 					>
-						<Sparkles />
+						<ScanLine />
 						<span class="hidden lg:inline">AI Import</span>
 						<span class="lg:hidden">AI</span>
 					</Button>
 				</Tooltip>
 
-				<Separator orientation="vertical" class="mx-0.5 h-5" />
+				<Separator orientation="vertical" class="mx-1 h-4" />
 
 				<Tooltip content="Workbench preferences & IEEE/IEC standard" side="bottom">
 					<Button
 						variant="ghost"
 						size="icon"
-						class="h-11 w-11 lg:h-8 lg:w-8"
+						class="h-11 w-11 lg:h-7 lg:w-7"
 						aria-label="Workbench settings"
 						onclick={() => (settingsOpen = true)}
 					>
@@ -350,7 +375,7 @@
 				<Button
 					variant="ghost"
 					size="icon"
-					class="h-11 w-11 lg:h-8 lg:w-8"
+					class="h-11 w-11 lg:h-7 lg:w-7"
 					aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
 					onclick={toggleMode}
 				>
@@ -386,7 +411,10 @@
 				<Button
 					variant="ghost"
 					size="icon"
-					aria-label={rightRailOpen ? 'Collapse results and inspector' : 'Expand results and inspector'}
+					class="h-7 w-7"
+					aria-label={rightRailOpen
+						? 'Collapse results and inspector'
+						: 'Expand results and inspector'}
 					onclick={() => (rightRailOpen = !rightRailOpen)}
 				>
 					{#if rightRailOpen}
@@ -498,7 +526,7 @@
 				}}
 				class="flex min-h-11 w-full cursor-pointer items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm font-medium text-foreground transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 			>
-				<Sparkles class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+				<ScanLine class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 				<span>AI Import</span>
 			</button>
 			<Separator class="my-1" />
@@ -604,10 +632,11 @@
 		{#if rightRailOpen}
 			<aside
 				aria-label="Results and element inspector"
-				class="hidden w-[360px] shrink-0 flex-col border-l border-border bg-surface-rail lg:flex lg:w-[380px] xl:w-[440px] 2xl:w-[460px]"
+				class="hidden w-[360px] shrink-0 flex-col border-l border-border bg-card lg:flex lg:w-[380px] xl:w-[440px] 2xl:w-[460px]"
 			>
 				<Tabs
 					value={rightTab}
+					variant="underline"
 					onValueChange={(next) => {
 						if (next === 'results' || next === 'inspector') {
 							rightTab = next;
@@ -615,26 +644,24 @@
 					}}
 					class="flex min-h-0 flex-1 flex-col"
 				>
-					<div class="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
-						<TabsList class="grid w-full grid-cols-2">
-							<TabsTrigger value="results">Results</TabsTrigger>
-							<TabsTrigger value="inspector" class="gap-1.5">
-								<span>Inspector</span>
-								{#if circuit.selectedComponent}
-									<Badge variant="warning" class="font-engineering px-1 py-0 text-[10px]">
-										{circuit.selectedComponent.label}
-									</Badge>
-								{:else if circuit.selectedWire}
-									<Badge variant="warning" class="font-engineering px-1 py-0 text-[10px]">
-										{circuit.selectedWire.id}
-									</Badge>
-								{/if}
-							</TabsTrigger>
-						</TabsList>
-					</div>
+					<TabsList class="grid h-9 w-full shrink-0 grid-cols-2 gap-0 px-3">
+						<TabsTrigger value="results" class="w-full">Results</TabsTrigger>
+						<TabsTrigger value="inspector" class="w-full gap-1.5">
+							<span>Inspector</span>
+							{#if circuit.selectedComponent}
+								<Badge variant="warning" class="font-engineering px-1 py-0 text-[10px]">
+									{circuit.selectedComponent.label}
+								</Badge>
+							{:else if circuit.selectedWire}
+								<Badge variant="warning" class="font-engineering px-1 py-0 text-[10px]">
+									{circuit.selectedWire.id}
+								</Badge>
+							{/if}
+						</TabsTrigger>
+					</TabsList>
 
 					{#if rightTab === 'results' && circuit.selectedComponent}
-						<div class="flex items-center justify-between gap-2 border-b border-border bg-card/70 px-3 py-1.5 text-xs">
+						<div class="flex items-center justify-between gap-2 border-b border-border bg-surface-rail/70 px-3 py-1.5 text-xs">
 							<div class="flex min-w-0 items-center gap-1.5">
 								<span class="text-muted-foreground">Selected:</span>
 								<span class="font-engineering font-semibold text-warning">
@@ -687,17 +714,17 @@
 				'relative flex min-h-[52px] flex-1 cursor-pointer flex-col items-center justify-center gap-0.5 px-2 py-1.5 text-[11px] transition-colors duration-150',
 				'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
 				mobileTab === 'canvas'
-					? 'bg-primary/8 font-semibold text-primary'
+					? 'font-semibold text-foreground'
 					: 'font-medium text-muted-foreground hover:text-foreground'
 			)}
 		>
 			{#if mobileTab === 'canvas'}
 				<span
-					class="absolute top-0 right-4 left-4 h-0.5 rounded-b-full bg-primary"
+					class="absolute top-0 right-3 left-3 h-0.5 bg-primary"
 					aria-hidden="true"
 				></span>
 			{/if}
-			<Cpu class="size-4" aria-hidden="true" />
+			<CircuitBoard class="size-4" aria-hidden="true" />
 			<span>Canvas</span>
 		</button>
 
@@ -709,13 +736,13 @@
 				'relative flex min-h-[52px] flex-1 cursor-pointer flex-col items-center justify-center gap-0.5 px-2 py-1.5 text-[11px] transition-colors duration-150',
 				'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
 				mobileTab === 'results'
-					? 'bg-primary/8 font-semibold text-primary'
+					? 'font-semibold text-foreground'
 					: 'font-medium text-muted-foreground hover:text-foreground'
 			)}
 		>
 			{#if mobileTab === 'results'}
 				<span
-					class="absolute top-0 right-4 left-4 h-0.5 rounded-b-full bg-primary"
+					class="absolute top-0 right-3 left-3 h-0.5 bg-primary"
 					aria-hidden="true"
 				></span>
 			{/if}
@@ -744,13 +771,13 @@
 				'relative flex min-h-[52px] flex-1 cursor-pointer flex-col items-center justify-center gap-0.5 px-2 py-1.5 text-[11px] transition-colors duration-150',
 				'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
 				mobileTab === 'inspector'
-					? 'bg-primary/8 font-semibold text-primary'
+					? 'font-semibold text-foreground'
 					: 'font-medium text-muted-foreground hover:text-foreground'
 			)}
 		>
 			{#if mobileTab === 'inspector'}
 				<span
-					class="absolute top-0 right-4 left-4 h-0.5 rounded-b-full bg-primary"
+					class="absolute top-0 right-3 left-3 h-0.5 bg-primary"
 					aria-hidden="true"
 				></span>
 			{/if}

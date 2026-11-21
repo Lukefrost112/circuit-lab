@@ -7,18 +7,17 @@
 		Minus,
 		Plus,
 		Redo2,
-		RotateCcw,
 		RotateCw,
 		Scan,
+		ScanLine,
 		SlidersHorizontal,
-		Sparkles,
 		Target,
 		Trash2,
 		Undo2,
 		X
 	} from 'lucide-svelte';
 	import { CircuitSymbol, GRID_SIZE, PALETTE_ITEMS } from '$lib/components/symbols';
-	import { Badge, Button, Separator, Tooltip } from '$lib/components/ui';
+	import { Button, Separator, Tooltip } from '$lib/components/ui';
 	import {
 		Complex,
 		getPinPositions,
@@ -1177,13 +1176,194 @@
 
 <div
 	bind:this={containerEl}
-	bind:clientWidth={viewportW}
-	bind:clientHeight={viewportH}
 	class={cn(
-		'relative flex min-h-0 flex-1 flex-col overflow-hidden bg-background select-none',
+		'flex min-h-0 flex-1 flex-col overflow-hidden bg-background select-none',
 		className
 	)}
 >
+	<!-- Mobile & Tablet Flush Top Telemetry Strip (< lg) -->
+	<div class="flex h-7 shrink-0 items-center justify-between gap-2 border-b border-border bg-surface-rail px-3 text-[11px] lg:hidden">
+		<div class="flex min-w-0 items-center gap-1.5 font-engineering">
+			<span class="text-muted-foreground">
+				Snap: <span class="text-foreground">{settings.snapToGrid ? 'ON' : 'OFF'}</span>
+			</span>
+			<span class="text-muted-foreground/60" aria-hidden="true">·</span>
+			<span class="text-voltage">
+				{nodeCount} {nodeCount === 1 ? 'Node' : 'Nodes'}
+			</span>
+		</div>
+
+		<div class="flex shrink-0 items-center gap-1.5 font-engineering">
+			{#if circuit.document.components.length === 0}
+				<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/50" aria-hidden="true"></span>
+				<span class="text-muted-foreground">Empty</span>
+			{:else if hasErrors}
+				<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-destructive" aria-hidden="true"></span>
+				<span class="font-medium text-destructive">Error</span>
+			{:else if circuit.solution.mna.valid}
+				<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-branch-current" aria-hidden="true"></span>
+				<span class="text-foreground">
+					{circuit.solution.allVerified ? 'Verified' : 'MNA'}
+				</span>
+			{:else}
+				<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true"></span>
+				<span class="text-muted-foreground">Idle</span>
+			{/if}
+		</div>
+	</div>
+
+	<!-- Flush Top Contextual Strip (only when wiring, placing, wire-tool, or probing) -->
+	{#if wireStart !== null}
+		<div
+			role="region"
+			aria-label="Active wire controls"
+			class="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-3 py-1"
+		>
+			<div class="flex min-w-0 items-center gap-1.5 text-xs">
+				<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" aria-hidden="true"></span>
+				<span class="truncate font-medium text-foreground">
+					Wiring<span class="hidden font-normal text-muted-foreground sm:inline">{' · Tap pin or grid'}</span>
+				</span>
+			</div>
+			<div class="flex shrink-0 items-center gap-1">
+				<Button
+					variant="secondary"
+					size="sm"
+					class="min-h-11 shrink-0 gap-1 px-2.5 text-xs lg:min-h-0 lg:h-6 lg:px-2"
+					aria-label="Flip wire bend direction"
+					onclick={() => {
+						wireBendMode = wireBendMode === 'hv' ? 'vh' : 'hv';
+					}}
+				>
+					<CornerDownRight class="size-3.5" aria-hidden="true" />
+					<span>Flip Bend</span>
+					<span class="font-engineering text-[10px] text-muted-foreground uppercase">
+						{wireBendMode}
+					</span>
+				</Button>
+				<Button
+					variant="ghost"
+					size="sm"
+					class="min-h-11 shrink-0 gap-1 px-2.5 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive lg:min-h-0 lg:h-6 lg:px-2"
+					aria-label="Cancel wiring"
+					onclick={() => {
+						wireStart = null;
+						wireStartedFromSelect = false;
+					}}
+				>
+					<X class="size-3.5" aria-hidden="true" />
+					<span>Cancel</span>
+				</Button>
+			</div>
+		</div>
+	{:else if isPlacementTool(circuit.activeTool)}
+		<div
+			role="region"
+			aria-label="Active tool controls"
+			class="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-3 py-1"
+		>
+			<div class="flex min-w-0 items-center gap-2 text-xs">
+				<CircuitSymbol
+					kind={circuit.activeTool}
+					variant="icon"
+					sourceMode={circuit.activeSourceMode}
+					size={18}
+					terminalLabel={circuit.activeTool === 'terminal' ? 'A' : undefined}
+					class="shrink-0 text-primary"
+				/>
+				<span class="truncate font-medium text-foreground">
+					Place {activeToolLabel}
+					<span class="font-engineering text-[11px] font-normal text-muted-foreground">
+						{' · '}{circuit.placementRotation}°
+					</span>
+				</span>
+			</div>
+			<div class="flex shrink-0 items-center gap-1">
+				<Button
+					variant="secondary"
+					size="sm"
+					class="min-h-11 shrink-0 gap-1 px-2.5 text-xs lg:min-h-0 lg:h-6 lg:px-2"
+					aria-label="Rotate placement 90 degrees"
+					onclick={() => circuit.rotatePlacement()}
+				>
+					<RotateCw class="size-3.5" aria-hidden="true" />
+					<span>Rotate 90°</span>
+				</Button>
+				<Button
+					variant="ghost"
+					size="sm"
+					class="min-h-11 shrink-0 gap-1 px-2.5 text-xs lg:min-h-0 lg:h-6 lg:px-2"
+					aria-label="Exit active tool"
+					onclick={() => circuit.setActiveTool('select')}
+				>
+					<X class="size-3.5" aria-hidden="true" />
+					<span>Done</span>
+				</Button>
+			</div>
+		</div>
+	{:else if circuit.activeTool === 'wire'}
+		<div
+			role="region"
+			aria-label="Active tool controls"
+			class="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-3 py-1"
+		>
+			<div class="flex min-w-0 items-center gap-1.5 text-xs">
+				<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" aria-hidden="true"></span>
+				<span class="truncate font-medium text-foreground">
+					Orthogonal Wire<span class="hidden font-normal text-muted-foreground sm:inline">{' · Tap pin or grid'}</span>
+				</span>
+			</div>
+			<Button
+				variant="ghost"
+				size="sm"
+				class="min-h-11 shrink-0 gap-1 px-2.5 text-xs lg:min-h-0 lg:h-6 lg:px-2"
+				aria-label="Exit active tool"
+				onclick={() => circuit.setActiveTool('select')}
+			>
+				<X class="size-3.5" aria-hidden="true" />
+				<span>Done</span>
+			</Button>
+		</div>
+	{:else if circuit.activeTool === 'probe'}
+		<div
+			role="region"
+			aria-label="Active tool controls"
+			class="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-3 py-1"
+		>
+			<div class="flex min-w-0 items-center gap-1.5 text-xs">
+				<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-voltage" aria-hidden="true"></span>
+				{#if probedNodeData}
+					<span class="truncate text-muted-foreground">
+						Node <span class="font-engineering font-semibold text-foreground">{probedNodeData.nodeId}:</span>{' '}
+						<span class="font-engineering font-semibold text-voltage">
+							{probedNodeData.formatted}
+						</span>
+					</span>
+				{:else}
+					<span class="truncate font-medium text-foreground">
+						Node Voltage Probe<span class="hidden font-normal text-muted-foreground sm:inline">{' · Tap any node or wire'}</span>
+					</span>
+				{/if}
+			</div>
+			<Button
+				variant="ghost"
+				size="sm"
+				class="min-h-11 shrink-0 gap-1 px-2.5 text-xs lg:min-h-0 lg:h-6 lg:px-2"
+				aria-label="Exit active tool"
+				onclick={() => circuit.setActiveTool('select')}
+			>
+				<X class="size-3.5" aria-hidden="true" />
+				<span>Done</span>
+			</Button>
+		</div>
+	{/if}
+
+	<!-- Unobstructed Interactive SVG Stage -->
+	<div
+		bind:clientWidth={viewportW}
+		bind:clientHeight={viewportH}
+		class="relative min-h-0 flex-1 overflow-hidden"
+	>
 	<!-- Interactive SVG Canvas -->
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 	<svg
@@ -1381,7 +1561,7 @@
 							y={selRect.y}
 							width={selRect.width}
 							height={selRect.height}
-							rx="6"
+							rx="4"
 							fill="var(--warning)"
 							fill-opacity="0.08"
 							stroke="var(--warning)"
@@ -1459,7 +1639,7 @@
 								y="-9"
 								width="96"
 								height="17"
-								rx="4"
+								rx="3"
 								fill="var(--card)"
 								stroke="var(--warning)"
 								stroke-width="1"
@@ -1549,7 +1729,7 @@
 							y="-8"
 							width={br.pillWidth}
 							height="16"
-							rx="4"
+							rx="3"
 							fill="var(--card)"
 							fill-opacity="0.95"
 							stroke="var(--current)"
@@ -1594,7 +1774,7 @@
 							y="-8.5"
 							width={node.pillWidth}
 							height="17"
-							rx="8.5"
+							rx="3"
 							fill="var(--card)"
 							fill-opacity="0.96"
 							stroke={node.isReference ? 'var(--border)' : 'var(--voltage)'}
@@ -1619,203 +1799,62 @@
 		</g>
 	</svg>
 
-	<!-- Top Telemetry Strip -->
-	<div class="pointer-events-none absolute top-3 right-3 left-3 flex items-center justify-between gap-2">
-		<div class="pointer-events-auto inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md border border-border bg-card/95 px-2.5 py-1 text-[11px] shadow-2xs">
-			<span class="hidden font-engineering text-muted-foreground sm:inline lg:hidden xl:inline">Grid: 20 px</span>
-			<Separator orientation="vertical" class="hidden h-3 sm:block lg:hidden xl:block" />
-			<span class="font-engineering text-foreground">
-				Snap: {settings.snapToGrid ? 'ON' : 'OFF'}
-			</span>
-			<Separator orientation="vertical" class="h-3" />
-			<span class="font-engineering text-voltage">
-				{nodeCount} {nodeCount === 1 ? 'Node' : 'Nodes'}
-			</span>
-			{#if hoverGrid}
-				<Separator orientation="vertical" class="hidden h-3 xl:block" />
-				<span class="hidden font-engineering text-muted-foreground xl:inline">
-					({hoverGrid.x}, {hoverGrid.y})
-				</span>
-			{/if}
-		</div>
+		<!-- Onboarding Empty State -->
+		{#if circuit.document.components.length === 0}
+			<div class="pointer-events-none absolute inset-0 flex items-center justify-center p-4">
+				<div class="pointer-events-auto w-full max-w-md rounded-[4px] border border-border bg-card/95 p-5">
+					<h1 class="text-sm font-semibold tracking-tight text-foreground">
+						Place a component or load a preset to begin
+					</h1>
+					<p class="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+						Select a source, passive element, or wire tool from the palette to capture your
+						schematic, or open a verified reference circuit to inspect live node voltages and
+						branch currents.
+					</p>
 
-		<div class="pointer-events-auto hidden shrink-0 items-center gap-2 whitespace-nowrap rounded-md border border-border bg-card/95 px-2.5 py-1 text-[11px] shadow-2xs sm:inline-flex">
-			{#if circuit.document.components.length === 0}
-				<span class="h-2 w-2 shrink-0 rounded-full bg-muted-foreground"></span>
-				<span class="text-muted-foreground">Canvas empty</span>
-			{:else if hasErrors}
-				<span class="h-2 w-2 shrink-0 rounded-full bg-destructive"></span>
-				<span class="font-medium text-destructive">Topology / Value Error</span>
-			{:else if circuit.solution.mna.valid}
-				<span class="h-2 w-2 shrink-0 rounded-full bg-branch-current"></span>
-				<span class="text-foreground">
-					Solved<span class="xl:hidden">{circuit.solution.allVerified ? ' · Verified' : ' · MNA'}</span><span class="hidden xl:inline">{' '}({circuit.solution.allVerified ? 'All methods verified' : 'MNA ready'})</span>
-				</span>
-			{:else}
-				<span class="h-2 w-2 shrink-0 rounded-full bg-warning"></span>
-				<span class="text-muted-foreground">Solver idle</span>
-			{/if}
-		</div>
+					<div class="mt-4 flex flex-wrap items-center gap-2">
+						<Button variant="default" size="sm" onclick={() => onOpenPresets?.()}>
+							<BookOpen />
+							<span>Browse Presets</span>
+						</Button>
+						<Button variant="outline" size="sm" onclick={() => onOpenImport?.()}>
+							<FileCode2 />
+							<span>Import JSON</span>
+						</Button>
+						<Button variant="ghost" size="sm" onclick={() => onOpenAiImport?.()}>
+							<ScanLine />
+							<span>AI Import</span>
+						</Button>
+					</div>
+				</div>
+			</div>
+		{/if}
 	</div>
 
-	<!-- On-screen Wiring Floating Pill -->
-	{#if wireStart !== null}
-		<div
-			role="region"
-			aria-label="Active wire controls"
-			class="pointer-events-none absolute top-12 left-1/2 z-20 flex max-w-[calc(100%-1rem)] -translate-x-1/2 justify-center"
-		>
-			<div class="pointer-events-auto inline-flex max-w-full items-center gap-1.5 rounded-lg border border-primary/40 bg-card/95 px-2.5 py-1 shadow-md backdrop-blur-xs">
-				<span class="flex items-center gap-1.5 truncate text-xs font-medium text-foreground">
-					<span class="h-2 w-2 shrink-0 rounded-full bg-primary" aria-hidden="true"></span>
-					<span class="truncate">
-						Wiring<span class="hidden sm:inline">{' · Tap pin/grid'}</span>
-					</span>
-				</span>
-				<Separator orientation="vertical" class="h-4 shrink-0" />
-				<Button
-					variant="secondary"
-					size="sm"
-					class="min-h-11 shrink-0 gap-1 px-3 text-xs lg:min-h-7 lg:px-2.5"
-					aria-label="Flip wire bend direction"
-					onclick={() => {
-						wireBendMode = wireBendMode === 'hv' ? 'vh' : 'hv';
-					}}
-				>
-					<CornerDownRight class="size-3.5" aria-hidden="true" />
-					<span>Flip Bend</span>
-					<span class="font-engineering text-[10px] text-muted-foreground uppercase">
-						{wireBendMode}
-					</span>
-				</Button>
-				<Button
-					variant="ghost"
-					size="sm"
-					class="min-h-11 shrink-0 gap-1 px-3 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive lg:min-h-7 lg:px-2.5"
-					aria-label="Cancel wiring"
-					onclick={() => {
-						wireStart = null;
-						wireStartedFromSelect = false;
-					}}
-				>
-					<X class="size-3.5" aria-hidden="true" />
-					<span>Cancel</span>
-				</Button>
-			</div>
-		</div>
-	{:else if isPlacementTool(circuit.activeTool) || circuit.activeTool === 'wire' || circuit.activeTool === 'probe'}
-		<!-- On-screen Placement / Wire / Probe Mode Floating Pill -->
-		<div
-			role="region"
-			aria-label="Active tool controls"
-			class="pointer-events-none absolute top-12 left-1/2 z-20 flex max-w-[calc(100%-1rem)] -translate-x-1/2 justify-center"
-		>
-			<div class="pointer-events-auto inline-flex max-w-full items-center gap-1.5 rounded-lg border border-primary/40 bg-card/95 px-2.5 py-1 shadow-md backdrop-blur-xs">
-				<span class="flex items-center gap-1.5 truncate text-xs font-medium text-foreground">
-					<span class="h-2 w-2 shrink-0 rounded-full bg-primary" aria-hidden="true"></span>
-					<span class="truncate">{activeToolLabel}</span>
-					{#if isPlacementTool(circuit.activeTool)}
-						<span class="font-engineering text-[11px] text-muted-foreground">
-							{circuit.placementRotation}°
-						</span>
-					{/if}
-				</span>
-				<Separator orientation="vertical" class="h-4 shrink-0" />
-				{#if isPlacementTool(circuit.activeTool)}
-					<Button
-						variant="secondary"
-						size="sm"
-						class="min-h-11 shrink-0 gap-1 px-2.5 text-xs lg:min-h-7 lg:px-2"
-						aria-label="Rotate placement 90 degrees"
-						onclick={() => circuit.rotatePlacement()}
-					>
-						<RotateCw class="size-3.5" aria-hidden="true" />
-						<span>Rotate 90°</span>
-					</Button>
-				{/if}
-				<Button
-					variant="ghost"
-					size="sm"
-					class="min-h-11 shrink-0 gap-1 px-3 text-xs lg:min-h-7 lg:px-2.5"
-					aria-label="Exit active tool"
-					onclick={() => circuit.setActiveTool('select')}
-				>
-					<X class="size-3.5" aria-hidden="true" />
-					<span>Done</span>
-				</Button>
-			</div>
-		</div>
-	{/if}
-
-	<!-- Probe Readout Pill (when Probe tool active) -->
-	{#if circuit.activeTool === 'probe' && probedNodeData}
-		<div class="pointer-events-none absolute top-28 left-3 z-10 rounded-md border border-voltage/40 bg-card/95 px-3 py-1.5 shadow-sm lg:top-24">
-			<div class="flex items-center gap-2 text-xs">
-				<span class="text-muted-foreground">Probe Node</span>
-				<Badge variant="voltage">{probedNodeData.nodeId}</Badge>
-				<span class="font-engineering font-semibold text-voltage">
-					{probedNodeData.formatted}
-				</span>
-			</div>
-		</div>
-	{/if}
-
-	<!-- Onboarding Empty State -->
-	{#if circuit.document.components.length === 0}
-		<div class="pointer-events-none absolute inset-0 flex items-center justify-center p-4">
-			<div class="pointer-events-auto w-full max-w-md rounded-lg border border-border bg-card/95 p-6 shadow-sm">
-				<div class="mb-4 flex h-10 w-10 items-center justify-center rounded-md border border-border bg-surface-rail text-primary">
-					<CircuitSymbol kind="resistor" variant="icon" size={24} />
-				</div>
-
-				<h1 class="text-base font-semibold tracking-tight text-foreground">
-					Place a component or load a preset to begin
-				</h1>
-				<p class="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-					Select a source, passive element, or wire tool from the palette to capture your
-					schematic, or open a verified reference circuit to inspect live node voltages and
-					branch currents.
-				</p>
-
-				<div class="mt-4 flex flex-wrap items-center gap-2">
-					<Button variant="default" size="sm" onclick={() => onOpenPresets?.()}>
-						<BookOpen />
-						<span>Browse Presets</span>
-					</Button>
-					<Button variant="outline" size="sm" onclick={() => onOpenImport?.()}>
-						<FileCode2 />
-						<span>Import Netlist</span>
-					</Button>
-					<Button variant="ghost" size="sm" onclick={() => onOpenAiImport?.()}>
-						<Sparkles />
-						<span>AI Import</span>
-					</Button>
-				</div>
-			</div>
-		</div>
-	{/if}
-
-	<!-- Selected Element Quick Action Bar (< lg) -->
+	<!-- Selected Element Contextual Strip (< lg) -->
 	{#if (circuit.selectedComponent || circuit.selectedWire) && !wireStart && !isPlacementTool(circuit.activeTool)}
 		<div
 			role="toolbar"
 			aria-label="Selected element actions"
-			class="pointer-events-none absolute right-2 bottom-[68px] left-2 z-20 flex justify-center lg:hidden"
+			class="flex shrink-0 items-center justify-between gap-1.5 border-t border-border bg-card px-2.5 py-1 lg:hidden"
 		>
-			<div class="no-scrollbar pointer-events-auto inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-lg border border-warning/50 bg-card/95 px-2 py-1 shadow-lg backdrop-blur-xs">
-				{#if circuit.selectedComponent}
-					{@const selectedComp = circuit.selectedComponent}
-					{@const isTwoTerminal = selectedComp.kind !== 'ground' && selectedComp.kind !== 'terminal'}
-					{@const isTheveninActive =
-						circuit.theveninTarget?.kind === 'component' &&
-						circuit.theveninTarget.componentId === selectedComp.id}
-					<Badge variant="warning" class="font-engineering shrink-0 px-1.5 py-0.5 text-xs">
+			{#if circuit.selectedComponent}
+				{@const selectedComp = circuit.selectedComponent}
+				{@const isTwoTerminal = selectedComp.kind !== 'ground' && selectedComp.kind !== 'terminal'}
+				{@const isTheveninActive =
+					circuit.theveninTarget?.kind === 'component' &&
+					circuit.theveninTarget.componentId === selectedComp.id}
+				<div class="flex min-w-0 items-center gap-1.5">
+					<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true"></span>
+					<span class="font-engineering truncate text-xs font-semibold text-foreground">
 						{selectedComp.label}
-					</Badge>
+					</span>
+				</div>
+				<div class="flex shrink-0 items-center gap-0.5">
 					<Button
 						variant="ghost"
 						size="sm"
-						class="min-h-11 shrink-0 gap-1 px-2.5 text-xs"
+						class="min-h-11 shrink-0 gap-1 px-2 text-xs"
 						aria-label="Rotate component 90 degrees"
 						onclick={() => circuit.rotateComponent(selectedComp.id)}
 					>
@@ -1825,7 +1864,7 @@
 					<Button
 						variant="ghost"
 						size="sm"
-						class="min-h-11 shrink-0 gap-1 px-2.5 text-xs"
+						class="min-h-11 shrink-0 gap-1 px-2 text-xs"
 						aria-label="Inspect component properties"
 						onclick={() => onMobileInspect?.(selectedComp.id)}
 					>
@@ -1837,7 +1876,7 @@
 							variant={isTheveninActive ? 'secondary' : 'ghost'}
 							size="sm"
 							class={cn(
-								'min-h-11 shrink-0 gap-1 px-2.5 text-xs',
+								'min-h-11 shrink-0 gap-1 px-2 text-xs',
 								isTheveninActive && 'border border-warning/50 bg-warning/15 text-warning'
 							)}
 							aria-label={isTheveninActive
@@ -1865,11 +1904,16 @@
 					>
 						<Trash2 class="size-4" aria-hidden="true" />
 					</Button>
-				{:else if circuit.selectedWire}
-					{@const selectedWire = circuit.selectedWire}
-					<Badge variant="warning" class="font-engineering shrink-0 px-1.5 py-0.5 text-xs">
+				</div>
+			{:else if circuit.selectedWire}
+				{@const selectedWire = circuit.selectedWire}
+				<div class="flex min-w-0 items-center gap-1.5">
+					<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true"></span>
+					<span class="font-engineering truncate text-xs font-semibold text-foreground">
 						{selectedWire.id}
-					</Badge>
+					</span>
+				</div>
+				<div class="flex shrink-0 items-center gap-0.5">
 					<Button
 						variant="ghost"
 						size="sm"
@@ -1890,14 +1934,14 @@
 						<Trash2 class="size-3.5" aria-hidden="true" />
 						<span>Delete</span>
 					</Button>
-				{/if}
-			</div>
+				</div>
+			{/if}
 		</div>
 	{/if}
 
-	<!-- Mobile & Tablet Floating Canvas Controls (< lg) -->
-	<div class="pointer-events-none absolute right-2 bottom-3 left-2 z-20 flex items-center justify-between gap-2 lg:hidden">
-		<div class="pointer-events-auto inline-flex items-center rounded-lg border border-border bg-card/95 p-0.5 shadow-md backdrop-blur-xs">
+	<!-- Mobile & Tablet Bottom Docked Canvas Tool Strip (< lg) -->
+	<div class="flex shrink-0 items-center justify-between gap-2 border-t border-border bg-surface-rail px-2 py-1 lg:hidden">
+		<div class="flex items-center">
 			<Button
 				variant="ghost"
 				size="icon"
@@ -1947,20 +1991,64 @@
 			</Button>
 		</div>
 
-		<Button
-			variant="default"
+		<button
+			type="button"
 			onclick={() => onOpenPalette?.()}
 			aria-label="Open component palette"
-			class="pointer-events-auto min-h-11 shrink-0 gap-1.5 rounded-lg px-3 text-sm shadow-md"
+			class="inline-flex min-h-11 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-[4px] bg-foreground px-3.5 text-xs font-medium text-background transition-colors duration-150 hover:bg-foreground/90 active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
 		>
 			<Plus class="size-4" aria-hidden="true" />
 			<span>Parts</span>
-		</Button>
+		</button>
 	</div>
 
-	<!-- Desktop Bottom Controls & Contextual Hint (lg+) -->
-	<div class="pointer-events-none absolute right-3 bottom-3 left-3 hidden flex-wrap items-center justify-between gap-2 lg:flex">
-		<div class="pointer-events-auto inline-flex items-center gap-1 rounded-md border border-border bg-card/95 p-1 shadow-2xs">
+	<!-- Desktop Docked Bottom Status & Tool Bar (lg+) -->
+	<div class="hidden h-8 shrink-0 items-center justify-between gap-3 border-t border-border bg-surface-rail px-3 text-[11px] lg:flex">
+		<!-- Left: Solver Status, Telemetry & Contextual Hint -->
+		<div class="flex min-w-0 items-center gap-2.5">
+			<div class="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
+				{#if circuit.document.components.length === 0}
+					<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/50" aria-hidden="true"></span>
+					<span class="text-muted-foreground">Empty</span>
+				{:else if hasErrors}
+					<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-destructive" aria-hidden="true"></span>
+					<span class="font-medium text-destructive">Topology / Value Error</span>
+				{:else if circuit.solution.mna.valid}
+					<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-branch-current" aria-hidden="true"></span>
+					<span class="text-foreground">
+						Solved<span class="xl:hidden">{circuit.solution.allVerified ? ' · Verified' : ' · MNA'}</span><span class="hidden xl:inline">{circuit.solution.allVerified ? ' · All methods verified' : ' · MNA ready'}</span>
+					</span>
+				{:else}
+					<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true"></span>
+					<span class="text-muted-foreground">Solver idle</span>
+				{/if}
+			</div>
+
+			<Separator orientation="vertical" class="h-3.5 shrink-0" />
+
+			<div class="flex shrink-0 items-center gap-2.5 font-engineering whitespace-nowrap">
+				<span class="hidden text-muted-foreground xl:inline">Grid 20px</span>
+				<span class="text-muted-foreground">
+					Snap <span class="text-foreground">{settings.snapToGrid ? 'ON' : 'OFF'}</span>
+				</span>
+				<span class="text-voltage">
+					{nodeCount} {nodeCount === 1 ? 'Node' : 'Nodes'}
+				</span>
+				{#if hoverGrid}
+					<span class="text-muted-foreground">
+						({hoverGrid.x}, {hoverGrid.y})
+					</span>
+				{/if}
+			</div>
+
+			<Separator orientation="vertical" class="hidden h-3.5 shrink-0 2xl:block" />
+			<span class="hidden truncate text-muted-foreground/80 2xl:inline">
+				{activeToolHint}
+			</span>
+		</div>
+
+		<!-- Right: Flat Hairline Viewport & History Controls -->
+		<div class="flex shrink-0 items-center gap-0.5">
 			<Tooltip content="Zoom out" side="top">
 				<Button
 					variant="ghost"
@@ -1976,7 +2064,7 @@
 				type="button"
 				onclick={resetZoom}
 				title="Reset zoom to 100%"
-				class="min-w-11 cursor-pointer rounded px-1 py-0.5 text-center font-engineering text-[11px] text-foreground hover:bg-accent"
+				class="min-w-10 cursor-pointer rounded-[3px] px-1 py-0.5 text-center font-engineering text-[11px] text-foreground transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 			>
 				{Math.round(zoom * 100)}%
 			</button>
@@ -1991,20 +2079,6 @@
 					<Plus class="size-3.5" />
 				</Button>
 			</Tooltip>
-
-			<Separator orientation="vertical" class="mx-0.5 h-4" />
-
-			<Tooltip content="Reset to 100%" side="top">
-				<Button
-					variant="ghost"
-					size="icon"
-					class="h-6 w-6"
-					aria-label="Reset zoom"
-					onclick={resetZoom}
-				>
-					<RotateCcw class="size-3.5" />
-				</Button>
-			</Tooltip>
 			<Tooltip content="Fit schematic to view" side="top">
 				<Button
 					variant="ghost"
@@ -2017,7 +2091,7 @@
 				</Button>
 			</Tooltip>
 
-			<Separator orientation="vertical" class="mx-0.5 h-4" />
+			<Separator orientation="vertical" class="mx-1 h-3.5" />
 
 			<Tooltip content="Undo (Ctrl+Z)" side="top">
 				<Button
@@ -2055,10 +2129,6 @@
 					<Eraser class="size-3.5" />
 				</Button>
 			</Tooltip>
-		</div>
-
-		<div class="hidden rounded-md border border-border bg-card/95 px-2.5 py-1 text-[11px] text-muted-foreground shadow-2xs md:block">
-			{activeToolHint}
 		</div>
 	</div>
 </div>
