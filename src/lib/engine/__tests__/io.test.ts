@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { layoutNetlistToDocument } from '../auto-layout';
+import { layoutNetlistToDocument, layoutNetlistWithMeta } from '../auto-layout';
 import { buildElectricalGraph } from '../graph';
 import { AI_CIRCUIT_IMPORT_PROMPT, exportCircuitJson, parseCircuitImport } from '../io';
 import { solveMNA } from '../mna';
-import type { CircuitDocument } from '../types';
+import { solveCircuit } from '../solve';
+import type { CircuitDocument, UnitSystemId } from '../types';
 
 function assertNoComponentOverlap(doc: CircuitDocument): void {
 	const active = doc.components;
@@ -265,4 +266,490 @@ Let me know if you want node voltages calculated!`;
 		expect(sol.branches['R1'].current.re).toBeCloseTo(iTotRe, 9);
 		expect(sol.branches['R1'].current.im).toBeCloseTo(iTotIm, 9);
 	});
+
+	it('includes visual-grid, unitSystem, and unknownProblem instructions in AI_CIRCUIT_IMPORT_PROMPT', () => {
+		expect(AI_CIRCUIT_IMPORT_PROMPT).toContain('"fromPos"');
+		expect(AI_CIRCUIT_IMPORT_PROMPT).toContain('"toPos"');
+		expect(AI_CIRCUIT_IMPORT_PROMPT).toContain('"unitSystem"');
+		expect(AI_CIRCUIT_IMPORT_PROMPT).toContain('"ohm-v-a"');
+		expect(AI_CIRCUIT_IMPORT_PROMPT).toContain('"kohm-v-ma"');
+		expect(AI_CIRCUIT_IMPORT_PROMPT).toContain('"mohm-v-ua"');
+		expect(AI_CIRCUIT_IMPORT_PROMPT).toContain('"unknownProblem"');
+	});
+
+	it('visual-grid cloner preserves exact horizontal/vertical orientations, upward current source, left-to-right vs right-to-left, and MNA equivalence', () => {
+		const res = parseCircuitImport(
+			JSON.stringify({
+				schemaVersion: 1,
+				name: 'Oriented Dual-Source Schematic',
+				mode: 'dc',
+				unitSystem: 'kohm-v-ma',
+				elements: [
+					// Downward voltage source (+ top, - bottom) at col 0
+					{
+						id: 'V1',
+						kind: 'voltage_source',
+						label: 'V1',
+						from: 'N1',
+						to: '0',
+						fromPos: [0, 0],
+						toPos: [0, 1],
+						value: '12'
+					},
+					// Left-to-right horizontal resistor on top rail (0 -> 1)
+					{
+						id: 'R1',
+						kind: 'resistor',
+						label: 'R1',
+						from: 'N1',
+						to: 'N2',
+						fromPos: [0, 0],
+						toPos: [1, 0],
+						value: '2k'
+					},
+					// Downward vertical resistor at col 1
+					{
+						id: 'R2',
+						kind: 'resistor',
+						label: 'R2',
+						from: 'N2',
+						to: '0',
+						fromPos: [1, 0],
+						toPos: [1, 1],
+						value: '4k'
+					},
+					// Right-to-left horizontal resistor on top rail (2 -> 1) -> rotation 180
+					{
+						id: 'R3',
+						kind: 'resistor',
+						label: 'R3',
+						from: 'N3',
+						to: 'N2',
+						fromPos: [2, 0],
+						toPos: [1, 0],
+						value: '2k'
+					},
+					// Upward current source (tail at bottom [2,1], head at top [2,0]) -> rotation 270
+					{
+						id: 'I1',
+						kind: 'current_source',
+						label: 'I1',
+						from: '0',
+						to: 'N3',
+						fromPos: [2, 1],
+						toPos: [2, 0],
+						value: '1m'
+					}
+				]
+			})
+		);
+
+		expect(res.ok).toBe(true);
+		if (!res.ok) return;
+
+		expect(res.sourceFormat).toBe('ai-netlist');
+		expect(res.layoutMode).toBe('visual-grid');
+		expect(res.warnings).toEqual([]);
+		expect(res.document.unitSystem).toBe('kohm-v-ma');
+		assertNoComponentOverlap(res.document);
+
+		const byId = Object.fromEntries(res.document.components.map((c) => [c.id, c]));
+		// Exact orientation checks
+		expect(byId['V1'].rotation).toBe(90);
+		expect(byId['R1'].rotation).toBe(0);
+		expect(byId['R2'].rotation).toBe(90);
+		expect(byId['R3'].rotation).toBe(180);
+		expect(byId['I1'].rotation).toBe(270);
+
+		// Exact left-to-right spatial order preserved
+		expect(byId['V1'].x).toBeLessThan(byId['R1'].x);
+		expect(byId['R1'].x).toBeLessThan(byId['R2'].x);
+		expect(byId['R2'].x).toBeLessThan(byId['R3'].x);
+		expect(byId['R3'].x).toBeLessThan(byId['I1'].x);
+		// Top-rail resistors sit strictly above vertical branch centers
+		expect(byId['R1'].y).toBe(byId['R3'].y);
+		expect(byId['R1'].y).toBeLessThan(byId['V1'].y);
+		expect(byId['V1'].y).toBe(byId['R2'].y);
+		expect(byId['R2'].y).toBe(byId['I1'].y);
+
+		// Analytical MNA check:
+		// KCL at N2: (V2 - 12)/2k + V2/4k - 1mA = 0 => V2*(3/4k) = 7mA => V2 = 28/3 V
+		// I(R2) = V2/4k = 7/3 mA; I(R3) = +1mA (from N3 to N2)
+		const sol = solveMNA(res.document);
+		expect(sol.valid).toBe(true);
+		expect(sol.powerBalance.balanced).toBe(true);
+		expect(sol.branches['R2'].voltage.re).toBeCloseTo(28 / 3, 9);
+		expect(sol.branches['R2'].current.re).toBeCloseTo(7 / 3000, 9);
+		expect(sol.branches['R3'].current.re).toBeCloseTo(1e-3, 9);
+	});
+
+	it('visual-grid cloner handles parallel branches on the same segment and a spanning top branch without overlap or shorts', () => {
+		const res = parseCircuitImport(
+			JSON.stringify({
+				schemaVersion: 1,
+				name: 'Parallel + Spanning Visual Grid',
+				mode: 'dc',
+				elements: [
+					{
+						id: 'V1',
+						kind: 'voltage_source',
+						from: 'N1',
+						to: '0',
+						fromPos: [0, 0],
+						toPos: [0, 1],
+						value: '12'
+					},
+					{
+						id: 'R1',
+						kind: 'resistor',
+						from: 'N1',
+						to: 'N2',
+						fromPos: [0, 0],
+						toPos: [1, 0],
+						value: '2'
+					},
+					// Two parallel vertical resistors on the same [1,0]->[1,1] segment
+					{
+						id: 'R2a',
+						kind: 'resistor',
+						from: 'N2',
+						to: '0',
+						fromPos: [1, 0],
+						toPos: [1, 1],
+						value: '4'
+					},
+					{
+						id: 'R2b',
+						kind: 'resistor',
+						from: 'N2',
+						to: '0',
+						fromPos: [1, 0],
+						toPos: [1, 1],
+						value: '4'
+					},
+					{
+						id: 'R3',
+						kind: 'resistor',
+						from: 'N2',
+						to: 'N3',
+						fromPos: [1, 0],
+						toPos: [2, 0],
+						value: '2'
+					},
+					{
+						id: 'R4',
+						kind: 'resistor',
+						from: 'N3',
+						to: '0',
+						fromPos: [2, 0],
+						toPos: [2, 1],
+						value: '2'
+					},
+					// Spanning top resistor across N1 ([0,0]) -> N3 ([2,0]) leaping over N2 ([1,0])
+					{
+						id: 'Rtop',
+						kind: 'resistor',
+						from: 'N1',
+						to: 'N3',
+						fromPos: [0, 0],
+						toPos: [2, 0],
+						value: '4'
+					}
+				]
+			})
+		);
+
+		expect(res.ok).toBe(true);
+		if (!res.ok) return;
+
+		expect(res.layoutMode).toBe('visual-grid');
+		assertNoComponentOverlap(res.document);
+
+		const byId = Object.fromEntries(res.document.components.map((c) => [c.id, c]));
+		// Parallel vertical branches spread cleanly side-by-side at same Y
+		expect(byId['R2a'].y).toBe(byId['R2b'].y);
+		expect(byId['R2a'].x).not.toBe(byId['R2b'].x);
+		// Spanning top branch sits strictly above main top rail
+		expect(byId['Rtop'].y).toBeLessThan(byId['R1'].y);
+
+		// Verify exact electrical equivalence against ladder reference layout
+		const ladderDoc = layoutNetlistToDocument({
+			mode: 'dc',
+			elements: [
+				{ id: 'V1', kind: 'voltage_source', from: 'N1', to: '0', value: '12' },
+				{ id: 'R1', kind: 'resistor', from: 'N1', to: 'N2', value: '2' },
+				{ id: 'R2a', kind: 'resistor', from: 'N2', to: '0', value: '4' },
+				{ id: 'R2b', kind: 'resistor', from: 'N2', to: '0', value: '4' },
+				{ id: 'R3', kind: 'resistor', from: 'N2', to: 'N3', value: '2' },
+				{ id: 'R4', kind: 'resistor', from: 'N3', to: '0', value: '2' },
+				{ id: 'Rtop', kind: 'resistor', from: 'N1', to: 'N3', value: '4' }
+			]
+		});
+		const solVisual = solveMNA(res.document);
+		const solRef = solveMNA(ladderDoc);
+		expect(solVisual.valid).toBe(true);
+		expect(solVisual.powerBalance.balanced).toBe(true);
+		for (const id of ['V1', 'R1', 'R2a', 'R2b', 'R3', 'R4', 'Rtop']) {
+			expect(solVisual.branches[id].current.re).toBeCloseTo(solRef.branches[id].current.re, 9);
+			expect(solVisual.branches[id].voltage.re).toBeCloseTo(solRef.branches[id].voltage.re, 9);
+		}
+	});
+
+	it('falls back safely to auto-layout when visual-grid coordinates conflict electrically, and keeps legacy netlists backwards compatible', () => {
+		// Conflicting coordinates: two different nodes N1 and N2 placed at the same vertex [1,0]
+		const conflict = parseCircuitImport(
+			JSON.stringify({
+				mode: 'dc',
+				elements: [
+					{
+						id: 'V1',
+						kind: 'voltage_source',
+						from: 'N1',
+						to: '0',
+						fromPos: [1, 0],
+						toPos: [0, 1],
+						value: '12'
+					},
+					{
+						id: 'R1',
+						kind: 'resistor',
+						from: 'N1',
+						to: 'N2',
+						fromPos: [0, 0],
+						toPos: [1, 0],
+						value: '2k'
+					},
+					{
+						id: 'R2',
+						kind: 'resistor',
+						from: 'N2',
+						to: '0',
+						fromPos: [1, 0],
+						toPos: [1, 1],
+						value: '4k'
+					}
+				]
+			})
+		);
+		expect(conflict.ok).toBe(true);
+		if (!conflict.ok) return;
+		expect(conflict.layoutMode).toBe('auto-layout');
+		expect(conflict.warnings.some((w) => w.includes('fell back'))).toBe(true);
+		const conflictSol = solveMNA(conflict.document);
+		expect(conflictSol.valid).toBe(true);
+		expect(conflictSol.branches['R2'].voltage.re).toBeCloseTo(8, 9);
+
+		// Legacy netlist without fromPos/toPos uses auto-layout with zero warnings
+		const legacy = layoutNetlistWithMeta({
+			mode: 'dc',
+			elements: [
+				{ id: 'V1', kind: 'voltage_source', from: 'N1', to: '0', value: '12' },
+				{ id: 'R1', kind: 'resistor', from: 'N1', to: 'N2', value: '2k' },
+				{ id: 'R2', kind: 'resistor', from: 'N2', to: '0', value: '4k' }
+			]
+		});
+		expect(legacy.layoutMode).toBe('auto-layout');
+		expect(legacy.warnings).toEqual([]);
+		expect(solveMNA(legacy.document).branches['R2'].voltage.re).toBeCloseTo(8, 9);
+	});
+
+	it('parses and round-trips all unitSystem options across AI netlist import and CircuitDocument JSON export', () => {
+		const systems: UnitSystemId[] = ['auto', 'ohm-v-a', 'kohm-v-ma', 'mohm-v-ua'];
+		for (const unitSystem of systems) {
+			const imported = parseCircuitImport(
+				JSON.stringify({
+					schemaVersion: 1,
+					name: `Unit System ${unitSystem}`,
+					mode: 'dc',
+					unitSystem,
+					elements: [
+						{
+							id: 'V1',
+							kind: 'voltage_source',
+							from: 'N1',
+							to: '0',
+							fromPos: [0, 0],
+							toPos: [0, 1],
+							value: '10'
+						},
+						{
+							id: 'R1',
+							kind: 'resistor',
+							from: 'N1',
+							to: '0',
+							fromPos: [1, 0],
+							toPos: [1, 1],
+							value: '1k'
+						}
+					]
+				})
+			);
+			expect(imported.ok).toBe(true);
+			if (!imported.ok) continue;
+			expect(imported.document.unitSystem).toBe(unitSystem);
+
+			const exportedJson = exportCircuitJson(imported.document);
+			expect(exportedJson).toContain(`"unitSystem": "${unitSystem}"`);
+
+			const reparsed = parseCircuitImport(exportedJson);
+			expect(reparsed.ok).toBe(true);
+			if (!reparsed.ok) continue;
+			expect(reparsed.sourceFormat).toBe('circuit-document');
+			expect(reparsed.document.unitSystem).toBe(unitSystem);
+		}
+	});
+
+	it('imports an unknown-value textbook problem (value "?" + unknownProblem) and solves the exact unknown voltage via solveCircuit()', () => {
+		const res = parseCircuitImport(
+			JSON.stringify({
+				schemaVersion: 1,
+				name: 'Find Vs Given Io = 2 mA',
+				mode: 'dc',
+				unitSystem: 'kohm-v-ma',
+				elements: [
+					{
+						id: 'V1',
+						kind: 'voltage_source',
+						label: 'Vs',
+						from: 'N1',
+						to: '0',
+						fromPos: [0, 0],
+						toPos: [0, 1],
+						value: '?',
+						unknown: true,
+						unknownSymbol: 'Vs'
+					},
+					{
+						id: 'R1',
+						kind: 'resistor',
+						label: 'R1',
+						from: 'N1',
+						to: 'N2',
+						fromPos: [0, 0],
+						toPos: [1, 0],
+						value: '2k'
+					},
+					{
+						id: 'R2',
+						kind: 'resistor',
+						label: 'R2',
+						from: 'N2',
+						to: '0',
+						fromPos: [1, 0],
+						toPos: [1, 1],
+						value: '4k'
+					},
+					{
+						id: 'R3',
+						kind: 'resistor',
+						label: 'R3',
+						from: 'N2',
+						to: 'N3',
+						fromPos: [1, 0],
+						toPos: [2, 0],
+						value: '2k'
+					},
+					{
+						id: 'I1',
+						kind: 'current_source',
+						label: 'I1',
+						from: '0',
+						to: 'N3',
+						fromPos: [2, 1],
+						toPos: [2, 0],
+						value: '1m'
+					}
+				],
+				unknownProblem: {
+					componentId: 'V1',
+					symbol: 'Vs',
+					constraint: {
+						kind: 'branch_current',
+						targetId: 'R2',
+						value: '2m',
+						label: 'I_o'
+					}
+				}
+			})
+		);
+
+		expect(res.ok).toBe(true);
+		if (!res.ok) return;
+
+		expect(res.layoutMode).toBe('visual-grid');
+		expect(res.document.unitSystem).toBe('kohm-v-ma');
+		expect(res.document.unknownProblem?.componentId).toBe('V1');
+		expect(res.document.unknownProblem?.symbol).toBe('Vs');
+		expect(res.document.unknownProblem?.constraint.kind).toBe('branch_current');
+
+		// Analytical check: V(N2) = 4k * 2mA = 8 V; KCL at N2 => (8 - Vs)/2k + 2mA - 1mA = 0 => Vs = 10 V
+		const solved = solveCircuit(res.document);
+		expect(solved.mna.valid).toBe(true);
+		expect(solved.unknownSolution?.valid).toBe(true);
+		expect(solved.unknownSolution?.solutions[0].value.re).toBeCloseTo(10, 9);
+		expect(solved.unknownSolution?.solutions[0].verified).toBe(true);
+		expect(solved.mna.branches['R2'].current.re).toBeCloseTo(2e-3, 9);
+	});
+
+	it('normalizes shorthand top-level constraint + unknown element and remaps custom node_voltage target IDs', () => {
+		const res = parseCircuitImport(
+			JSON.stringify({
+				mode: 'dc',
+				unitSystem: 'kohm-v-ma',
+				elements: [
+					{
+						id: 'V1',
+						kind: 'voltage_source',
+						from: 'Vin',
+						to: '0',
+						fromPos: [0, 0],
+						toPos: [0, 1],
+						value: '12'
+					},
+					{
+						id: 'R1',
+						kind: 'resistor',
+						from: 'Vin',
+						to: 'Vo',
+						fromPos: [0, 0],
+						toPos: [1, 0],
+						value: '2k'
+					},
+					{
+						id: 'R2',
+						kind: 'resistor',
+						label: 'Rx',
+						from: 'Vo',
+						to: '0',
+						fromPos: [1, 0],
+						toPos: [1, 1],
+						value: 'unknown',
+						unknown: true,
+						unknownSymbol: 'Rx'
+					}
+				],
+				constraint: {
+					kind: 'node_voltage',
+					targetId: 'Vo',
+					value: '8',
+					label: 'V_o'
+				}
+			})
+		);
+
+		expect(res.ok).toBe(true);
+		if (!res.ok) return;
+
+		expect(res.document.unknownProblem).toBeDefined();
+		expect(res.document.unknownProblem?.componentId).toBe('R2');
+		expect(res.document.unknownProblem?.symbol).toBe('Rx');
+
+		const solved = solveCircuit(res.document);
+		expect(solved.mna.valid).toBe(true);
+		expect(solved.unknownSolution?.valid).toBe(true);
+		// Voltage divider: 12 * Rx / (2k + Rx) = 8 => Rx = 4k = 4000 ohm
+		expect(solved.unknownSolution?.solutions[0].value.re).toBeCloseTo(4000, 6);
+		expect(solved.unknownSolution?.solutions[0].verified).toBe(true);
+	});
 });
+

@@ -2,21 +2,28 @@
  * JSON Export / Import, AI Netlist Prompt & Parser for Circuit Lab.
  */
 
-import { layoutNetlistToDocument, type LayoutNetlistElement } from './auto-layout';
+import {
+	layoutNetlistWithMeta,
+	type LayoutMode,
+	type LayoutNetlistElement
+} from './auto-layout';
 import { buildElectricalGraph, parsePassiveValue, parseSourceValue } from './graph';
 import type {
 	AcMagnitudeMode,
 	AnalysisMode,
 	CircuitComponent,
+	CircuitConstraint,
 	CircuitDocument,
 	CircuitWire,
 	ComponentKind,
 	ConstraintKind,
-	Rotation
+	Rotation,
+	UnitSystemId,
+	UnknownProblemSpec
 } from './types';
 import { parseComplexValue, parseEngineeringNumber } from './units';
 
-export const AI_CIRCUIT_IMPORT_PROMPT = `Convert the attached circuit diagram into a single valid JSON object for Circuit Lab.
+export const AI_CIRCUIT_IMPORT_PROMPT = `Convert the attached circuit diagram (and any problem statement) into a single valid JSON object for Circuit Lab.
 Output ONLY raw JSON (no markdown commentary, no explanation outside the JSON).
 
 Schema:
@@ -26,6 +33,7 @@ Schema:
   "mode": "dc" | "ac",
   "frequencyHz": 60,
   "acMagnitudeMode": "rms",
+  "unitSystem": "auto" | "ohm-v-a" | "kohm-v-ma" | "mohm-v-ua",
   "elements": [
     {
       "id": "R1",
@@ -33,10 +41,24 @@ Schema:
       "label": "R1",
       "from": "N1",
       "to": "N2",
+      "fromPos": [0, 0],
+      "toPos": [1, 0],
       "value": "10k",
-      "phaseDeg": 0
+      "phaseDeg": 0,
+      "unknown": false,
+      "unknownSymbol": "V"
     }
-  ]
+  ],
+  "unknownProblem": {
+    "componentId": "V1",
+    "symbol": "V",
+    "constraint": {
+      "kind": "branch_current" | "branch_voltage" | "node_voltage" | "branch_power",
+      "targetId": "R2",
+      "value": "2m",
+      "label": "I_o"
+    }
+  }
 }
 
 Rules:
@@ -44,39 +66,69 @@ Rules:
 2. Node naming:
    - Use "0" for the ground / reference node (or bottom return rail if no ground symbol is drawn).
    - Name all other distinct electrical nodes "N1", "N2", "N3", ...
-3. Polarity ("from" -> "to"):
-   - For "voltage_source": "from" is the positive (+) terminal, "to" is the negative (-) terminal.
-   - For "current_source": "from" is the arrow tail (current leaves "from"), "to" is the arrow head (current enters "to").
-   - For passives ("resistor", "capacitor", "inductor"): "from" and "to" are the two connected nodes.
-4. Values:
+3. Exact Visual Layout Cloning ("fromPos" and "toPos" — REQUIRED on every element):
+   - Overlay an integer schematic grid over the image: col = 0, 1, 2, ... from LEFT to RIGHT; row = 0, 1, 2, ... from TOP to BOTTOM.
+   - Set "fromPos": [col, row] to the grid vertex of the "from" terminal and "toPos": [col, row] to the grid vertex of the "to" terminal as drawn in the image.
+   - Horizontal element: same row (e.g. left-to-right [0,0]->[1,0], or right-to-left [1,0]->[0,0]).
+   - Vertical element: same col (e.g. top-to-bottom [0,0]->[0,1], or bottom-to-top [2,1]->[2,0] for an upward source).
+   - Every element sharing the same drawn corner/junction must share the exact same [col, row] and node name. Never rotate or rearrange the schematic.
+4. Polarity ("from" -> "to"):
+   - For "voltage_source": "from" (and "fromPos") is the positive (+) terminal; "to" (and "toPos") is the negative (-) terminal.
+   - For "current_source": "from" (and "fromPos") is the arrow tail (current leaves "from"); "to" (and "toPos") is the arrow head (current enters "to").
+   - For passives ("resistor", "capacitor", "inductor"): "from" -> "to" defines the branch reference direction (voltage V = V_from - V_to, current flows from -> to). Match any drawn arrow or +/- label on a resistor!
+5. Unit System ("unitSystem"):
+   - Choose according to the problem's units:
+     - "ohm-v-a" when resistors are in Ω and currents in A
+     - "kohm-v-ma" when resistors are in kΩ and currents in mA
+     - "mohm-v-ua" when resistors are in MΩ and currents in µA
+     - "auto" for mixed scales
+6. Values:
    - Use plain numbers or SI suffixes (f, p, n, u, m, k, M, G, T): e.g. "10k", "4.7u", "100m", "12".
-   - All passive values (R, C, L) must be strictly positive.
+   - All known passive values (R, C, L) must be strictly positive.
    - For AC circuits, set "mode": "ac", include positive "frequencyHz" (e.g. 60 or 1000), and write phasor sources as "120∠30°" (or numeric magnitude in "value" with "phaseDeg": 30).
+7. Unknown-Value Problems (omit "unknownProblem" if all values are known):
+   - If the problem asks to find an unknown source or component value (e.g. "Find V_s given I_o = 2 mA" or "Find R_x given V_o = 6 V"):
+     - On that element, set "unknown": true and "value": "?" (or placeholder "1").
+     - Include top-level "unknownProblem" with "componentId", optional "symbol" (e.g. "V_s", "R_x"), and "constraint": { "kind": "branch_current" | "branch_voltage" | "node_voltage" | "branch_power", "targetId": "<elementId or nodeId>", "value": "<SI value>", "label": "<e.g. I_o or V_o>" }.
 
-Example 1 (DC):
+Example 1 (DC) — Unknown Source with kΩ/V/mA & Exact Visual Grid:
 {
   "schemaVersion": 1,
-  "name": "DC Voltage Divider",
+  "name": "Find Vs Given Io = 2 mA",
   "mode": "dc",
+  "unitSystem": "kohm-v-ma",
   "elements": [
-    { "id": "V1", "kind": "voltage_source", "label": "V1", "from": "N1", "to": "0", "value": "12" },
-    { "id": "R1", "kind": "resistor", "label": "R1", "from": "N1", "to": "N2", "value": "2k" },
-    { "id": "R2", "kind": "resistor", "label": "R2", "from": "N2", "to": "0", "value": "4k" }
-  ]
+    { "id": "V1", "kind": "voltage_source", "label": "Vs", "from": "N1", "to": "0", "fromPos": [0, 0], "toPos": [0, 1], "value": "?", "unknown": true, "unknownSymbol": "Vs" },
+    { "id": "R1", "kind": "resistor", "label": "R1", "from": "N1", "to": "N2", "fromPos": [0, 0], "toPos": [1, 0], "value": "2k" },
+    { "id": "R2", "kind": "resistor", "label": "R2", "from": "N2", "to": "0", "fromPos": [1, 0], "toPos": [1, 1], "value": "4k" },
+    { "id": "R3", "kind": "resistor", "label": "R3", "from": "N2", "to": "N3", "fromPos": [1, 0], "toPos": [2, 0], "value": "2k" },
+    { "id": "I1", "kind": "current_source", "label": "I1", "from": "0", "to": "N3", "fromPos": [2, 1], "toPos": [2, 0], "value": "1m" }
+  ],
+  "unknownProblem": {
+    "componentId": "V1",
+    "symbol": "Vs",
+    "constraint": {
+      "kind": "branch_current",
+      "targetId": "R2",
+      "value": "2m",
+      "label": "I_o"
+    }
+  }
 }
 
-Example 2 (AC):
+Example 2 (AC) — RLC Phasor Circuit with Ω/V/A & Exact Visual Grid:
 {
   "schemaVersion": 1,
   "name": "AC RLC Phasor Circuit",
   "mode": "ac",
   "frequencyHz": 1000,
   "acMagnitudeMode": "rms",
+  "unitSystem": "ohm-v-a",
   "elements": [
-    { "id": "V1", "kind": "voltage_source", "label": "V1", "from": "N1", "to": "0", "value": "120∠30°" },
-    { "id": "R1", "kind": "resistor", "label": "R1", "from": "N1", "to": "N2", "value": "100" },
-    { "id": "L1", "kind": "inductor", "label": "L1", "from": "N2", "to": "N3", "value": "20m" },
-    { "id": "C1", "kind": "capacitor", "label": "C1", "from": "N3", "to": "0", "value": "2.2u" }
+    { "id": "V1", "kind": "voltage_source", "label": "V1", "from": "N1", "to": "0", "fromPos": [0, 0], "toPos": [0, 1], "value": "120∠30°" },
+    { "id": "R1", "kind": "resistor", "label": "R1", "from": "N1", "to": "N2", "fromPos": [0, 0], "toPos": [1, 0], "value": "100" },
+    { "id": "L1", "kind": "inductor", "label": "L1", "from": "N2", "to": "N3", "fromPos": [1, 0], "toPos": [2, 0], "value": "20m" },
+    { "id": "C1", "kind": "capacitor", "label": "C1", "from": "N3", "to": "0", "fromPos": [2, 0], "toPos": [2, 1], "value": "2.2u" }
   ]
 }`;
 
@@ -85,6 +137,7 @@ export type CircuitImportResult =
 			ok: true;
 			document: CircuitDocument;
 			sourceFormat: 'circuit-document' | 'ai-netlist';
+			layoutMode?: LayoutMode;
 			warnings: string[];
 	  }
 	| {
@@ -102,12 +155,80 @@ const ALLOWED_KINDS = new Set<ComponentKind>([
 	'terminal'
 ]);
 
+const ALLOWED_UNIT_SYSTEMS = new Set<UnitSystemId>([
+	'auto',
+	'ohm-v-a',
+	'kohm-v-ma',
+	'mohm-v-ua'
+]);
+
+const VALID_CONSTRAINT_KINDS = new Set<ConstraintKind>([
+	'node_voltage',
+	'branch_voltage',
+	'branch_current',
+	'branch_power'
+]);
+
 const PASSIVE_KINDS = new Set<ComponentKind>(['resistor', 'capacitor', 'inductor']);
 const SOURCE_KINDS = new Set<ComponentKind>(['voltage_source', 'current_source']);
 const VALID_ROTATIONS = new Set<number>([0, 90, 180, 270]);
 
 function isPlainObject(val: unknown): val is Record<string, unknown> {
 	return typeof val === 'object' && val !== null && !Array.isArray(val);
+}
+
+function parseGridPos(raw: unknown): [number, number] | null {
+	if (
+		Array.isArray(raw) &&
+		raw.length === 2 &&
+		typeof raw[0] === 'number' &&
+		typeof raw[1] === 'number' &&
+		Number.isFinite(raw[0]) &&
+		Number.isFinite(raw[1])
+	) {
+		return [Math.round(raw[0]), Math.round(raw[1])];
+	}
+	return null;
+}
+
+function parseConstraintObject(
+	raw: unknown,
+	warnings: string[],
+	contextLabel: string
+): CircuitConstraint | null {
+	if (!isPlainObject(raw)) {
+		warnings.push(`${contextLabel}: expected an object.`);
+		return null;
+	}
+	const kind = typeof raw.kind === 'string' ? raw.kind.trim() : '';
+	if (!VALID_CONSTRAINT_KINDS.has(kind as ConstraintKind)) {
+		warnings.push(
+			`${contextLabel}: unsupported constraint kind "${kind}" (expected node_voltage, branch_voltage, branch_current, or branch_power).`
+		);
+		return null;
+	}
+	const targetId = typeof raw.targetId === 'string' ? raw.targetId.trim() : '';
+	if (!targetId) {
+		warnings.push(`${contextLabel}: missing "targetId".`);
+		return null;
+	}
+	let valueStr = '';
+	if (typeof raw.value === 'number' && Number.isFinite(raw.value)) {
+		valueStr = String(raw.value);
+	} else if (typeof raw.value === 'string' && raw.value.trim() !== '') {
+		valueStr = raw.value.trim();
+	}
+	if (!valueStr || !parseComplexValue(valueStr)) {
+		warnings.push(`${contextLabel}: invalid constraint value "${String(raw.value ?? '')}".`);
+		return null;
+	}
+	const label = typeof raw.label === 'string' && raw.label.trim() ? raw.label.trim() : undefined;
+	return {
+		kind: kind as ConstraintKind,
+		targetId,
+		value: valueStr,
+		label
+	};
 }
 
 /**
@@ -145,6 +266,7 @@ export function exportCircuitJson(doc: CircuitDocument): string {
 	out.mode = doc.mode;
 	out.frequencyHz = doc.frequencyHz;
 	if (doc.acMagnitudeMode !== undefined) out.acMagnitudeMode = doc.acMagnitudeMode;
+	if (doc.unitSystem !== undefined) out.unitSystem = doc.unitSystem;
 	out.components = normalizedComponents;
 	out.wires = normalizedWires;
 	if (doc.unknownProblem !== undefined) {
@@ -232,7 +354,12 @@ function validateHeader(
 	isNetlist: boolean,
 	errors: string[],
 	warnings: string[]
-): { mode: AnalysisMode; frequencyHz: number; acMagnitudeMode?: AcMagnitudeMode } {
+): {
+	mode: AnalysisMode;
+	frequencyHz: number;
+	acMagnitudeMode?: AcMagnitudeMode;
+	unitSystem?: UnitSystemId;
+} {
 	if (obj.schemaVersion !== undefined && obj.schemaVersion !== 1) {
 		errors.push(`Unsupported schemaVersion "${String(obj.schemaVersion)}" (expected 1).`);
 	}
@@ -276,14 +403,35 @@ function validateHeader(
 		}
 	}
 
-	return { mode, frequencyHz, acMagnitudeMode };
+	let unitSystem: UnitSystemId | undefined;
+	if (obj.unitSystem !== undefined) {
+		if (typeof obj.unitSystem === 'string') {
+			const normalized = obj.unitSystem.trim().toLowerCase() as UnitSystemId;
+			if (ALLOWED_UNIT_SYSTEMS.has(normalized)) {
+				unitSystem = normalized;
+			} else {
+				warnings.push(
+					`Unrecognized "unitSystem" (${JSON.stringify(obj.unitSystem)}); ignored.`
+				);
+			}
+		} else {
+			warnings.push(`Invalid "unitSystem" (${JSON.stringify(obj.unitSystem)}); ignored.`);
+		}
+	}
+
+	return { mode, frequencyHz, acMagnitudeMode, unitSystem };
 }
 
 function parseCircuitDocumentFormat(obj: Record<string, unknown>): CircuitImportResult {
 	const errors: string[] = [];
 	const warnings: string[] = [];
 
-	const { mode, frequencyHz, acMagnitudeMode } = validateHeader(obj, false, errors, warnings);
+	const { mode, frequencyHz, acMagnitudeMode, unitSystem } = validateHeader(
+		obj,
+		false,
+		errors,
+		warnings
+	);
 
 	if (!Array.isArray(obj.components)) {
 		errors.push('Missing or invalid "components" array.');
@@ -352,7 +500,10 @@ function parseCircuitDocumentFormat(obj: Record<string, unknown>): CircuitImport
 			}
 		}
 
-		if (raw.phaseDeg !== undefined && (typeof raw.phaseDeg !== 'number' || !Number.isFinite(raw.phaseDeg))) {
+		if (
+			raw.phaseDeg !== undefined &&
+			(typeof raw.phaseDeg !== 'number' || !Number.isFinite(raw.phaseDeg))
+		) {
 			errors.push(
 				`${prefix} (${String(raw.id ?? '?')}): "phaseDeg" must be a finite number.`
 			);
@@ -412,7 +563,9 @@ function parseCircuitDocumentFormat(obj: Record<string, unknown>): CircuitImport
 			seenWireIds.add(raw.id);
 		}
 		if (!Array.isArray(raw.points) || raw.points.length < 2) {
-			errors.push(`${prefix} (${String(raw.id ?? '?')}): "points" must have at least 2 points.`);
+			errors.push(
+				`${prefix} (${String(raw.id ?? '?')}): "points" must have at least 2 points.`
+			);
 			return;
 		}
 		const pts: Array<{ x: number; y: number }> = [];
@@ -449,34 +602,22 @@ function parseCircuitDocumentFormat(obj: Record<string, unknown>): CircuitImport
 	if (typeof obj.id === 'string' && obj.id.trim() !== '') document.id = obj.id.trim();
 	if (typeof obj.name === 'string' && obj.name.trim() !== '') document.name = obj.name.trim();
 	if (acMagnitudeMode) document.acMagnitudeMode = acMagnitudeMode;
+	if (unitSystem) document.unitSystem = unitSystem;
 	if (isPlainObject(obj.unknownProblem)) {
 		const up = obj.unknownProblem;
-		const c = up.constraint;
-		const validConstraintKinds: ConstraintKind[] = [
-			'node_voltage',
-			'branch_voltage',
-			'branch_current',
-			'branch_power'
-		];
-		if (
-			isPlainObject(c) &&
-			typeof up.componentId === 'string' &&
-			up.componentId.trim() !== '' &&
-			typeof c.kind === 'string' &&
-			validConstraintKinds.includes(c.kind as ConstraintKind) &&
-			typeof c.targetId === 'string' &&
-			c.targetId.trim() !== '' &&
-			typeof c.value === 'string'
-		) {
+		const parsedConstraint = parseConstraintObject(
+			up.constraint,
+			warnings,
+			'unknownProblem.constraint'
+		);
+		if (parsedConstraint && typeof up.componentId === 'string' && up.componentId.trim() !== '') {
 			document.unknownProblem = {
 				componentId: up.componentId.trim(),
-				symbol: typeof up.symbol === 'string' && up.symbol.trim() ? up.symbol.trim() : undefined,
-				constraint: {
-					kind: c.kind as ConstraintKind,
-					targetId: c.targetId.trim(),
-					value: c.value.trim(),
-					label: typeof c.label === 'string' && c.label.trim() ? c.label.trim() : undefined
-				}
+				symbol:
+					typeof up.symbol === 'string' && up.symbol.trim()
+						? up.symbol.trim()
+						: undefined,
+				constraint: parsedConstraint
 			};
 		}
 	}
@@ -493,15 +634,29 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 	const errors: string[] = [];
 	const warnings: string[] = [];
 
-	const { mode, frequencyHz, acMagnitudeMode } = validateHeader(obj, true, errors, warnings);
+	const { mode, frequencyHz, acMagnitudeMode, unitSystem } = validateHeader(
+		obj,
+		true,
+		errors,
+		warnings
+	);
 
 	if (!Array.isArray(obj.elements) || obj.elements.length === 0) {
 		errors.push('Missing or empty "elements" array in AI netlist.');
 		return { ok: false, errors };
 	}
 
+	// Pre-inspect top-level unknownProblem so an element referenced by it may carry "?" or symbolic value
+	const topLevelUnknownRef =
+		isPlainObject(obj.unknownProblem) &&
+		typeof obj.unknownProblem.componentId === 'string' &&
+		obj.unknownProblem.componentId.trim() !== ''
+			? obj.unknownProblem.componentId.trim()
+			: undefined;
+
 	const elements: LayoutNetlistElement[] = [];
 	const seenIds = new Set<string>();
+	const unknownHints: Array<{ index: number; symbol?: string }> = [];
 
 	(obj.elements as unknown[]).forEach((raw, idx) => {
 		const prefix = `Element[${idx}]`;
@@ -530,8 +685,8 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 			return;
 		}
 		const kind = raw.kind as ComponentKind;
-		const displayName =
-			(typeof raw.label === 'string' && raw.label.trim()) || elId || `${kind}#${idx + 1}`;
+		const labelStr = typeof raw.label === 'string' ? raw.label.trim() : '';
+		const displayName = labelStr || elId || `${kind}#${idx + 1}`;
 
 		// Validate nodes (accept either from/to or nodes: [from, to])
 		let fromNode = '';
@@ -539,7 +694,9 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 		if (kind === 'ground' || kind === 'terminal') {
 			const n =
 				(typeof raw.from === 'string' && raw.from.trim()) ||
-				(Array.isArray(raw.nodes) && typeof raw.nodes[0] === 'string' && raw.nodes[0].trim()) ||
+				(Array.isArray(raw.nodes) &&
+					typeof raw.nodes[0] === 'string' &&
+					raw.nodes[0].trim()) ||
 				(typeof raw.to === 'string' && raw.to.trim()) ||
 				'';
 			if (!n) {
@@ -550,12 +707,16 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 		} else {
 			if (raw.from !== undefined || raw.to !== undefined) {
 				if (typeof raw.from !== 'string' || raw.from.trim() === '') {
-					errors.push(`${prefix} (${displayName}): "from" must be a non-empty node string.`);
+					errors.push(
+						`${prefix} (${displayName}): "from" must be a non-empty node string.`
+					);
 				} else {
 					fromNode = raw.from.trim();
 				}
 				if (typeof raw.to !== 'string' || raw.to.trim() === '') {
-					errors.push(`${prefix} (${displayName}): "to" must be a non-empty node string.`);
+					errors.push(
+						`${prefix} (${displayName}): "to" must be a non-empty node string.`
+					);
 				} else {
 					toNode = raw.to.trim();
 				}
@@ -587,18 +748,79 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 			);
 		}
 
-		// Validate value
+		// Parse optional visual grid positions
+		let fromPos: [number, number] | undefined;
+		let toPos: [number, number] | undefined;
+		if (raw.fromPos !== undefined) {
+			const parsedPos = parseGridPos(raw.fromPos);
+			if (parsedPos) {
+				fromPos = parsedPos;
+			} else {
+				warnings.push(
+					`Element "${displayName}" has invalid "fromPos" (expected [col, row]); ignored.`
+				);
+			}
+		}
+		if (raw.toPos !== undefined) {
+			const parsedPos = parseGridPos(raw.toPos);
+			if (parsedPos) {
+				toPos = parsedPos;
+			} else {
+				warnings.push(
+					`Element "${displayName}" has invalid "toPos" (expected [col, row]); ignored.`
+				);
+			}
+		}
+
+		// Detect unknown-value markers on element
+		const rawValTrimmed = typeof raw.value === 'string' ? raw.value.trim() : '';
+		const isUnknownPlaceholder =
+			rawValTrimmed === '?' || rawValTrimmed.toLowerCase() === 'unknown';
+		const matchesTopLevelUnknown =
+			topLevelUnknownRef !== undefined &&
+			(elId === topLevelUnknownRef || labelStr === topLevelUnknownRef);
+		const isMarkedUnknown =
+			raw.unknown === true || isUnknownPlaceholder || matchesTopLevelUnknown;
+
+		let unknownSymbol =
+			typeof raw.unknownSymbol === 'string' && raw.unknownSymbol.trim() !== ''
+				? raw.unknownSymbol.trim()
+				: undefined;
+
+		// Validate value (allowing "?" / "unknown" / symbolic placeholder when element is marked unknown)
 		let valueStr = '';
 		if (kind === 'ground' || kind === 'terminal') {
 			valueStr = typeof raw.value === 'string' ? raw.value.trim() : '0';
+		} else if (isMarkedUnknown) {
+			if (typeof raw.value === 'number' && Number.isFinite(raw.value) && raw.value > 0) {
+				valueStr = String(raw.value);
+			} else if (rawValTrimmed !== '' && !isUnknownPlaceholder) {
+				const validAsKnown = PASSIVE_KINDS.has(kind)
+					? (() => {
+							const n = parseEngineeringNumber(rawValTrimmed);
+							return n !== null && Number.isFinite(n) && n > 0;
+						})()
+					: (() => {
+							const c = parseComplexValue(rawValTrimmed);
+							return c !== null && c.isFinite() && (mode === 'ac' || c.isReal(1e-12));
+						})();
+				if (validAsKnown) {
+					valueStr = rawValTrimmed;
+				} else {
+					if (!unknownSymbol) unknownSymbol = rawValTrimmed;
+					valueStr = '1';
+				}
+			} else {
+				valueStr = '1';
+			}
 		} else {
 			if (typeof raw.value === 'number' && Number.isFinite(raw.value)) {
 				valueStr = String(raw.value);
 				warnings.push(
 					`Element "${displayName}" provided numeric value ${raw.value}; normalized to "${valueStr}".`
 				);
-			} else if (typeof raw.value === 'string' && raw.value.trim() !== '') {
-				valueStr = raw.value.trim();
+			} else if (rawValTrimmed !== '') {
+				valueStr = rawValTrimmed;
 			} else {
 				errors.push(`${prefix} (${displayName}): "value" must be a non-empty string.`);
 			}
@@ -613,23 +835,25 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 			}
 		}
 
-		if (PASSIVE_KINDS.has(kind) && valueStr !== '') {
-			const parsed = parseEngineeringNumber(valueStr);
-			if (parsed === null || !Number.isFinite(parsed) || parsed <= 0) {
-				errors.push(
-					`${prefix} (${displayName}): passive value "${valueStr}" must be a positive finite number.`
-				);
-			}
-		} else if (SOURCE_KINDS.has(kind) && valueStr !== '') {
-			const parsed = parseComplexValue(valueStr);
-			if (!parsed || !parsed.isFinite()) {
-				errors.push(
-					`${prefix} (${displayName}): invalid source value "${valueStr}".`
-				);
-			} else if (mode === 'dc' && !parsed.isReal(1e-12)) {
-				errors.push(
-					`${prefix} (${displayName}): complex/phasor value "${valueStr}" is not valid in DC mode.`
-				);
+		if (!isMarkedUnknown) {
+			if (PASSIVE_KINDS.has(kind) && valueStr !== '') {
+				const parsed = parseEngineeringNumber(valueStr);
+				if (parsed === null || !Number.isFinite(parsed) || parsed <= 0) {
+					errors.push(
+						`${prefix} (${displayName}): passive value "${valueStr}" must be a positive finite number.`
+					);
+				}
+			} else if (SOURCE_KINDS.has(kind) && valueStr !== '') {
+				const parsed = parseComplexValue(valueStr);
+				if (!parsed || !parsed.isFinite()) {
+					errors.push(
+						`${prefix} (${displayName}): invalid source value "${valueStr}".`
+					);
+				} else if (mode === 'dc' && !parsed.isReal(1e-12)) {
+					errors.push(
+						`${prefix} (${displayName}): complex/phasor value "${valueStr}" is not valid in DC mode.`
+					);
+				}
 			}
 		}
 
@@ -640,13 +864,25 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 			value: valueStr
 		};
 		if (elId !== undefined) el.id = elId;
-		if (typeof raw.label === 'string' && raw.label.trim() !== '') el.label = raw.label.trim();
+		if (labelStr !== '') el.label = labelStr;
 		if (phaseDeg !== undefined) el.phaseDeg = phaseDeg;
 		if (typeof raw.frequencyHz === 'number' && Number.isFinite(raw.frequencyHz)) {
 			el.frequencyHz = raw.frequencyHz;
 		}
 		if (raw.sourceMode === 'dc' || raw.sourceMode === 'ac') el.sourceMode = raw.sourceMode;
 		if (typeof raw.terminalName === 'string') el.terminalName = raw.terminalName;
+		if (fromPos) el.fromPos = fromPos;
+		if (toPos) el.toPos = toPos;
+		if (isMarkedUnknown) {
+			el.unknown = true;
+			if (unknownSymbol) el.unknownSymbol = unknownSymbol;
+			if (unknownHints.length === 0 && kind !== 'ground' && kind !== 'terminal') {
+				unknownHints.push({
+					index: elements.length,
+					symbol: unknownSymbol ?? (labelStr || undefined)
+				});
+			}
+		}
 
 		elements.push(el);
 	});
@@ -655,16 +891,110 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 		return { ok: false, errors };
 	}
 
-	const document = layoutNetlistToDocument({
+	const firstUnknownElementHint = unknownHints[0] ?? null;
+
+	// Normalize unknownProblem (accepting full `obj.unknownProblem` OR shorthand `obj.constraint` + element `unknown: true`)
+	let rawUnknownProblem: UnknownProblemSpec | undefined;
+	if (isPlainObject(obj.unknownProblem)) {
+		const up = obj.unknownProblem;
+		const parsedConstraint = parseConstraintObject(
+			up.constraint,
+			warnings,
+			'unknownProblem.constraint'
+		);
+		const compRef =
+			typeof up.componentId === 'string' && up.componentId.trim() !== ''
+				? up.componentId.trim()
+				: firstUnknownElementHint !== null
+					? (elements[firstUnknownElementHint.index]?.id ??
+						elements[firstUnknownElementHint.index]?.label ??
+						'')
+					: '';
+		if (parsedConstraint && compRef) {
+			rawUnknownProblem = {
+				componentId: compRef,
+				symbol:
+					typeof up.symbol === 'string' && up.symbol.trim()
+						? up.symbol.trim()
+						: firstUnknownElementHint?.symbol,
+				constraint: parsedConstraint
+			};
+		}
+	} else if (isPlainObject(obj.constraint) && firstUnknownElementHint !== null) {
+		const parsedConstraint = parseConstraintObject(obj.constraint, warnings, 'constraint');
+		const targetEl = elements[firstUnknownElementHint.index];
+		if (parsedConstraint && targetEl) {
+			rawUnknownProblem = {
+				componentId: targetEl.id ?? targetEl.label ?? '',
+				symbol: targetEl.unknownSymbol ?? firstUnknownElementHint.symbol,
+				constraint: parsedConstraint
+			};
+		}
+	} else if (firstUnknownElementHint !== null) {
+		const targetEl = elements[firstUnknownElementHint.index];
+		warnings.push(
+			`Element "${targetEl?.label ?? targetEl?.id ?? 'unknown'}" was marked unknown without a constraint; defaulted value to "1".`
+		);
+	}
+
+	const layoutResult = layoutNetlistWithMeta({
 		schemaVersion: 1,
 		id: typeof obj.id === 'string' ? obj.id.trim() : undefined,
 		name: typeof obj.name === 'string' ? obj.name.trim() : undefined,
 		mode,
 		frequencyHz,
 		acMagnitudeMode,
+		unitSystem,
 		groundNode: typeof obj.groundNode === 'string' ? obj.groundNode.trim() : undefined,
 		elements
 	});
+
+	const { document, layoutMode, nodeIdMap } = layoutResult;
+	warnings.push(...layoutResult.warnings);
+
+	// Resolve and attach `unknownProblem` using actual laid-out component IDs and graph node IDs
+	if (rawUnknownProblem) {
+		const resolveCompId = (ref: string): string | null => {
+			const byId = document.components.find((c) => c.id === ref);
+			if (byId) return byId.id;
+			const byLabel = document.components.find((c) => c.label === ref);
+			if (byLabel) return byLabel.id;
+			return null;
+		};
+
+		let resolvedCompId = resolveCompId(rawUnknownProblem.componentId);
+		if (!resolvedCompId && firstUnknownElementHint !== null) {
+			const fallbackEl = elements[firstUnknownElementHint.index];
+			const fallbackComp = document.components.find(
+				(c) =>
+					(fallbackEl?.id && c.id === fallbackEl.id) ||
+					(fallbackEl?.label && c.label === fallbackEl.label)
+			);
+			if (fallbackComp) resolvedCompId = fallbackComp.id;
+		}
+
+		let resolvedTargetId: string | null = rawUnknownProblem.constraint.targetId;
+		if (rawUnknownProblem.constraint.kind === 'node_voltage') {
+			resolvedTargetId = nodeIdMap[resolvedTargetId] ?? resolvedTargetId;
+		} else {
+			resolvedTargetId = resolveCompId(resolvedTargetId);
+		}
+
+		if (resolvedCompId && resolvedTargetId) {
+			document.unknownProblem = {
+				componentId: resolvedCompId,
+				symbol: rawUnknownProblem.symbol,
+				constraint: {
+					...rawUnknownProblem.constraint,
+					targetId: resolvedTargetId
+				}
+			};
+		} else {
+			warnings.push(
+				`Could not match unknownProblem references (component "${rawUnknownProblem.componentId}", target "${rawUnknownProblem.constraint.targetId}"); imported circuit without unknown constraint.`
+			);
+		}
+	}
 
 	const graph = buildElectricalGraph(document);
 	for (const diag of graph.diagnostics) {
@@ -677,6 +1007,7 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 		ok: true,
 		document,
 		sourceFormat: 'ai-netlist',
+		layoutMode,
 		warnings
 	};
 }

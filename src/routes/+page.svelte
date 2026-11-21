@@ -45,6 +45,7 @@
 	import type { CircuitPreset } from '$lib/data/presets';
 	import type { CircuitDocument } from '$lib/engine';
 	import { circuit } from '$lib/stores/circuit.svelte';
+	import { settings } from '$lib/stores/settings.svelte';
 	import { cn } from '$lib/utils';
 
 	let leftRailOpen = $state(true);
@@ -134,6 +135,9 @@
 	}
 
 	function handleImportDocument(doc: CircuitDocument) {
+		if (doc.unitSystem) {
+			settings.unitSystem = doc.unitSystem;
+		}
 		circuit.loadDocument(doc);
 		rightTab = 'results';
 		rightRailOpen = true;

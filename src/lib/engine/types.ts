@@ -141,6 +141,13 @@ export interface NetlistElement {
 	value: string;
 	phaseDeg?: number;
 	terminalName?: string;
+	/** Coarse integer schematic grid position [col, row] of the `from` (pin 0 / + / tail) terminal in the source image */
+	fromPos?: [number, number];
+	/** Coarse integer schematic grid position [col, row] of the `to` (pin 1 / - / head) terminal in the source image */
+	toPos?: [number, number];
+	/** Optional explicit unknown flag (or value === "?" / "unknown") */
+	unknown?: boolean;
+	unknownSymbol?: string;
 	/** Reserved for v2 dependent sources */
 	controlRef?: DependentControlRef;
 }
@@ -154,6 +161,7 @@ export interface AINetlistDocument {
 	unitSystem?: UnitSystemId;
 	groundNode?: string;
 	elements: NetlistElement[];
+	unknownProblem?: UnknownProblemSpec;
 }
 
 export type DiagnosticSeverity = 'error' | 'warning' | 'info';
