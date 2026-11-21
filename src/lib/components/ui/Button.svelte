@@ -13,7 +13,7 @@
 		variants: {
 			variant: {
 				default:
-					'bg-primary text-primary-foreground shadow-xs hover:bg-primary/90 active:bg-primary/85',
+					'bg-primary text-primary-foreground hover:bg-primary/90 active:bg-primary/85',
 				secondary:
 					'bg-secondary text-secondary-foreground border border-border hover:bg-secondary/80 active:bg-secondary/70',
 				outline:
@@ -21,7 +21,7 @@
 				ghost:
 					'text-foreground hover:bg-accent hover:text-accent-foreground active:bg-accent/80',
 				destructive:
-					'bg-destructive text-destructive-foreground shadow-xs hover:bg-destructive/90 active:bg-destructive/85'
+					'bg-destructive text-destructive-foreground hover:bg-destructive/90 active:bg-destructive/85'
 			},
 			size: {
 				sm: 'h-7 px-2.5 text-xs [&_svg]:size-3.5',

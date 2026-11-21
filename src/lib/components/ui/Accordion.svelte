@@ -3,7 +3,10 @@
 
 	const ACCORDION_KEY = Symbol('circuit-lab-accordion');
 
+	export type AccordionVariant = 'bordered' | 'flush';
+
 	export interface AccordionContext {
+		readonly variant: AccordionVariant;
 		isOpen: (id: string) => boolean;
 		toggle: (id: string) => void;
 	}
@@ -20,6 +23,7 @@
 
 	type Props = {
 		type?: 'single' | 'multiple';
+		variant?: AccordionVariant;
 		value?: string[];
 		class?: string;
 		children?: Snippet;
@@ -27,6 +31,7 @@
 
 	let {
 		type = 'multiple',
+		variant = 'bordered',
 		value = $bindable<string[]>([]),
 		class: className,
 		children,
@@ -34,6 +39,9 @@
 	}: Props = $props();
 
 	setContext<AccordionContext>(ACCORDION_KEY, {
+		get variant() {
+			return variant;
+		},
 		isOpen(id: string) {
 			return value.includes(id);
 		},
@@ -49,6 +57,13 @@
 	});
 </script>
 
-<div class={cn('divide-y divide-border rounded-md border border-border bg-card', className)} {...restProps}>
+<div
+	class={cn(
+		'divide-y divide-border',
+		variant === 'bordered' && 'rounded-md border border-border bg-card',
+		className
+	)}
+	{...restProps}
+>
 	{@render children?.()}
 </div>

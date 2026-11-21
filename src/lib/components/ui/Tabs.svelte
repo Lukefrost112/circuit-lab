@@ -3,8 +3,11 @@
 
 	const TABS_KEY = Symbol('circuit-lab-tabs');
 
+	export type TabsVariant = 'segmented' | 'underline';
+
 	export interface TabsContext {
 		readonly value: string;
+		readonly variant: TabsVariant;
 		setValue: (next: string) => void;
 	}
 
@@ -24,6 +27,7 @@
 
 	type Props = {
 		value?: string;
+		variant?: TabsVariant;
 		onValueChange?: (value: string) => void;
 		class?: string;
 		children?: Snippet;
@@ -31,6 +35,7 @@
 
 	let {
 		value = $bindable(''),
+		variant = 'segmented',
 		onValueChange,
 		class: className,
 		children,
@@ -40,6 +45,9 @@
 	setContext<TabsContext>(TABS_KEY, {
 		get value() {
 			return value;
+		},
+		get variant() {
+			return variant;
 		},
 		setValue(next: string) {
 			if (value === next) return;

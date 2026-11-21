@@ -1,14 +1,40 @@
+<script lang="ts" module>
+	import { getContext, setContext } from 'svelte';
+	import type { TabsVariant } from './Tabs.svelte';
+
+	const TABS_LIST_VARIANT_KEY = Symbol('circuit-lab-tabs-list-variant');
+
+	export interface TabsListVariantContext {
+		readonly variant: TabsVariant;
+	}
+
+	export function getTabsListVariantContext(): TabsListVariantContext | undefined {
+		return getContext<TabsListVariantContext | undefined>(TABS_LIST_VARIANT_KEY);
+	}
+</script>
+
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import type { HTMLAttributes } from 'svelte/elements';
 	import { cn } from '$lib/utils';
+	import { getTabsContext } from './Tabs.svelte';
 
 	type Props = {
+		variant?: TabsVariant;
 		class?: string;
 		children?: Snippet;
 	} & Omit<HTMLAttributes<HTMLDivElement>, 'class' | 'role'>;
 
-	let { class: className, children, onkeydown, ...restProps }: Props = $props();
+	let { variant, class: className, children, onkeydown, ...restProps }: Props = $props();
+
+	const tabs = getTabsContext();
+	const resolvedVariant = $derived<TabsVariant>(variant ?? tabs.variant);
+
+	setContext<TabsListVariantContext>(TABS_LIST_VARIANT_KEY, {
+		get variant() {
+			return resolvedVariant;
+		}
+	});
 
 	let listEl = $state<HTMLDivElement | undefined>(undefined);
 
@@ -25,7 +51,7 @@
 			return;
 		}
 
-		const tabs = Array.from(
+		const tabsList = Array.from(
 			listEl.querySelectorAll<HTMLButtonElement>('[role="tab"]:not([disabled])')
 		).filter(
 			(el) =>
@@ -34,23 +60,24 @@
 				el.getAttribute('aria-disabled') !== 'true'
 		);
 
-		if (tabs.length === 0) return;
+		if (tabsList.length === 0) return;
 
-		const currentIndex = tabs.indexOf(currentTab as HTMLButtonElement);
+		const currentIndex = tabsList.indexOf(currentTab as HTMLButtonElement);
 		let nextIndex = 0;
 
 		if (e.key === 'ArrowRight') {
-			nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % tabs.length;
+			nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % tabsList.length;
 		} else if (e.key === 'ArrowLeft') {
-			nextIndex = currentIndex === -1 ? tabs.length - 1 : (currentIndex - 1 + tabs.length) % tabs.length;
+			nextIndex =
+				currentIndex === -1 ? tabsList.length - 1 : (currentIndex - 1 + tabsList.length) % tabsList.length;
 		} else if (e.key === 'Home') {
 			nextIndex = 0;
 		} else if (e.key === 'End') {
-			nextIndex = tabs.length - 1;
+			nextIndex = tabsList.length - 1;
 		}
 
 		e.preventDefault();
-		const target = tabs[nextIndex];
+		const target = tabsList[nextIndex];
 		target.focus();
 		target.click();
 	}
@@ -61,7 +88,9 @@
 	role="tablist"
 	onkeydown={handleKeyDown}
 	class={cn(
-		'inline-flex h-9 items-center gap-1 rounded-md border border-border bg-surface-rail p-1 text-muted-foreground',
+		resolvedVariant === 'underline'
+			? 'inline-flex h-9 w-full items-center gap-4 border-b border-border bg-transparent px-0 text-muted-foreground'
+			: 'inline-flex h-9 items-center gap-1 rounded-md border border-border bg-surface-rail p-1 text-muted-foreground',
 		className
 	)}
 	{...restProps}
