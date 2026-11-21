@@ -41,6 +41,17 @@
 	const CX = 160;
 	const CY = 160;
 	const MAX_R = 96;
+	// Arrowhead footprint used for label avoidance (marker 6 units × hovered stroke 2.75).
+	const ARROW_LEN = 16;
+	const ARROW_HALF_W = 6;
+	// Opaque equivalent of the SVG's `bg-background/60` over the section's `bg-card`, so label
+	// halos blend into the diagram background instead of showing card-colored blobs.
+	const LABEL_HALO_COLOR = 'color-mix(in srgb, var(--background) 60%, var(--card))';
+
+	function labelBoxWidth(label: string): number {
+		return label.length * 5.8 + 4;
+	}
+	const LABEL_BOX_H = 12;
 
 	function normalizeDeg(deg: number): number {
 		let d = deg % 360;
@@ -208,8 +219,8 @@
 		];
 
 		function placeVectorLabel(item: RawVectorItem): { lx: number; ly: number } {
-			const labelW = item.label.length * 5.8 + 4;
-			const labelH = 12;
+			const labelW = labelBoxWidth(item.label);
+			const labelH = LABEL_BOX_H;
 			const nearCardinal = [0, 90, 180, -180, -90].some((c) => angleDiffDeg(item.angleDeg, c) < 14);
 			const hasCollinearOther = rawItems.some(
 				(other) => other.key !== item.key && angleDiffDeg(other.angleDeg, item.angleDeg) <= 6
@@ -269,6 +280,16 @@
 						}
 					} else if (segmentIntersectsRect(CX, CY, seg.x2, seg.y2, rect, 3)) {
 						score += 180;
+					}
+					// Labels paint above all shafts with a solid halo, so keep them well clear of
+					// other vectors' arrowheads (marker reaches ~ARROW_LEN back from the tip and is
+					// ~ARROW_HALF_W wide when hovered). The own arrowhead is covered by the shaft check.
+					if (seg.key !== item.key) {
+						const tipBackX = seg.x2 - ARROW_LEN * Math.cos(seg.rad);
+						const tipBackY = seg.y2 + ARROW_LEN * Math.sin(seg.rad);
+						if (segmentIntersectsRect(tipBackX, tipBackY, seg.x2, seg.y2, rect, ARROW_HALF_W)) {
+							score += 600;
+						}
 					}
 				}
 				if (score < bestScore) {
@@ -486,6 +507,29 @@
 					<text x={CX} y={CY + MAX_R + 20} text-anchor="middle">-90°</text>
 				</g>
 
+				<!-- Label hit targets: drawn beneath every shaft group so shaft hit lines always win,
+				     and sized exactly like the placement boxes (which are kept 3px apart) so labels
+				     never steal each other's hover. Keyboard access is on the vector groups below. -->
+				<g aria-hidden="true">
+					{#each phasorData.entries as entry (entry.key)}
+						{@const boxW = labelBoxWidth(entry.label)}
+						<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+						<rect
+							x={entry.labelX - boxW / 2}
+							y={entry.labelY - LABEL_BOX_H / 2}
+							width={boxW}
+							height={LABEL_BOX_H}
+							fill="transparent"
+							class={entry.componentId ? 'cursor-pointer' : undefined}
+							onmouseenter={() => (hoveredKey = entry.key)}
+							onmouseleave={() => (hoveredKey = null)}
+							onclick={() => {
+								if (entry.componentId) onSelectComponent?.(entry.componentId);
+							}}
+						/>
+					{/each}
+				</g>
+
 				<!-- Phasor vectors -->
 				{#each phasorData.entries as entry (entry.key)}
 					{@const isHovered = hoveredKey === entry.key}
@@ -519,7 +563,7 @@
 							}
 						}}
 					>
-						<!-- Invisible wide hit targets (shaft + label area) -->
+						<!-- Invisible wide shaft hit target (label hit targets live in a layer below) -->
 						<line
 							x1={CX}
 							y1={CY}
@@ -527,13 +571,6 @@
 							y2={entry.y2}
 							stroke="transparent"
 							stroke-width="12"
-						/>
-						<rect
-							x={entry.labelX - (entry.label.length * 5.8 + 6) / 2}
-							y={entry.labelY - 8}
-							width={entry.label.length * 5.8 + 6}
-							height="16"
-							fill="transparent"
 						/>
 						<line
 							x1={CX}
@@ -550,7 +587,7 @@
 
 				<circle cx={CX} cy={CY} r="2.75" fill="var(--foreground)" />
 
-				<!-- Phasor vector labels rendered above all shafts with card-colored halo -->
+				<!-- Phasor vector labels rendered above all shafts with a background-matched halo -->
 				<g pointer-events="none">
 					{#each phasorData.entries as entry (entry.key)}
 						{@const isHovered = hoveredKey === entry.key}
@@ -563,7 +600,7 @@
 							text-anchor="middle"
 							dominant-baseline="central"
 							fill={strokeColor}
-							stroke="var(--card)"
+							style="stroke: {LABEL_HALO_COLOR};"
 							stroke-width="3.5"
 							stroke-linejoin="round"
 							paint-order="stroke"

@@ -21,6 +21,10 @@
 	let containerEl = $state<HTMLDivElement | undefined>(undefined);
 	let canScrollRight = $state(false);
 	let canScrollLeft = $state(false);
+	// Vertical extent of the scroll viewport (excludes margins and the horizontal scrollbar),
+	// so the edge fades never paint over the scrollbar.
+	let cueTop = $state(0);
+	let cueHeight = $state(0);
 
 	$effect(() => {
 		if (!display || !containerEl) {
@@ -31,17 +35,23 @@
 		void renderedHtml;
 
 		const root = containerEl;
-		const getScroller = (): HTMLElement =>
-			root.querySelector<HTMLElement>('.katex-display') ?? root;
+		// KaTeX parse errors render a bare .katex-error with no .katex-display; it wraps instead
+		// of scrolling (see styles), so there is nothing to cue.
+		const scroller = root.querySelector<HTMLElement>('.katex-display');
+		if (!scroller) {
+			canScrollRight = false;
+			canScrollLeft = false;
+			return;
+		}
 
 		const updateScrollCue = () => {
-			const scroller = getScroller();
 			const maxScroll = scroller.scrollWidth - scroller.clientWidth;
 			canScrollRight = maxScroll > 2 && scroller.scrollLeft < maxScroll - 2;
 			canScrollLeft = maxScroll > 2 && scroller.scrollLeft > 2;
+			cueTop = scroller.offsetTop;
+			cueHeight = scroller.clientHeight;
 		};
 
-		const scroller = getScroller();
 		updateScrollCue();
 		const rafId = requestAnimationFrame(updateScrollCue);
 
@@ -51,14 +61,26 @@
 		if (typeof ResizeObserver !== 'undefined') {
 			ro = new ResizeObserver(updateScrollCue);
 			ro.observe(root);
-			if (scroller !== root) {
-				ro.observe(scroller);
+			ro.observe(scroller);
+			// The inner .katex box changes width when content width changes (e.g. a late
+			// webfont swap) even though the scroller's own box does not.
+			if (scroller.firstElementChild) {
+				ro.observe(scroller.firstElementChild);
 			}
 		}
 
+		let disposed = false;
+		const fonts = typeof document !== 'undefined' ? document.fonts : undefined;
+		fonts?.ready.then(() => {
+			if (!disposed) updateScrollCue();
+		});
+		fonts?.addEventListener?.('loadingdone', updateScrollCue);
+
 		return () => {
+			disposed = true;
 			cancelAnimationFrame(rafId);
 			scroller.removeEventListener('scroll', updateScrollCue);
+			fonts?.removeEventListener?.('loadingdone', updateScrollCue);
 			ro?.disconnect();
 		};
 	});
@@ -76,13 +98,15 @@
 		{#if canScrollLeft}
 			<div
 				aria-hidden="true"
-				class="pointer-events-none absolute inset-y-0 left-0 w-5 bg-gradient-to-r from-card via-card/70 to-transparent"
+				class="math-fade-left pointer-events-none absolute left-0 w-5"
+				style="top: {cueTop}px; height: {cueHeight}px;"
 			></div>
 		{/if}
 		{#if canScrollRight}
 			<div
 				aria-hidden="true"
-				class="pointer-events-none absolute inset-y-0 right-0 w-7 bg-gradient-to-l from-card via-card/75 to-transparent"
+				class="math-fade-right pointer-events-none absolute right-0 w-7"
+				style="top: {cueTop}px; height: {cueHeight}px;"
 			></div>
 		{/if}
 	</div>
@@ -115,13 +139,42 @@
 		-webkit-overflow-scrolling: touch;
 		padding-bottom: 0.25rem;
 		padding-inline: 0.125rem;
+		/* Box-level start alignment so overflowing equations scroll from their left edge */
 		text-align: left;
 	}
 
 	.math-block :global(.katex-display > .katex) {
 		display: inline-block;
 		min-width: 100%;
-		text-align: left;
+		/* Equations that fit stay centered (KaTeX default); overflowing ones fill and scroll */
+		text-align: center;
 		white-space: nowrap;
+	}
+
+	/* Parse errors have no scroll wrapper; wrap long tokens instead of clipping them */
+	.math-block :global(.katex-error) {
+		display: inline-block;
+		max-width: 100%;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+
+	/* Fade color follows the surface the block sits on; containers can override --math-fade-bg */
+	.math-fade-left {
+		background: linear-gradient(
+			to right,
+			var(--math-fade-bg, var(--card)),
+			color-mix(in srgb, var(--math-fade-bg, var(--card)) 70%, transparent),
+			transparent
+		);
+	}
+
+	.math-fade-right {
+		background: linear-gradient(
+			to left,
+			var(--math-fade-bg, var(--card)),
+			color-mix(in srgb, var(--math-fade-bg, var(--card)) 75%, transparent),
+			transparent
+		);
 	}
 </style>

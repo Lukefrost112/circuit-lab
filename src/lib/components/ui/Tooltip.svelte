@@ -28,14 +28,10 @@
 	let positioned = $state(false);
 	let coords = $state({ top: 0, left: 0 });
 	let timer: ReturnType<typeof setTimeout> | undefined;
-	let suppressNextFocus = false;
-
-	function canHover(): boolean {
-		return (
-			typeof window !== 'undefined' &&
-			(window.matchMedia?.('(hover: hover) and (pointer: fine)').matches ?? true)
-		);
-	}
+	// Touch/pen taps can move focus to the trigger; ignore focus that lands shortly after one.
+	// A timestamp (not a sticky flag) so a tap that never focuses can't swallow later keyboard focus.
+	const TAP_FOCUS_WINDOW_MS = 800;
+	let suppressFocusUntil = 0;
 
 	$effect(() => {
 		return () => {
@@ -46,11 +42,19 @@
 	$effect(() => {
 		if (!visible) return;
 		const dismiss = () => hide();
+		// Only scrolls that move the trigger (an ancestor scroller or the document) should dismiss;
+		// unrelated scrollers elsewhere on the page must not hide a hovered tooltip.
+		const dismissOnScroll = (e: Event) => {
+			const target = e.target;
+			if (!triggerEl || !(target instanceof Node) || target.contains(triggerEl)) {
+				hide();
+			}
+		};
 		window.addEventListener('pointerdown', dismiss, { capture: true, passive: true });
-		window.addEventListener('scroll', dismiss, { capture: true, passive: true });
+		window.addEventListener('scroll', dismissOnScroll, { capture: true, passive: true });
 		return () => {
 			window.removeEventListener('pointerdown', dismiss, { capture: true });
-			window.removeEventListener('scroll', dismiss, { capture: true });
+			window.removeEventListener('scroll', dismissOnScroll, { capture: true });
 		};
 	});
 
@@ -119,31 +123,30 @@
 	}
 
 	function handlePointerEnter(e: PointerEvent) {
-		if (e.pointerType === 'mouse' && canHover()) {
+		// Decide per event, not by the device's primary pointer: a real mouse or hovering pen
+		// should get tooltips even on touch-first tablets; touch never hovers.
+		if (e.pointerType === 'mouse' || e.pointerType === 'pen') {
 			show();
 		}
 	}
 
 	function handlePointerDown(e: PointerEvent) {
 		if (e.pointerType !== 'mouse') {
-			suppressNextFocus = true;
+			suppressFocusUntil = performance.now() + TAP_FOCUS_WINDOW_MS;
 		}
 		hide();
 	}
 
 	function handleKeyDown(e: KeyboardEvent) {
-		suppressNextFocus = false;
+		suppressFocusUntil = 0;
 		if (e.key === 'Escape') {
 			hide();
 		}
 	}
 
 	function handleFocusIn(e: FocusEvent) {
-		if (suppressNextFocus) {
-			suppressNextFocus = false;
-			return;
-		}
-		if (!canHover()) {
+		if (performance.now() < suppressFocusUntil) {
+			suppressFocusUntil = 0;
 			return;
 		}
 		const target = e.target as HTMLElement | null;
