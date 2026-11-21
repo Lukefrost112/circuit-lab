@@ -286,7 +286,7 @@
 			{:else if isVerified}
 				<Badge variant="success" class="hidden gap-1 font-engineering sm:inline-flex">
 					<CheckCircle2 class="size-3" aria-hidden="true" />
-					<span>Verified<span class="hidden lg:inline"> · ΣP = 0</span></span>
+					<span>Verified<span class="hidden lg:inline">{' · ΣP = 0'}</span></span>
 				</Badge>
 			{:else}
 				<Badge variant="warning" class="hidden sm:inline-flex">Solved (MNA)</Badge>

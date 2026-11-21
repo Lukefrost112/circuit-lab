@@ -911,6 +911,32 @@
 		};
 	}
 
+	function getSelectionRect(comp: CircuitComponent): {
+		x: number;
+		y: number;
+		width: number;
+		height: number;
+	} {
+		const cx = comp.x * GRID_SIZE;
+		const cy = comp.y * GRID_SIZE;
+		if (comp.kind === 'ground') {
+			if (comp.rotation === 90) return { x: cx - 22, y: cy - 14, width: 28, height: 28 };
+			if (comp.rotation === 180) return { x: cx - 14, y: cy - 22, width: 28, height: 28 };
+			if (comp.rotation === 270) return { x: cx - 6, y: cy - 14, width: 28, height: 28 };
+			return { x: cx - 14, y: cy - 6, width: 28, height: 28 };
+		}
+		if (comp.kind === 'terminal') {
+			return { x: cx - 12, y: cy - 12, width: 24, height: 24 };
+		}
+		const isVertical = comp.rotation === 90 || comp.rotation === 270;
+		return {
+			x: cx - (isVertical ? 16 : 42),
+			y: cy - (isVertical ? 42 : 16),
+			width: isVertical ? 32 : 84,
+			height: isVertical ? 84 : 32
+		};
+	}
+
 	interface NodeOverlayItem {
 		nodeId: string;
 		xPx: number;
@@ -1312,11 +1338,12 @@
 				>
 					<!-- Selection Highlight Ring -->
 					{#if isSelected}
+						{@const selRect = getSelectionRect(comp)}
 						<rect
-							x={comp.x * GRID_SIZE - (isVertical ? 22 : 42)}
-							y={comp.y * GRID_SIZE - (isVertical ? 42 : 22)}
-							width={isVertical ? 44 : 84}
-							height={isVertical ? 84 : 44}
+							x={selRect.x}
+							y={selRect.y}
+							width={selRect.width}
+							height={selRect.height}
 							rx="6"
 							fill="var(--warning)"
 							fill-opacity="0.08"
@@ -1557,9 +1584,9 @@
 
 	<!-- Top Telemetry Strip -->
 	<div class="pointer-events-none absolute top-3 right-3 left-3 flex items-center justify-between gap-2">
-		<div class="pointer-events-auto inline-flex items-center gap-2 whitespace-nowrap rounded-md border border-border bg-card/95 px-2.5 py-1 text-[11px] shadow-2xs">
-			<span class="hidden font-engineering text-muted-foreground sm:inline">Grid: 20 px</span>
-			<Separator orientation="vertical" class="hidden h-3 sm:block" />
+		<div class="pointer-events-auto inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md border border-border bg-card/95 px-2.5 py-1 text-[11px] shadow-2xs">
+			<span class="hidden font-engineering text-muted-foreground sm:inline lg:hidden xl:inline">Grid: 20 px</span>
+			<Separator orientation="vertical" class="hidden h-3 sm:block lg:hidden xl:block" />
 			<span class="font-engineering text-foreground">
 				Snap: {settings.snapToGrid ? 'ON' : 'OFF'}
 			</span>
@@ -1575,20 +1602,20 @@
 			{/if}
 		</div>
 
-		<div class="pointer-events-auto hidden items-center gap-2 rounded-md border border-border bg-card/95 px-2.5 py-1 text-[11px] shadow-2xs sm:inline-flex">
+		<div class="pointer-events-auto hidden shrink-0 items-center gap-2 whitespace-nowrap rounded-md border border-border bg-card/95 px-2.5 py-1 text-[11px] shadow-2xs sm:inline-flex">
 			{#if circuit.document.components.length === 0}
-				<span class="h-2 w-2 rounded-full bg-muted-foreground"></span>
+				<span class="h-2 w-2 shrink-0 rounded-full bg-muted-foreground"></span>
 				<span class="text-muted-foreground">Canvas empty</span>
 			{:else if hasErrors}
-				<span class="h-2 w-2 rounded-full bg-destructive"></span>
+				<span class="h-2 w-2 shrink-0 rounded-full bg-destructive"></span>
 				<span class="font-medium text-destructive">Topology / Value Error</span>
 			{:else if circuit.solution.mna.valid}
-				<span class="h-2 w-2 rounded-full bg-branch-current"></span>
+				<span class="h-2 w-2 shrink-0 rounded-full bg-branch-current"></span>
 				<span class="text-foreground">
-					Solved ({circuit.solution.allVerified ? 'All methods verified' : 'MNA ready'})
+					Solved{#if circuit.solution.allVerified}<span class="xl:hidden">{' · Verified'}</span>{/if}<span class="hidden xl:inline">{' '}({circuit.solution.allVerified ? 'All methods verified' : 'MNA ready'})</span>
 				</span>
 			{:else}
-				<span class="h-2 w-2 rounded-full bg-warning"></span>
+				<span class="h-2 w-2 shrink-0 rounded-full bg-warning"></span>
 				<span class="text-muted-foreground">Solver idle</span>
 			{/if}
 		</div>
@@ -1605,7 +1632,7 @@
 				<span class="flex items-center gap-1.5 truncate text-xs font-medium text-foreground">
 					<span class="h-2 w-2 shrink-0 rounded-full bg-primary" aria-hidden="true"></span>
 					<span class="truncate">
-						Wiring<span class="hidden sm:inline"> · Tap pin/grid</span>
+						Wiring<span class="hidden sm:inline">{' · Tap pin/grid'}</span>
 					</span>
 				</span>
 				<Separator orientation="vertical" class="h-4 shrink-0" />

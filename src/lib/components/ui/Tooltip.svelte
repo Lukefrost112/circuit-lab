@@ -28,6 +28,31 @@
 	let positioned = $state(false);
 	let coords = $state({ top: 0, left: 0 });
 	let timer: ReturnType<typeof setTimeout> | undefined;
+	let suppressNextFocus = false;
+
+	function canHover(): boolean {
+		return (
+			typeof window !== 'undefined' &&
+			(window.matchMedia?.('(hover: hover) and (pointer: fine)').matches ?? true)
+		);
+	}
+
+	$effect(() => {
+		return () => {
+			clearTimeout(timer);
+		};
+	});
+
+	$effect(() => {
+		if (!visible) return;
+		const dismiss = () => hide();
+		window.addEventListener('pointerdown', dismiss, { capture: true, passive: true });
+		window.addEventListener('scroll', dismiss, { capture: true, passive: true });
+		return () => {
+			window.removeEventListener('pointerdown', dismiss, { capture: true });
+			window.removeEventListener('scroll', dismiss, { capture: true });
+		};
+	});
 
 	$effect(() => {
 		if (!visible || !triggerEl || !tooltipEl) return;
@@ -93,13 +118,34 @@
 		positioned = false;
 	}
 
+	function handlePointerEnter(e: PointerEvent) {
+		if (e.pointerType === 'mouse' && canHover()) {
+			show();
+		}
+	}
+
+	function handlePointerDown(e: PointerEvent) {
+		if (e.pointerType !== 'mouse') {
+			suppressNextFocus = true;
+		}
+		hide();
+	}
+
 	function handleKeyDown(e: KeyboardEvent) {
+		suppressNextFocus = false;
 		if (e.key === 'Escape') {
 			hide();
 		}
 	}
 
 	function handleFocusIn(e: FocusEvent) {
+		if (suppressNextFocus) {
+			suppressNextFocus = false;
+			return;
+		}
+		if (!canHover()) {
+			return;
+		}
 		const target = e.target as HTMLElement | null;
 		let isFocusVisible = false;
 		if (target) {
@@ -118,9 +164,9 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <span
 	bind:this={triggerEl}
-	onmouseenter={show}
-	onmouseleave={hide}
-	onpointerdown={hide}
+	onpointerenter={handlePointerEnter}
+	onpointerleave={hide}
+	onpointerdown={handlePointerDown}
 	onclick={hide}
 	onfocusin={handleFocusIn}
 	onfocusout={hide}

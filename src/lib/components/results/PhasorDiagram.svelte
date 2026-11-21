@@ -69,6 +69,45 @@
 		);
 	}
 
+	function segmentIntersectsRect(
+		x1: number,
+		y1: number,
+		x2: number,
+		y2: number,
+		rect: SvgRect,
+		pad = 2.5
+	): boolean {
+		const minX = rect.x1 - pad;
+		const maxX = rect.x2 + pad;
+		const minY = rect.y1 - pad;
+		const maxY = rect.y2 + pad;
+		const dx = x2 - x1;
+		const dy = y2 - y1;
+		let t0 = 0;
+		let t1 = 1;
+		const checks: Array<[number, number]> = [
+			[-dx, x1 - minX],
+			[dx, maxX - x1],
+			[-dy, y1 - minY],
+			[dy, maxY - y1]
+		];
+		for (const [p, q] of checks) {
+			if (Math.abs(p) < 1e-9) {
+				if (q < 0) return false;
+			} else {
+				const t = q / p;
+				if (p < 0) {
+					if (t > t1) return false;
+					if (t > t0) t0 = t;
+				} else {
+					if (t < t0) return false;
+					if (t < t1) t1 = t;
+				}
+			}
+		}
+		return t0 <= t1;
+	}
+
 	const phasorData = $derived.by(() => {
 		const mna = solution.mna;
 		const prec = settings.precision;
@@ -85,7 +124,80 @@
 		const maxV = rawVoltages.reduce((m, n) => Math.max(m, n.voltage.abs()), 0);
 		const maxI = rawCurrents.reduce((m, b) => Math.max(m, b.current.abs()), 0);
 
-		const entries: PhasorEntry[] = [];
+		// Pass 1: compute all visible vector geometries so label placement knows every shaft
+		interface RawVectorItem {
+			key: string;
+			label: string;
+			category: 'voltage' | 'current';
+			componentId?: string;
+			magnitude: number;
+			angleDeg: number;
+			rad: number;
+			normalizedRadius: number;
+			r: number;
+			x2: number;
+			y2: number;
+			formatted: string;
+			formattedPolar: string;
+		}
+
+		const rawItems: RawVectorItem[] = [];
+
+		if (showVoltages && maxV > 0) {
+			for (const node of rawVoltages) {
+				const mag = node.voltage.abs();
+				const deg = node.voltage.argDeg();
+				const rad = node.voltage.argRad();
+				const norm = Math.max(0.18, mag / maxV);
+				const r = norm * MAX_R;
+				rawItems.push({
+					key: `V:${node.nodeId}`,
+					label: `V_${node.nodeId}`,
+					category: 'voltage',
+					magnitude: mag,
+					angleDeg: deg,
+					rad,
+					normalizedRadius: norm,
+					r,
+					x2: CX + r * Math.cos(rad),
+					y2: CY - r * Math.sin(rad),
+					formatted: formatComplexValue(node.voltage, 'V', 'ac', {
+						precision: prec,
+						angleDisplay
+					}),
+					formattedPolar: formatPolarQuantity(node.voltage, 'V', prec)
+				});
+			}
+		}
+
+		if (showCurrents && maxI > 0) {
+			for (const branch of rawCurrents) {
+				const mag = branch.current.abs();
+				const deg = branch.current.argDeg();
+				const rad = branch.current.argRad();
+				const norm = Math.max(0.18, mag / maxI);
+				const r = norm * MAX_R;
+				rawItems.push({
+					key: `I:${branch.componentId}`,
+					label: `I_${branch.label}`,
+					category: 'current',
+					componentId: branch.componentId,
+					magnitude: mag,
+					angleDeg: deg,
+					rad,
+					normalizedRadius: norm,
+					r,
+					x2: CX + r * Math.cos(rad),
+					y2: CY - r * Math.sin(rad),
+					formatted: formatComplexValue(branch.current, 'A', 'ac', {
+						precision: prec,
+						angleDisplay
+					}),
+					formattedPolar: formatPolarQuantity(branch.current, 'A', prec)
+				});
+			}
+		}
+
 		const placedLabels: SvgRect[] = [
 			// Axis labels (0°, 90°, 180°, -90°) + origin dot
 			{ x1: CX + MAX_R + 10, y1: CY - 8, x2: CX + MAX_R + 30, y2: CY + 8 },
@@ -95,18 +207,25 @@
 			{ x1: CX - 8, y1: CY - 8, x2: CX + 8, y2: CY + 8 }
 		];
 
-		function placeVectorLabel(label: string, r: number, rad: number, deg: number): { lx: number; ly: number } {
-			const labelW = label.length * 5.8 + 4;
+		function placeVectorLabel(item: RawVectorItem): { lx: number; ly: number } {
+			const labelW = item.label.length * 5.8 + 4;
 			const labelH = 12;
-			const nearCardinal = [0, 90, 180, -180, -90].some((c) => angleDiffDeg(deg, c) < 14);
+			const nearCardinal = [0, 90, 180, -180, -90].some((c) => angleDiffDeg(item.angleDeg, c) < 14);
+			const hasCollinearOther = rawItems.some(
+				(other) => other.key !== item.key && angleDiffDeg(other.angleDeg, item.angleDeg) <= 6
+			);
 
 			const offsets: Array<{ dr: number; dDeg: number; bias: number }> = [
 				{ dr: 16, dDeg: nearCardinal ? 14 : 0, bias: 0 },
 				{ dr: 16, dDeg: -14, bias: 1 },
 				{ dr: 16, dDeg: 18, bias: 2 },
+				{ dr: 4, dDeg: 20, bias: 3 },
+				{ dr: 4, dDeg: -20, bias: 3.5 },
 				{ dr: 27, dDeg: nearCardinal ? 12 : 0, bias: 4 },
 				{ dr: 14, dDeg: -24, bias: 5 },
 				{ dr: 14, dDeg: 24, bias: 6 },
+				{ dr: 8, dDeg: 28, bias: 7 },
+				{ dr: 8, dDeg: -28, bias: 7.5 },
 				{ dr: -14, dDeg: 16, bias: 8 },
 				{ dr: -14, dDeg: -16, bias: 9 },
 				{ dr: 30, dDeg: -16, bias: 11 },
@@ -115,13 +234,13 @@
 				{ dr: 16, dDeg: -36, bias: 15 }
 			];
 
-			let bestX = CX + (r + 16) * Math.cos(rad);
-			let bestY = CY - (r + 16) * Math.sin(rad);
+			let bestX = CX + (item.r + 16) * Math.cos(item.rad);
+			let bestY = CY - (item.r + 16) * Math.sin(item.rad);
 			let bestScore = Infinity;
 
 			for (const off of offsets) {
-				const candR = Math.max(22, Math.min(MAX_R + 28, r + off.dr));
-				const candRad = rad + (off.dDeg * Math.PI) / 180;
+				const candR = Math.max(22, Math.min(MAX_R + 28, item.r + off.dr));
+				const candRad = item.rad + (off.dDeg * Math.PI) / 180;
 				const lx = CX + candR * Math.cos(candRad);
 				const ly = CY - candR * Math.sin(candRad);
 				const rect: SvgRect = {
@@ -140,6 +259,18 @@
 						score += 1000;
 					}
 				}
+				if (hasCollinearOther && Math.abs(off.dDeg) < 10) {
+					score += 25;
+				}
+				for (const seg of rawItems) {
+					if (seg.key === item.key) {
+						if (segmentIntersectsRect(CX, CY, seg.x2, seg.y2, rect, 1.5)) {
+							score += 40;
+						}
+					} else if (segmentIntersectsRect(CX, CY, seg.x2, seg.y2, rect, 3)) {
+						score += 180;
+					}
+				}
 				if (score < bestScore) {
 					bestScore = score;
 					bestX = lx;
@@ -156,68 +287,25 @@
 			return { lx: bestX, ly: bestY };
 		}
 
-		if (showVoltages && maxV > 0) {
-			for (const node of rawVoltages) {
-				const mag = node.voltage.abs();
-				const deg = node.voltage.argDeg();
-				const rad = node.voltage.argRad();
-				const norm = Math.max(0.18, mag / maxV);
-				const r = norm * MAX_R;
-				const x2 = CX + r * Math.cos(rad);
-				const y2 = CY - r * Math.sin(rad);
-				const label = `V_${node.nodeId}`;
-				const { lx, ly } = placeVectorLabel(label, r, rad, deg);
-				entries.push({
-					key: `V:${node.nodeId}`,
-					label,
-					category: 'voltage',
-					magnitude: mag,
-					angleDeg: deg,
-					normalizedRadius: norm,
-					x2,
-					y2,
-					labelX: lx,
-					labelY: ly,
-					formatted: formatComplexValue(node.voltage, 'V', 'ac', {
-						precision: prec,
-						angleDisplay
-					}),
-					formattedPolar: formatPolarQuantity(node.voltage, 'V', prec)
-				});
-			}
-		}
-
-		if (showCurrents && maxI > 0) {
-			for (const branch of rawCurrents) {
-				const mag = branch.current.abs();
-				const deg = branch.current.argDeg();
-				const rad = branch.current.argRad();
-				const norm = Math.max(0.18, mag / maxI);
-				const r = norm * MAX_R;
-				const x2 = CX + r * Math.cos(rad);
-				const y2 = CY - r * Math.sin(rad);
-				const label = `I_${branch.label}`;
-				const { lx, ly } = placeVectorLabel(label, r, rad, deg);
-				entries.push({
-					key: `I:${branch.componentId}`,
-					label,
-					category: 'current',
-					componentId: branch.componentId,
-					magnitude: mag,
-					angleDeg: deg,
-					normalizedRadius: norm,
-					x2,
-					y2,
-					labelX: lx,
-					labelY: ly,
-					formatted: formatComplexValue(branch.current, 'A', 'ac', {
-						precision: prec,
-						angleDisplay
-					}),
-					formattedPolar: formatPolarQuantity(branch.current, 'A', prec)
-				});
-			}
-		}
+		// Pass 2: place labels using full knowledge of all vector shafts
+		const entries: PhasorEntry[] = rawItems.map((item) => {
+			const { lx, ly } = placeVectorLabel(item);
+			return {
+				key: item.key,
+				label: item.label,
+				category: item.category,
+				componentId: item.componentId,
+				magnitude: item.magnitude,
+				angleDeg: item.angleDeg,
+				normalizedRadius: item.normalizedRadius,
+				x2: item.x2,
+				y2: item.y2,
+				labelX: lx,
+				labelY: ly,
+				formatted: item.formatted,
+				formattedPolar: item.formattedPolar
+			};
+		});
 
 		return { entries, maxV, maxI };
 	});
@@ -431,7 +519,7 @@
 							}
 						}}
 					>
-						<!-- Invisible wide hit target -->
+						<!-- Invisible wide hit targets (shaft + label area) -->
 						<line
 							x1={CX}
 							y1={CY}
@@ -439,6 +527,13 @@
 							y2={entry.y2}
 							stroke="transparent"
 							stroke-width="12"
+						/>
+						<rect
+							x={entry.labelX - (entry.label.length * 5.8 + 6) / 2}
+							y={entry.labelY - 8}
+							width={entry.label.length * 5.8 + 6}
+							height="16"
+							fill="transparent"
 						/>
 						<line
 							x1={CX}
@@ -450,22 +545,37 @@
 							stroke-dasharray={entry.category === 'current' ? '5 2.5' : undefined}
 							marker-end={markerUrl}
 						/>
+					</g>
+				{/each}
+
+				<circle cx={CX} cy={CY} r="2.75" fill="var(--foreground)" />
+
+				<!-- Phasor vector labels rendered above all shafts with card-colored halo -->
+				<g pointer-events="none">
+					{#each phasorData.entries as entry (entry.key)}
+						{@const isHovered = hoveredKey === entry.key}
+						{@const isSelected = Boolean(entry.componentId && selectedComponentId === entry.componentId)}
+						{@const isDimmed = hoveredKey !== null && !isHovered}
+						{@const strokeColor = entry.category === 'voltage' ? 'var(--voltage)' : 'var(--current)'}
 						<text
 							x={entry.labelX}
 							y={entry.labelY}
 							text-anchor="middle"
 							dominant-baseline="central"
 							fill={strokeColor}
+							stroke="var(--card)"
+							stroke-width="3.5"
+							stroke-linejoin="round"
+							paint-order="stroke"
 							font-family="var(--font-mono)"
 							font-size="9.5"
 							font-weight={isHovered || isSelected ? '700' : '600'}
+							class={cn('transition-opacity duration-150', isDimmed ? 'opacity-25' : 'opacity-100')}
 						>
 							{entry.label}
 						</text>
-					</g>
-				{/each}
-
-				<circle cx={CX} cy={CY} r="2.75" fill="var(--foreground)" />
+					{/each}
+				</g>
 			</svg>
 		</div>
 
