@@ -86,13 +86,13 @@
 		}}
 	>
 		<TabsList
-			class="flex h-auto w-full flex-nowrap justify-start gap-3 overflow-x-auto no-scrollbar px-4 [-webkit-overflow-scrolling:touch] md:flex-wrap md:gap-x-4 md:gap-y-0"
+			class="flex h-11 w-full flex-nowrap items-stretch justify-start gap-3 overflow-x-auto overflow-y-hidden no-scrollbar px-4 [-webkit-overflow-scrolling:touch] md:h-9 md:gap-4"
 		>
 			{#each METHOD_TABS as tab (tab.id)}
 				{@const res = solution.methods[tab.id]}
 				<TabsTrigger
 					value={tab.id}
-					class="min-h-11 shrink-0 gap-1.5 px-0.5 py-2 md:h-9 md:min-h-0 md:py-0"
+					class="mb-0 h-full shrink-0 gap-1.5 px-1.5"
 				>
 					<span>{tab.label}</span>
 					{#if res && !res.applicable}

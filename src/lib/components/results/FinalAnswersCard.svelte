@@ -119,7 +119,7 @@
 				</span>
 			{/if}
 
-			<span class="text-border" aria-hidden="true">·</span>
+			<span class="text-muted-foreground/60" aria-hidden="true">·</span>
 
 			{#if solution.allVerified}
 				<span class="text-muted-foreground" title="All applicable methods verified against MNA">

@@ -902,9 +902,9 @@
 		}
 		return {
 			labelX: 0,
-			labelY: -32,
+			labelY: -36,
 			valueX: 0,
-			valueY: -20,
+			valueY: -22,
 			anchor: 'middle' as const,
 			showValue: true
 		};
@@ -1193,7 +1193,7 @@
 			</span>
 		</div>
 
-		<div class="flex shrink-0 items-center gap-1.5 font-engineering">
+		<div class="flex shrink-0 items-center gap-1.5 font-engineering sm:hidden">
 			{#if circuit.document.components.length === 0}
 				<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/50" aria-hidden="true"></span>
 				<span class="text-muted-foreground">Empty</span>
@@ -1210,6 +1210,9 @@
 				<span class="text-muted-foreground">Idle</span>
 			{/if}
 		</div>
+		<span class="hidden shrink-0 font-engineering text-muted-foreground sm:inline">
+			{Math.round(zoom * 100)}%
+		</span>
 	</div>
 
 	<!-- Flush Top Contextual Strip (only when wiring, placing, wire-tool, or probing) -->
@@ -1631,7 +1634,7 @@
 					<!-- Thévenin Load Target Badge -->
 					{#if isThevenin}
 						<g
-							transform="translate({comp.x * GRID_SIZE}, {comp.y * GRID_SIZE - (isVertical ? 52 : 48)})"
+							transform="translate({comp.x * GRID_SIZE}, {comp.y * GRID_SIZE - (isVertical ? 52 : 54)})"
 							pointer-events="none"
 						>
 							<rect
@@ -2003,39 +2006,43 @@
 	</div>
 
 	<!-- Desktop Docked Bottom Status & Tool Bar (lg+) -->
-	<div class="hidden h-8 shrink-0 items-center justify-between gap-3 border-t border-border bg-surface-rail px-3 text-[11px] lg:flex">
+	<div class="hidden h-8 shrink-0 items-center justify-between gap-2 border-t border-border bg-surface-rail px-2.5 text-[11px] lg:flex xl:gap-3 xl:px-3">
 		<!-- Left: Solver Status, Telemetry & Contextual Hint -->
-		<div class="flex min-w-0 items-center gap-2.5">
+		<div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden xl:gap-2.5">
 			<div class="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
 				{#if circuit.document.components.length === 0}
 					<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/50" aria-hidden="true"></span>
 					<span class="text-muted-foreground">Empty</span>
 				{:else if hasErrors}
 					<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-destructive" aria-hidden="true"></span>
-					<span class="font-medium text-destructive">Topology / Value Error</span>
+					<span class="font-medium text-destructive">
+						<span class="xl:hidden">Error</span><span class="hidden xl:inline">Topology / Value Error</span>
+					</span>
 				{:else if circuit.solution.mna.valid}
 					<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-branch-current" aria-hidden="true"></span>
 					<span class="text-foreground">
-						Solved<span class="xl:hidden">{circuit.solution.allVerified ? ' · Verified' : ' · MNA'}</span><span class="hidden xl:inline">{circuit.solution.allVerified ? ' · All methods verified' : ' · MNA ready'}</span>
+						<span class="xl:hidden">{circuit.solution.allVerified ? 'Verified' : 'MNA'}</span><span class="hidden xl:inline">Solved{circuit.solution.allVerified ? ' · All methods verified' : ' · MNA ready'}</span>
 					</span>
 				{:else}
 					<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true"></span>
-					<span class="text-muted-foreground">Solver idle</span>
+					<span class="text-muted-foreground">
+						<span class="xl:hidden">Idle</span><span class="hidden xl:inline">Solver idle</span>
+					</span>
 				{/if}
 			</div>
 
 			<Separator orientation="vertical" class="h-3.5 shrink-0" />
 
-			<div class="flex shrink-0 items-center gap-2.5 font-engineering whitespace-nowrap">
-				<span class="hidden text-muted-foreground xl:inline">Grid 20px</span>
-				<span class="text-muted-foreground">
+			<div class="flex min-w-0 items-center gap-2 overflow-hidden font-engineering whitespace-nowrap xl:gap-2.5">
+				<span class="hidden shrink-0 text-muted-foreground xl:inline">Grid 20px</span>
+				<span class="hidden shrink-0 text-muted-foreground xl:inline">
 					Snap <span class="text-foreground">{settings.snapToGrid ? 'ON' : 'OFF'}</span>
 				</span>
-				<span class="text-voltage">
+				<span class="shrink-0 text-voltage">
 					{nodeCount} {nodeCount === 1 ? 'Node' : 'Nodes'}
 				</span>
 				{#if hoverGrid}
-					<span class="text-muted-foreground">
+					<span class="truncate text-muted-foreground">
 						({hoverGrid.x}, {hoverGrid.y})
 					</span>
 				{/if}

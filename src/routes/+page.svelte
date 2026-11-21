@@ -152,9 +152,9 @@
 
 <div class="flex h-dvh w-full flex-col overflow-hidden bg-background text-foreground">
 	<!-- Top Toolbar -->
-	<header class="flex h-14 shrink-0 items-center justify-between gap-1.5 border-b border-border bg-surface-rail px-2 sm:gap-2 sm:px-3 lg:h-11">
+	<header class="flex h-14 shrink-0 items-center justify-between gap-1 border-b border-border bg-surface-rail px-1.5 sm:gap-2 sm:px-3 lg:h-11">
 		<!-- Left: Rail Toggle, Brand, Mode & Telemetry -->
-		<div class="flex min-w-0 items-center gap-1.5 sm:gap-2">
+		<div class="flex min-w-0 items-center gap-1 sm:gap-2">
 			<Tooltip
 				content={leftRailOpen ? 'Collapse component palette' : 'Expand component palette'}
 				side="bottom"
@@ -175,7 +175,7 @@
 				</Button>
 			</Tooltip>
 
-			<div class="flex min-w-0 items-center gap-2">
+			<div class="flex shrink-0 items-center gap-1.5 sm:gap-2 xl:min-w-0">
 				<svg
 					width="18"
 					height="18"
@@ -192,7 +192,7 @@
 					<circle cx="3" cy="12" r="1.4" fill="currentColor" stroke="none" />
 					<circle cx="21" cy="12" r="1.4" fill="currentColor" stroke="none" />
 				</svg>
-				<span class="truncate text-[13px] font-semibold tracking-tight text-foreground sm:shrink-0">
+				<span class="shrink-0 whitespace-nowrap text-[13px] font-semibold tracking-tight text-foreground">
 					Circuit Lab
 				</span>
 				{#if circuit.document.name}
@@ -224,7 +224,7 @@
 					aria-checked={circuit.document.mode === 'dc'}
 					onclick={() => circuit.setMode('dc')}
 					class={cn(
-						'inline-flex h-11 cursor-pointer items-center justify-center rounded-[3px] border px-2.5 text-xs transition-colors duration-150 lg:h-full lg:px-2.5',
+						'inline-flex h-11 cursor-pointer items-center justify-center rounded-[3px] border px-2 text-xs transition-colors duration-150 sm:px-2.5 lg:h-full lg:px-2.5',
 						'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
 						circuit.document.mode === 'dc'
 							? 'border-border/80 bg-card font-semibold text-foreground'
@@ -239,7 +239,7 @@
 					aria-checked={circuit.document.mode === 'ac'}
 					onclick={() => circuit.setMode('ac')}
 					class={cn(
-						'inline-flex h-11 cursor-pointer items-center justify-center rounded-[3px] border px-2.5 text-xs transition-colors duration-150 lg:h-full lg:px-2.5',
+						'inline-flex h-11 cursor-pointer items-center justify-center rounded-[3px] border px-2 text-xs transition-colors duration-150 sm:px-2.5 lg:h-full lg:px-2.5',
 						'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
 						circuit.document.mode === 'ac'
 							? 'border-border/80 bg-card font-semibold text-foreground'
@@ -261,9 +261,10 @@
 						mobileMenuOpen = false;
 						freqPopoverOpen = !freqPopoverOpen;
 					}}
-					class="inline-flex min-h-11 shrink-0 cursor-pointer items-center rounded-[4px] border border-input bg-card px-2 font-engineering text-xs text-foreground transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
+					class="inline-flex min-h-11 shrink-0 cursor-pointer items-center rounded-[4px] border border-input bg-card px-1.5 font-engineering text-[11px] text-foreground transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-2 sm:text-xs md:hidden"
 				>
-					{formatFrequency(circuit.document.frequencyHz)}
+					<span class="sm:hidden">{formatFrequency(circuit.document.frequencyHz).replace(/\s+/g, '')}</span>
+					<span class="hidden sm:inline">{formatFrequency(circuit.document.frequencyHz)}</span>
 				</button>
 
 				<!-- Inline AC Frequency Input (md+) -->

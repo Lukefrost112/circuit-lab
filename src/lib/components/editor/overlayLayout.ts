@@ -82,14 +82,14 @@ export function buildSchematicObstacles(
 			const halfW = (Math.max(comp.label.length * 6.8, val.length * 6.2) + 8) / 2;
 			solid.push({
 				x1: cx - halfW,
-				y1: cy - 42,
+				y1: cy - 46,
 				x2: cx + halfW,
-				y2: cy - 15
+				y2: cy - 17
 			});
 		}
 
 		if (theveninCompId === comp.id) {
-			const topY = cy - (isVertical ? 52 : 48);
+			const topY = cy - (isVertical ? 52 : 54);
 			solid.push({ x1: cx - 49, y1: topY - 10, x2: cx + 49, y2: topY + 9 });
 		}
 	}
@@ -158,7 +158,7 @@ export function chooseBranchPillPosition(
 				{ x: cx, y: cy + 38, bias: 4 },
 				{ x: cx - 24, y: cy + 25, bias: 6 },
 				{ x: cx + 24, y: cy + 25, bias: 6 },
-				{ x: cx, y: cy - 53, bias: 10 },
+				{ x: cx, y: cy - 58, bias: 10 },
 				{ x: cx, y: cy + 52, bias: 14 }
 			];
 
