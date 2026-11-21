@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildElectricalGraph } from '../engine/graph';
 import { solveMNA } from '../engine/mna';
+import { solveCircuit } from '../engine/solve';
 import { getPresetById, PRESETS } from './presets';
 
 const EXPECTED_NON_REF_NODES: Record<string, number> = {
@@ -47,6 +48,30 @@ describe('Curated Textbook DC & AC Presets', () => {
 		expect(sol.valid).toBe(true);
 		expect(sol.powerBalance.balanced).toBe(true);
 		expect(sol.powerBalance.totalSuppliedReal).toBeGreaterThan(0);
+
+		const full = solveCircuit(preset.document, {
+			theveninTarget: preset.theveninLoadId
+				? { kind: 'component', componentId: preset.theveninLoadId }
+				: undefined
+		});
+		expect(full.mna.valid).toBe(true);
+		expect(full.mna.powerBalance.balanced).toBe(true);
+		expect(full.allVerified).toBe(true);
+		expect(full.maxDiscrepancy).toBeLessThan(1e-8);
+
+		for (const methodId of [
+			'kcl_kvl',
+			'nodal',
+			'mesh',
+			'superposition',
+			'source_transform',
+			'thevenin_norton'
+		] as const) {
+			const mRes = full.methods[methodId]!;
+			expect(mRes.applicable).toBe(true);
+			expect(mRes.verifiedAgainstMna).toBe(true);
+			expect(mRes.maxDiscrepancy!).toBeLessThan(1e-8);
+		}
 	});
 
 	it('matches exact analytical textbook solutions on all DC presets', () => {
