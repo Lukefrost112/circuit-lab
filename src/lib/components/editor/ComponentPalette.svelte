@@ -147,22 +147,22 @@
 					type="button"
 					onclick={handleSelectMoveTool}
 					class={cn(
-						'relative flex w-full cursor-pointer items-center justify-between gap-2 rounded-[4px] border text-left transition-colors duration-150',
+						'flex w-full cursor-pointer items-center justify-between gap-2 rounded-[4px] border text-left transition-colors duration-150',
 						isSheet ? 'min-h-11 px-3 py-2 text-sm' : 'px-2 py-1.5 text-xs',
 						'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 						circuit.activeTool === 'select'
-							? 'border-border bg-card font-medium text-foreground'
+							? 'border-primary/45 bg-card font-medium text-foreground'
 							: 'border-transparent text-foreground/90 hover:bg-accent/70 hover:text-foreground'
 					)}
 				>
-					{#if circuit.activeTool === 'select'}
-						<span
-							class="absolute top-1 bottom-1 left-0 w-0.5 rounded-r bg-primary"
-							aria-hidden="true"
-						></span>
-					{/if}
 					<span class={cn('flex min-w-0 items-center', isSheet ? 'gap-2.5' : 'gap-2')}>
-						<MousePointer2 class="size-3.5 shrink-0 text-foreground" aria-hidden="true" />
+						<MousePointer2
+							class={cn(
+								'size-3.5 shrink-0',
+								circuit.activeTool === 'select' ? 'text-primary' : 'text-foreground'
+							)}
+							aria-hidden="true"
+						/>
 						<span class="truncate">Select / Move</span>
 					</span>
 					{#if !isSheet}
@@ -190,27 +190,21 @@
 								title={item.description}
 								onclick={() => handleSelectPaletteItem(item)}
 								class={cn(
-									'relative flex w-full cursor-pointer items-center justify-between rounded-[4px] border text-left transition-colors duration-150',
+									'flex w-full cursor-pointer items-center justify-between rounded-[4px] border text-left transition-colors duration-150',
 									isSheet ? 'min-h-11 gap-2 px-3 py-2 text-sm' : 'gap-1.5 px-2 py-1.5 text-xs',
 									'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 									active
-										? 'border-border bg-card font-medium text-foreground'
+										? 'border-primary/45 bg-card font-medium text-foreground'
 										: 'border-transparent text-foreground/90 hover:bg-accent/70 hover:text-foreground'
 								)}
 							>
-								{#if active}
-									<span
-										class="absolute top-1 bottom-1 left-0 w-0.5 rounded-r bg-primary"
-										aria-hidden="true"
-									></span>
-								{/if}
 								<span class={cn('flex min-w-0 items-center', isSheet ? 'gap-2.5' : 'gap-1.5')}>
 									<CircuitSymbol
 										kind={item.kind}
 										variant="icon"
 										sourceMode={item.sourceMode ?? 'dc'}
 										size={isSheet ? 22 : 18}
-										class="shrink-0 text-foreground"
+										class={cn('shrink-0', active ? 'text-primary' : 'text-foreground')}
 									/>
 									<span class="truncate">{item.name}</span>
 								</span>
@@ -240,26 +234,20 @@
 								title={item.description}
 								onclick={() => handleSelectPaletteItem(item)}
 								class={cn(
-									'relative flex w-full cursor-pointer items-center justify-between rounded-[4px] border text-left transition-colors duration-150',
+									'flex w-full cursor-pointer items-center justify-between rounded-[4px] border text-left transition-colors duration-150',
 									isSheet ? 'min-h-11 gap-2 px-3 py-2 text-sm' : 'gap-1.5 px-2 py-1.5 text-xs',
 									'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 									active
-										? 'border-border bg-card font-medium text-foreground'
+										? 'border-primary/45 bg-card font-medium text-foreground'
 										: 'border-transparent text-foreground/90 hover:bg-accent/70 hover:text-foreground'
 								)}
 							>
-								{#if active}
-									<span
-										class="absolute top-1 bottom-1 left-0 w-0.5 rounded-r bg-primary"
-										aria-hidden="true"
-									></span>
-								{/if}
 								<span class={cn('flex min-w-0 items-center', isSheet ? 'gap-2.5' : 'gap-1.5')}>
 									<CircuitSymbol
 										kind={item.kind}
 										variant="icon"
 										size={isSheet ? 22 : 18}
-										class="shrink-0 text-foreground"
+										class={cn('shrink-0', active ? 'text-primary' : 'text-foreground')}
 									/>
 									<span class="truncate">{item.name}</span>
 								</span>
@@ -289,27 +277,21 @@
 								title={item.description}
 								onclick={() => handleSelectPaletteItem(item)}
 								class={cn(
-									'relative flex w-full cursor-pointer items-center justify-between rounded-[4px] border text-left transition-colors duration-150',
+									'flex w-full cursor-pointer items-center justify-between rounded-[4px] border text-left transition-colors duration-150',
 									isSheet ? 'min-h-11 gap-2 px-3 py-2 text-sm' : 'gap-1.5 px-2 py-1.5 text-xs',
 									'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 									active
-										? 'border-border bg-card font-medium text-foreground'
+										? 'border-primary/45 bg-card font-medium text-foreground'
 										: 'border-transparent text-foreground/90 hover:bg-accent/70 hover:text-foreground'
 								)}
 							>
-								{#if active}
-									<span
-										class="absolute top-1 bottom-1 left-0 w-0.5 rounded-r bg-primary"
-										aria-hidden="true"
-									></span>
-								{/if}
 								<span class={cn('flex min-w-0 items-center', isSheet ? 'gap-2.5' : 'gap-1.5')}>
 									<CircuitSymbol
 										kind={item.kind}
 										variant="icon"
 										size={isSheet ? 22 : 18}
 										terminalLabel={item.kind === 'terminal' ? 'A' : undefined}
-										class="shrink-0 text-foreground"
+										class={cn('shrink-0', active ? 'text-primary' : 'text-foreground')}
 									/>
 									<span class="truncate">{item.name}</span>
 								</span>

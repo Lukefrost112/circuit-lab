@@ -576,10 +576,10 @@
 		{#if mobileTab === 'results'}
 			<section
 				aria-label="Circuit analysis results"
-				class="flex min-h-0 flex-1 flex-col overflow-y-auto bg-surface-rail lg:hidden"
+				class="flex min-h-0 flex-1 flex-col overflow-y-auto bg-card p-0 lg:hidden"
 			>
 				{#if circuit.selectedComponent}
-					<div class="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-border bg-card/95 px-3 py-1.5 text-xs backdrop-blur-xs">
+					<div class="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-border bg-surface-rail/90 px-4 py-1.5 text-xs backdrop-blur-xs">
 						<div class="flex min-w-0 items-center gap-1.5">
 							<span class="text-muted-foreground">Selected:</span>
 							<span class="font-engineering truncate font-semibold text-warning">
@@ -608,7 +608,7 @@
 					</div>
 				{/if}
 
-				<div class="p-3">
+				<div class="min-w-0 flex-1">
 					<ResultsPanel
 						solution={circuit.solution}
 						document={circuit.document}
@@ -622,7 +622,7 @@
 		{:else if mobileTab === 'inspector'}
 			<section
 				aria-label="Element property inspector"
-				class="flex min-h-0 flex-1 flex-col overflow-y-auto bg-surface-rail p-3 lg:hidden"
+				class="flex min-h-0 flex-1 flex-col overflow-y-auto bg-card p-0 lg:hidden"
 			>
 				<PropertyInspector />
 			</section>
@@ -644,7 +644,7 @@
 					}}
 					class="flex min-h-0 flex-1 flex-col"
 				>
-					<TabsList class="grid h-9 w-full shrink-0 grid-cols-2 gap-0 px-3">
+					<TabsList class="grid h-9 w-full shrink-0 grid-cols-2 gap-0 px-4">
 						<TabsTrigger value="results" class="w-full">Results</TabsTrigger>
 						<TabsTrigger value="inspector" class="w-full gap-1.5">
 							<span>Inspector</span>
@@ -661,7 +661,7 @@
 					</TabsList>
 
 					{#if rightTab === 'results' && circuit.selectedComponent}
-						<div class="flex items-center justify-between gap-2 border-b border-border bg-surface-rail/70 px-3 py-1.5 text-xs">
+						<div class="flex items-center justify-between gap-2 border-b border-border bg-surface-rail/70 px-4 py-1.5 text-xs">
 							<div class="flex min-w-0 items-center gap-1.5">
 								<span class="text-muted-foreground">Selected:</span>
 								<span class="font-engineering font-semibold text-warning">
@@ -680,7 +680,7 @@
 						</div>
 					{/if}
 
-					<div class="flex-1 overflow-y-auto p-3">
+					<div class="flex-1 overflow-y-auto p-0">
 						<TabsContent value="results">
 							<ResultsPanel
 								solution={circuit.solution}

@@ -44,9 +44,8 @@
 	// Arrowhead footprint used for label avoidance (marker 6 units × hovered stroke 2.75).
 	const ARROW_LEN = 16;
 	const ARROW_HALF_W = 6;
-	// Opaque equivalent of the SVG's `bg-background/60` over the section's `bg-card`, so label
-	// halos blend into the diagram background instead of showing card-colored blobs.
-	const LABEL_HALO_COLOR = 'color-mix(in srgb, var(--background) 60%, var(--card))';
+	// Matches the SVG's solid `bg-background` so label halos blend seamlessly into the diagram.
+	const LABEL_HALO_COLOR = 'var(--background)';
 
 	function labelBoxWidth(label: string): number {
 		return label.length * 5.8 + 4;
@@ -354,11 +353,11 @@
 				onclick={() => (showVoltages = !showVoltages)}
 				aria-pressed={showVoltages}
 				class={cn(
-					'inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-sm border px-3 py-2 text-xs font-medium transition-colors duration-150 sm:min-h-0 sm:px-2 sm:py-1 sm:text-[11px]',
+					'inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-[4px] border px-3 py-2 text-xs font-medium transition-colors duration-150 sm:min-h-0 sm:px-2 sm:py-1 sm:text-[11px]',
 					'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 					showVoltages
-						? 'border-voltage/40 bg-voltage/10 text-voltage'
-						: 'border-border bg-transparent text-muted-foreground hover:text-foreground'
+						? 'border-voltage/45 bg-voltage/10 text-voltage'
+						: 'border-border bg-transparent text-muted-foreground hover:bg-accent/40 hover:text-foreground'
 				)}
 			>
 				<span class="size-2 rounded-full bg-voltage" aria-hidden="true"></span>
@@ -369,11 +368,11 @@
 				onclick={() => (showCurrents = !showCurrents)}
 				aria-pressed={showCurrents}
 				class={cn(
-					'inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-sm border px-3 py-2 text-xs font-medium transition-colors duration-150 sm:min-h-0 sm:px-2 sm:py-1 sm:text-[11px]',
+					'inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-[4px] border px-3 py-2 text-xs font-medium transition-colors duration-150 sm:min-h-0 sm:px-2 sm:py-1 sm:text-[11px]',
 					'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 					showCurrents
-						? 'border-branch-current/40 bg-branch-current/10 text-branch-current'
-						: 'border-border bg-transparent text-muted-foreground hover:text-foreground'
+						? 'border-branch-current/45 bg-branch-current/10 text-branch-current'
+						: 'border-border bg-transparent text-muted-foreground hover:bg-accent/40 hover:text-foreground'
 				)}
 			>
 				<span class="size-2 rounded-full bg-branch-current" aria-hidden="true"></span>
@@ -383,7 +382,7 @@
 
 		{#if activeEntry}
 			<div
-				class="font-engineering flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 rounded-sm border border-border bg-surface-rail px-2.5 py-1 text-[11px] text-foreground sm:w-auto sm:px-2 sm:py-0.5"
+				class="font-engineering flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 rounded-[4px] border border-border bg-surface-rail/60 px-2.5 py-1 text-[11px] text-foreground sm:w-auto sm:px-2 sm:py-0.5"
 			>
 				<span
 					class={cn(
@@ -408,7 +407,7 @@
 				viewBox="0 0 320 320"
 				role="img"
 				aria-label="AC Polar Phasor Diagram showing voltage and current phasors"
-				class="h-auto w-full rounded-md border border-border bg-background/60 select-none"
+				class="h-auto w-full rounded-[4px] border border-border bg-background select-none"
 			>
 				<title>AC Polar Phasor Diagram</title>
 				<desc>
@@ -617,13 +616,13 @@
 		</div>
 
 		<!-- Compact interactive legend -->
-		<div class="flex flex-col gap-1.5">
+		<div class="flex flex-col">
 			{#if phasorData.entries.length === 0}
 				<p class="text-xs text-muted-foreground">
 					No non-zero phasors visible. Enable Voltages or Currents above.
 				</p>
 			{:else}
-				<div class="grid max-h-[250px] grid-cols-1 gap-1 overflow-y-auto pr-1">
+				<div class="max-h-[250px] divide-y divide-border overflow-y-auto border-y border-border">
 					{#each phasorData.entries as entry (entry.key)}
 						{@const isSelected = Boolean(entry.componentId && selectedComponentId === entry.componentId)}
 						{@const isHovered = hoveredKey === entry.key}
@@ -635,17 +634,17 @@
 								if (entry.componentId) onSelectComponent?.(entry.componentId);
 							}}
 							class={cn(
-								'flex min-h-11 w-full cursor-pointer flex-wrap items-center justify-between gap-x-2 gap-y-0.5 rounded-sm border px-3 py-2 text-left text-xs transition-colors duration-150 sm:min-h-0 sm:flex-nowrap sm:px-2 sm:py-1',
-								'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+								'flex min-h-11 w-full cursor-pointer flex-wrap items-center justify-between gap-x-2 gap-y-0.5 px-2.5 py-2 text-left text-xs transition-colors duration-150 sm:min-h-0 sm:flex-nowrap sm:py-1.5',
+								'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
 								isSelected || isHovered
-									? 'border-primary/40 bg-primary/10'
-									: 'border-border bg-surface-rail/50 hover:bg-muted'
+									? 'bg-primary/10'
+									: 'bg-transparent hover:bg-accent/40'
 							)}
 						>
 							<span class="flex shrink-0 items-center gap-2">
 								<span
 									class={cn(
-										'h-2.5 w-2.5 shrink-0 rounded-full',
+										'h-2 w-2 shrink-0 rounded-full',
 										entry.category === 'voltage' ? 'bg-voltage' : 'bg-branch-current'
 									)}
 									aria-hidden="true"

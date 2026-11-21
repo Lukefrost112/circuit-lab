@@ -1,7 +1,6 @@
 <script lang="ts">
-	import { ArrowRight, Cpu } from 'lucide-svelte';
+	import { ArrowRight } from 'lucide-svelte';
 	import {
-		Badge,
 		Button,
 		Dialog,
 		Tabs,
@@ -54,14 +53,15 @@
 	<div class="flex flex-col gap-4">
 		<Tabs
 			value={categoryFilter}
+			variant="underline"
 			onValueChange={(next) => {
 				categoryFilter = next as 'all' | 'dc' | 'ac';
 			}}
 		>
-			<TabsList class="grid h-auto w-full grid-cols-3 sm:inline-flex sm:h-9 sm:w-fit">
-				<TabsTrigger value="all" class="min-h-11 sm:min-h-0">All ({PRESETS.length})</TabsTrigger>
-				<TabsTrigger value="dc" class="min-h-11 sm:min-h-0">DC ({dcCount})</TabsTrigger>
-				<TabsTrigger value="ac" class="min-h-11 sm:min-h-0">AC ({acCount})</TabsTrigger>
+			<TabsList class="h-auto w-full gap-4 sm:gap-5">
+				<TabsTrigger value="all" class="min-h-11 px-1 sm:h-9 sm:min-h-0">All ({PRESETS.length})</TabsTrigger>
+				<TabsTrigger value="dc" class="min-h-11 px-1 sm:h-9 sm:min-h-0">DC ({dcCount})</TabsTrigger>
+				<TabsTrigger value="ac" class="min-h-11 px-1 sm:h-9 sm:min-h-0">AC ({acCount})</TabsTrigger>
 			</TabsList>
 		</Tabs>
 
@@ -71,29 +71,25 @@
 					(c) => c.kind !== 'ground' && c.kind !== 'terminal'
 				).length}
 				<div
-					class="flex flex-col justify-between gap-3 rounded-lg border border-border bg-surface-rail/40 p-3.5 transition-colors duration-150 hover:border-primary/40 hover:bg-card"
+					class="flex flex-col justify-between gap-3 rounded-[4px] border border-border bg-background/50 p-3.5 transition-colors duration-150 hover:border-foreground/25 hover:bg-card"
 				>
-					<div class="flex flex-col gap-2">
-						<div class="flex flex-wrap items-center justify-between gap-1.5">
-							<div class="flex flex-wrap items-center gap-1.5">
-								<Badge
-									variant={preset.category === 'dc' ? 'voltage' : 'current'}
-									class="uppercase"
-								>
-									{#if preset.category === 'ac'}
-										AC · {formatFrequency(preset.document.frequencyHz)}
-									{:else}
-										DC
-									{/if}
-								</Badge>
-								<Badge variant="outline">
-									{METHOD_LABELS[preset.featuredMethod]}
-								</Badge>
-							</div>
-							<span class="font-engineering flex items-center gap-1 text-[11px] text-muted-foreground">
-								<Cpu class="size-3" aria-hidden="true" />
-								{componentCount} elements
+					<div class="flex flex-col gap-1.5">
+						<div class="font-engineering flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground">
+							<span
+								class={preset.category === 'dc'
+									? 'font-semibold text-voltage'
+									: 'font-semibold text-branch-current'}
+							>
+								{#if preset.category === 'ac'}
+									AC · {formatFrequency(preset.document.frequencyHz)}
+								{:else}
+									DC
+								{/if}
 							</span>
+							<span aria-hidden="true">·</span>
+							<span>{METHOD_LABELS[preset.featuredMethod]}</span>
+							<span aria-hidden="true">·</span>
+							<span>{componentCount} elements</span>
 						</div>
 
 						<h3 class="text-sm font-semibold leading-snug text-foreground">

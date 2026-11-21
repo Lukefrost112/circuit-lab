@@ -1,14 +1,15 @@
 <script lang="ts">
 	import {
 		AlertCircle,
+		ArrowRight,
 		Check,
 		CheckCircle2,
 		ChevronDown,
 		Copy,
 		FlaskConical,
-		Sparkles
+		ScanLine
 	} from 'lucide-svelte';
-	import { Badge, Button, Dialog } from '$lib/components/ui';
+	import { Button, Dialog } from '$lib/components/ui';
 	import { AI_CIRCUIT_IMPORT_PROMPT, parseCircuitImport } from '$lib/engine/io';
 	import type { CircuitDocument } from '$lib/engine/types';
 	import { cn } from '$lib/utils';
@@ -75,12 +76,12 @@
 	description="Convert any textbook schematic or photo into an editable, auto-laid-out Circuit Lab schematic."
 	class="sm:max-w-2xl"
 >
-	<div class="flex flex-col gap-4">
-		<!-- Step 1 — Copy Prompt -->
-		<section class="rounded-lg border border-border bg-surface-rail/40 p-3.5">
+	<div class="flex flex-col divide-y divide-border">
+		<!-- Step 01 — Copy Prompt -->
+		<section class="py-3.5 first:pt-0">
 			<div class="flex flex-wrap items-center justify-between gap-2">
 				<div class="flex items-center gap-2">
-					<Badge variant="default" class="font-engineering">Step 1</Badge>
+					<span class="font-engineering text-[11px] font-semibold text-muted-foreground">01</span>
 					<h3 class="text-xs font-semibold text-foreground">Copy the AI Netlist Prompt</h3>
 				</div>
 
@@ -89,7 +90,7 @@
 						type="button"
 						onclick={() => (promptExpanded = !promptExpanded)}
 						aria-expanded={promptExpanded}
-						class="inline-flex min-h-11 cursor-pointer items-center gap-1 rounded-sm px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0 sm:px-2 sm:text-[11px]"
+						class="inline-flex min-h-11 cursor-pointer items-center gap-1 rounded-[4px] px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0 sm:px-2 sm:text-[11px]"
 					>
 						{promptExpanded ? 'Hide Prompt' : 'Preview Prompt'}
 						<ChevronDown
@@ -114,27 +115,30 @@
 
 			{#if promptExpanded}
 				<pre
-					class="font-engineering mt-2.5 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-md border border-border bg-card p-2.5 text-[11px] leading-relaxed text-muted-foreground"
+					class="font-engineering mt-2.5 max-h-48 overflow-y-auto whitespace-pre-wrap rounded-[4px] border border-border bg-surface-rail/60 p-2.5 text-[11px] leading-relaxed text-muted-foreground"
 				>{AI_CIRCUIT_IMPORT_PROMPT}</pre>
 			{/if}
 		</section>
 
-		<!-- Step 2 — Ask Any AI -->
-		<section class="rounded-lg border border-border bg-surface-rail/40 px-3.5 py-2.5">
-			<div class="flex flex-wrap items-center gap-2">
-				<Badge variant="secondary" class="font-engineering">Step 2</Badge>
-				<p class="text-xs text-foreground">
+		<!-- Step 02 — Ask Any AI -->
+		<section class="py-3.5">
+			<div class="flex items-start gap-2">
+				<span class="font-engineering mt-0.5 shrink-0 text-[11px] font-semibold text-muted-foreground">
+					02
+				</span>
+				<ScanLine class="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+				<p class="text-xs leading-relaxed text-foreground">
 					Attach your circuit photo or textbook screenshot along with this prompt in ChatGPT,
 					Claude, or Gemini.
 				</p>
 			</div>
 		</section>
 
-		<!-- Step 3 — Paste AI JSON & Render -->
-		<section class="flex flex-col gap-2.5 rounded-lg border border-border bg-surface-rail/40 p-3.5">
+		<!-- Step 03 — Paste AI JSON & Render -->
+		<section class="flex flex-col gap-2.5 py-3.5 last:pb-0">
 			<div class="flex flex-wrap items-center justify-between gap-2">
 				<div class="flex items-center gap-2">
-					<Badge variant="default" class="font-engineering">Step 3</Badge>
+					<span class="font-engineering text-[11px] font-semibold text-muted-foreground">03</span>
 					<h3 class="text-xs font-semibold text-foreground">Paste AI JSON &amp; Render</h3>
 				</div>
 
@@ -154,7 +158,7 @@
 				aria-label="Paste AI JSON output"
 				placeholder={'```json\n{\n  "schemaVersion": 1,\n  "name": "My Circuit",\n  "mode": "dc",\n  "elements": [...]\n}\n```'}
 				rows={8}
-				class="font-engineering w-full resize-y rounded-md border border-input bg-card p-3 text-base leading-relaxed text-foreground placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-xs"
+				class="font-engineering w-full resize-y rounded-[4px] border border-input bg-background p-3 text-base leading-relaxed text-foreground placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-xs"
 			></textarea>
 
 			{#if parseResult}
@@ -163,7 +167,7 @@
 						(c) => c.kind !== 'ground' && c.kind !== 'terminal'
 					).length}
 					<div
-						class="flex flex-col gap-1 rounded-md border border-success/40 bg-success/10 px-3 py-2 text-xs"
+						class="flex flex-col gap-1 rounded-[4px] border border-success/40 bg-success/10 px-3 py-2 text-xs"
 					>
 						<div class="flex flex-wrap items-center gap-2 font-semibold text-success">
 							<CheckCircle2 class="size-4 shrink-0" aria-hidden="true" />
@@ -187,7 +191,7 @@
 				{:else}
 					<div
 						role="alert"
-						class="flex flex-col gap-1 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+						class="flex flex-col gap-1 rounded-[4px] border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
 					>
 						<div class="flex items-center gap-1.5 font-semibold">
 							<AlertCircle class="size-4 shrink-0" aria-hidden="true" />
@@ -215,8 +219,8 @@
 			onclick={handleRenderAndSolve}
 			class="min-h-11 sm:min-h-0"
 		>
-			<Sparkles class="size-3.5" aria-hidden="true" />
 			Render &amp; Solve Circuit
+			<ArrowRight class="size-3.5" aria-hidden="true" />
 		</Button>
 	{/snippet}
 </Dialog>

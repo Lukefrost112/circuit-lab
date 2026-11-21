@@ -46,7 +46,7 @@
 		<!-- Schematic Symbol Standard -->
 		<section class="flex flex-col gap-2">
 			<Label>Schematic Symbol Standard</Label>
-			<div class="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+			<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
 				{#each SYMBOL_OPTIONS as opt (opt.value)}
 					{@const active = settings.schematicStandard === opt.value}
 					<button
@@ -54,25 +54,23 @@
 						onclick={() => (settings.schematicStandard = opt.value)}
 						aria-pressed={active}
 						class={cn(
-							'flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-md border p-3 text-left transition-colors duration-150 sm:min-h-0',
+							'flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-[4px] border p-3 text-left transition-colors duration-150 sm:min-h-0',
 							'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 							active
-								? 'border-primary bg-primary/10'
-								: 'border-border bg-surface-rail/40 hover:bg-muted'
+								? 'border-primary bg-primary/8'
+								: 'border-border bg-background/50 hover:border-foreground/25 hover:bg-accent/40'
 						)}
 					>
 						<div class="flex flex-col gap-0.5">
 							<span class="text-xs font-semibold text-foreground">{opt.title}</span>
 							<span class="text-[11px] text-muted-foreground">{opt.subtitle}</span>
 						</div>
-						<div class="shrink-0 rounded-sm border border-border bg-card px-2 py-1 text-foreground">
-							<CircuitSymbol
-								kind="resistor"
-								variant="schematic"
-								standard={opt.value}
-								class="h-6 w-14"
-							/>
-						</div>
+						<CircuitSymbol
+							kind="resistor"
+							variant="schematic"
+							standard={opt.value}
+							class="h-6 w-14 shrink-0 text-foreground"
+						/>
 					</button>
 				{/each}
 			</div>
@@ -91,11 +89,11 @@
 						onclick={() => (settings.angleDisplay = opt.value)}
 						aria-pressed={active}
 						class={cn(
-							'flex min-h-11 cursor-pointer flex-col justify-center gap-0.5 rounded-md border px-3 py-2 text-left transition-colors duration-150 sm:min-h-0',
+							'flex min-h-11 cursor-pointer flex-col justify-center gap-0.5 rounded-[4px] border px-3 py-2 text-left transition-colors duration-150 sm:min-h-0',
 							'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 							active
-								? 'border-primary bg-primary/10 text-foreground'
-								: 'border-border bg-surface-rail/40 text-muted-foreground hover:bg-muted hover:text-foreground'
+								? 'border-primary bg-primary/8 text-foreground'
+								: 'border-border bg-background/50 text-muted-foreground hover:border-foreground/25 hover:bg-accent/40 hover:text-foreground'
 						)}
 					>
 						<span class="text-xs font-semibold text-foreground">{opt.label}</span>
@@ -117,11 +115,11 @@
 							onclick={() => (settings.precision = prec)}
 							aria-pressed={active}
 							class={cn(
-								'font-engineering min-h-11 cursor-pointer rounded-md border px-2.5 py-1.5 text-center text-xs font-medium transition-colors duration-150 sm:min-h-0',
+								'font-engineering min-h-11 cursor-pointer rounded-[4px] border px-2.5 py-1.5 text-center text-xs font-medium transition-colors duration-150 sm:min-h-0',
 								'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 								active
-									? 'border-primary bg-primary/10 text-primary'
-									: 'border-border bg-surface-rail/40 text-foreground hover:bg-muted'
+									? 'border-primary bg-primary/8 text-primary'
+									: 'border-border bg-background/50 text-foreground hover:border-foreground/25 hover:bg-accent/40'
 							)}
 						>
 							{prec} digits
@@ -141,11 +139,11 @@
 							aria-pressed={active}
 							title={opt.detail}
 							class={cn(
-								'min-h-11 cursor-pointer rounded-md border px-2.5 py-1.5 text-center text-xs font-medium transition-colors duration-150 sm:min-h-0',
+								'min-h-11 cursor-pointer rounded-[4px] border px-2.5 py-1.5 text-center text-xs font-medium transition-colors duration-150 sm:min-h-0',
 								'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 								active
-									? 'border-primary bg-primary/10 text-primary'
-									: 'border-border bg-surface-rail/40 text-foreground hover:bg-muted'
+									? 'border-primary bg-primary/8 text-primary'
+									: 'border-border bg-background/50 text-foreground hover:border-foreground/25 hover:bg-accent/40'
 							)}
 						>
 							{opt.label}

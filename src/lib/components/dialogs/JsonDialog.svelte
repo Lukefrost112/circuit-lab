@@ -82,19 +82,20 @@
 >
 	<Tabs
 		value={activeTab}
+		variant="underline"
 		onValueChange={(next) => {
 			activeTab = next as 'export' | 'import';
 		}}
-		class="gap-3"
+		class="gap-3.5"
 	>
-		<TabsList class="grid h-auto w-full grid-cols-2 sm:inline-flex sm:h-9 sm:w-fit">
-			<TabsTrigger value="export" class="min-h-11 sm:min-h-0">Export JSON</TabsTrigger>
-			<TabsTrigger value="import" class="min-h-11 sm:min-h-0">Import JSON</TabsTrigger>
+		<TabsList class="h-auto w-full gap-4 sm:gap-5">
+			<TabsTrigger value="export" class="min-h-11 px-1 sm:h-9 sm:min-h-0">Export JSON</TabsTrigger>
+			<TabsTrigger value="import" class="min-h-11 px-1 sm:h-9 sm:min-h-0">Import JSON</TabsTrigger>
 		</TabsList>
 
 		<TabsContent value="export" class="flex flex-col gap-3">
 			<div class="flex flex-wrap items-center justify-between gap-2">
-				<span class="text-xs text-muted-foreground">
+				<span class="font-engineering text-xs text-muted-foreground">
 					{document.components.length} components · {document.wires.length} wires
 				</span>
 				<div class="flex flex-wrap items-center gap-2">
@@ -119,7 +120,7 @@
 				aria-label="Exported circuit JSON"
 				value={exportedJson}
 				rows={13}
-				class="font-engineering w-full resize-y rounded-md border border-input bg-surface-rail/60 p-3 text-base leading-relaxed text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-xs"
+				class="font-engineering w-full resize-y rounded-[4px] border border-input bg-surface-rail/60 p-3 text-base leading-relaxed text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-xs"
 			></textarea>
 		</TabsContent>
 
@@ -154,13 +155,13 @@
 				aria-label="Paste circuit JSON to import"
 				placeholder={'{\n  "schemaVersion": 1,\n  "mode": "dc",\n  "components": [...],\n  "wires": [...]\n}'}
 				rows={10}
-				class="font-engineering w-full resize-y rounded-md border border-input bg-card p-3 text-base leading-relaxed text-foreground placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-xs"
+				class="font-engineering w-full resize-y rounded-[4px] border border-input bg-background p-3 text-base leading-relaxed text-foreground placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-xs"
 			></textarea>
 
 			{#if parsedResult}
 				{#if parsedResult.ok}
 					<div
-						class="flex flex-col gap-1 rounded-md border border-success/40 bg-success/10 px-3 py-2 text-xs"
+						class="flex flex-col gap-1 rounded-[4px] border border-success/40 bg-success/10 px-3 py-2 text-xs"
 					>
 						<div class="flex items-center gap-1.5 font-semibold text-success">
 							<CheckCircle2 class="size-4 shrink-0" aria-hidden="true" />
@@ -180,7 +181,7 @@
 				{:else}
 					<div
 						role="alert"
-						class="flex flex-col gap-1 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+						class="flex flex-col gap-1 rounded-[4px] border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
 					>
 						<div class="flex items-center gap-1.5 font-semibold">
 							<AlertCircle class="size-4 shrink-0" aria-hidden="true" />

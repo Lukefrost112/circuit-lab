@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { RotateCw, Target, Trash2 } from 'lucide-svelte';
 	import { CircuitSymbol } from '$lib/components/symbols';
-	import { Badge, Button, Input, Label, Select, Separator, Switch } from '$lib/components/ui';
+	import { Button, Input, Label, Select, Switch } from '$lib/components/ui';
 	import { formatEngineering, parseComplexValue, type ComponentKind } from '$lib/engine';
 	import { circuit } from '$lib/stores/circuit.svelte';
 	import { settings } from '$lib/stores/settings.svelte';
@@ -172,12 +172,12 @@
 	}
 </script>
 
-<div class="flex flex-col gap-3">
+<div class="flex flex-col divide-y divide-border">
 	{#if selectedComp}
-		<!-- Component Header -->
-		<div class="flex items-center justify-between gap-2 rounded-md border border-border bg-card p-3">
+		<!-- Component Identity Header -->
+		<div class="flex items-center justify-between gap-2 px-4 py-3.5">
 			<div class="flex min-w-0 items-center gap-2.5">
-				<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface-rail text-foreground">
+				<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-[4px] border border-border bg-surface-rail text-foreground">
 					<CircuitSymbol
 						kind={selectedComp.kind}
 						variant="icon"
@@ -190,18 +190,18 @@
 					<div class="truncate font-engineering text-sm font-semibold text-foreground">
 						{selectedComp.label}
 					</div>
-					<Badge variant="outline" class="mt-0.5">
+					<div class="text-[11px] text-muted-foreground">
 						{KIND_LABELS[selectedComp.kind]}
-					</Badge>
+					</div>
 				</div>
 			</div>
-			<span class="font-engineering text-[11px] text-muted-foreground">
+			<span class="font-engineering shrink-0 text-[11px] text-muted-foreground">
 				({selectedComp.x}, {selectedComp.y}) · {selectedComp.rotation}°
 			</span>
 		</div>
 
-		<!-- Component Properties -->
-		<div class="flex flex-col gap-3 rounded-md border border-border bg-card p-3">
+		<!-- Component Properties Form -->
+		<div class="flex flex-col gap-3 px-4 py-3.5">
 			<div class="flex flex-col gap-1.5">
 				<Label for="comp-label">Designator / Label</Label>
 				<Input
@@ -283,9 +283,10 @@
 					Optional per-source frequency enables multi-frequency AC Superposition.
 				</p>
 			{/if}
+		</div>
 
-			<Separator />
-
+		<!-- Component Actions -->
+		<div class="flex flex-col gap-2 px-4 py-3.5">
 			<div class="flex items-center gap-2">
 				<Button
 					variant="outline"
@@ -293,7 +294,7 @@
 					class="h-11 min-h-11 flex-1 lg:h-7 lg:min-h-0"
 					onclick={() => circuit.rotateComponent(selectedComp.id)}
 				>
-					<RotateCw class="size-3.5" />
+					<RotateCw class="size-3.5" aria-hidden="true" />
 					<span>Rotate 90°</span>
 				</Button>
 				<Button
@@ -302,7 +303,7 @@
 					class="h-11 min-h-11 lg:h-7 lg:min-h-0"
 					onclick={() => circuit.deleteComponent(selectedComp.id)}
 				>
-					<Trash2 class="size-3.5" />
+					<Trash2 class="size-3.5" aria-hidden="true" />
 					<span>Delete</span>
 				</Button>
 			</div>
@@ -314,7 +315,7 @@
 					class="h-auto min-h-11 w-full whitespace-normal py-2 text-center lg:h-7 lg:min-h-0 lg:whitespace-nowrap lg:py-0"
 					onclick={toggleThevenin}
 				>
-					<Target class="size-3.5" />
+					<Target class="size-3.5" aria-hidden="true" />
 					<span>
 						{isTheveninTarget
 							? 'Clear Thévenin / Norton Target'
@@ -324,55 +325,62 @@
 			{/if}
 		</div>
 	{:else if selectedWire}
-		<!-- Wire Properties -->
-		<div class="flex flex-col gap-3 rounded-md border border-border bg-card p-3">
+		<!-- Wire Identity Header -->
+		<div class="flex items-center justify-between gap-2 px-4 py-3.5">
+			<h2 class="text-xs font-semibold text-foreground">Selected Wire</h2>
+			<span class="font-engineering text-xs text-muted-foreground">{selectedWire.id}</span>
+		</div>
+
+		<!-- Wire Details -->
+		<div class="flex flex-col gap-2 px-4 py-3.5 text-xs">
 			<div class="flex items-center justify-between">
-				<h2 class="text-xs font-semibold text-foreground">Selected Wire</h2>
-				<Badge variant="outline" class="font-engineering">{selectedWire.id}</Badge>
+				<span class="text-muted-foreground">Electrical Node</span>
+				<span class="font-engineering font-medium text-voltage">
+					{selectedWireNodeId === '0'
+						? 'GND (0)'
+						: selectedWireNodeId ?? 'Unconnected'}
+				</span>
 			</div>
-
-			<div class="flex flex-col gap-1.5 text-xs">
-				<div class="flex items-center justify-between">
-					<span class="text-muted-foreground">Electrical Node</span>
-					<span class="font-engineering font-medium text-voltage">
-						{selectedWireNodeId === '0'
-							? 'GND (0)'
-							: selectedWireNodeId ?? 'Unconnected'}
-					</span>
-				</div>
-				<div class="flex items-center justify-between">
-					<span class="text-muted-foreground">Vertices</span>
-					<span class="font-engineering text-foreground">
-						{selectedWire.points.length}
-					</span>
-				</div>
-				<div class="rounded border border-border bg-surface-rail px-2 py-1.5 font-engineering text-[11px] text-muted-foreground">
-					{selectedWire.points.map((p) => `(${p.x},${p.y})`).join(' → ')}
-				</div>
+			<div class="flex items-center justify-between">
+				<span class="text-muted-foreground">Vertices</span>
+				<span class="font-engineering text-foreground">
+					{selectedWire.points.length}
+				</span>
 			</div>
+			<div class="rounded-[4px] border border-border bg-surface-rail/60 px-2.5 py-1.5 font-engineering text-[11px] text-muted-foreground">
+				{selectedWire.points.map((p) => `(${p.x},${p.y})`).join(' → ')}
+			</div>
+		</div>
 
+		<!-- Wire Actions -->
+		<div class="px-4 py-3.5">
 			<Button
 				variant="destructive"
 				size="sm"
 				class="h-11 min-h-11 w-full lg:h-7 lg:min-h-0"
 				onclick={() => circuit.deleteWire(selectedWire.id)}
 			>
-				<Trash2 class="size-3.5" />
+				<Trash2 class="size-3.5" aria-hidden="true" />
 				<span>Delete Wire</span>
 			</Button>
 		</div>
 	{:else}
-		<!-- Empty Selection & Simulation Parameters -->
-		<div class="rounded-md border border-border bg-card p-3">
-			<h2 class="text-xs font-semibold text-foreground">No Element Selected</h2>
-			<p class="mt-1 text-xs leading-relaxed text-muted-foreground">
+		<!-- Empty Selection -->
+		<div class="px-4 py-3.5">
+			<h2 class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+				No Element Selected
+			</h2>
+			<p class="mt-1.5 text-xs leading-relaxed text-muted-foreground">
 				Tap or click any component or wire on the schematic canvas to edit values, rotate, or set a
 				Thévenin load port. Tap or click any pin circle to draw an orthogonal wire.
 			</p>
 		</div>
 
-		<div class="flex flex-col gap-3 rounded-md border border-border bg-card p-3">
-			<h3 class="text-xs font-semibold text-foreground">Simulation Parameters</h3>
+		<!-- Simulation Parameters -->
+		<div class="flex flex-col gap-3 px-4 py-3.5">
+			<h3 class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+				Simulation Parameters
+			</h3>
 
 			{#if isAcMode}
 				<div class="flex flex-col gap-1.5">
@@ -409,9 +417,10 @@
 					]}
 				/>
 			</div>
+		</div>
 
-			<Separator />
-
+		<!-- Canvas Display Toggles -->
+		<div class="flex flex-col gap-2 px-4 py-3.5">
 			<div class="flex min-h-11 items-center justify-between gap-2 py-1 lg:min-h-0 lg:py-0">
 				<div class="flex flex-col gap-0.5">
 					<Label for="inspector-snap-grid">Grid Snapping</Label>
@@ -427,7 +436,7 @@
 			<div class="flex min-h-11 items-center justify-between gap-2 py-1 lg:min-h-0 lg:py-0">
 				<div class="flex flex-col gap-0.5">
 					<Label for="inspector-show-grid">Show Grid</Label>
-					<span class="text-[11px] text-muted-foreground">20 px dots & major lines</span>
+					<span class="text-[11px] text-muted-foreground">20 px dots &amp; major lines</span>
 				</div>
 				<Switch
 					id="inspector-show-grid"
@@ -439,7 +448,7 @@
 			<div class="flex min-h-11 items-center justify-between gap-2 py-1 lg:min-h-0 lg:py-0">
 				<div class="flex flex-col gap-0.5">
 					<Label for="inspector-live-overlays">Live V / I Overlays</Label>
-					<span class="text-[11px] text-muted-foreground">Show node & branch badges</span>
+					<span class="text-[11px] text-muted-foreground">Show node &amp; branch badges</span>
 				</div>
 				<Switch
 					id="inspector-live-overlays"
