@@ -247,7 +247,7 @@
 			{/if}
 
 			{#if isSource && isAcMode}
-				<div class="grid grid-cols-2 gap-2">
+				<div class="grid grid-cols-1 gap-2.5 min-[360px]:grid-cols-2">
 					<div class="flex flex-col gap-1.5">
 						<Label for="comp-phase">AC Phase (°)</Label>
 						<Input
@@ -290,7 +290,7 @@
 				<Button
 					variant="outline"
 					size="sm"
-					class="flex-1"
+					class="h-11 min-h-11 flex-1 lg:h-7 lg:min-h-0"
 					onclick={() => circuit.rotateComponent(selectedComp.id)}
 				>
 					<RotateCw class="size-3.5" />
@@ -299,6 +299,7 @@
 				<Button
 					variant="destructive"
 					size="sm"
+					class="h-11 min-h-11 lg:h-7 lg:min-h-0"
 					onclick={() => circuit.deleteComponent(selectedComp.id)}
 				>
 					<Trash2 class="size-3.5" />
@@ -310,7 +311,7 @@
 				<Button
 					variant={isTheveninTarget ? 'default' : 'secondary'}
 					size="sm"
-					class="w-full"
+					class="h-auto min-h-11 w-full whitespace-normal py-2 text-center lg:h-7 lg:min-h-0 lg:whitespace-nowrap lg:py-0"
 					onclick={toggleThevenin}
 				>
 					<Target class="size-3.5" />
@@ -353,7 +354,7 @@
 			<Button
 				variant="destructive"
 				size="sm"
-				class="w-full"
+				class="h-11 min-h-11 w-full lg:h-7 lg:min-h-0"
 				onclick={() => circuit.deleteWire(selectedWire.id)}
 			>
 				<Trash2 class="size-3.5" />
@@ -365,8 +366,8 @@
 		<div class="rounded-md border border-border bg-card p-3">
 			<h2 class="text-xs font-semibold text-foreground">No Element Selected</h2>
 			<p class="mt-1 text-xs leading-relaxed text-muted-foreground">
-				Click any component or wire on the schematic canvas to edit values, rotate, or set a
-				Thévenin load port. Click any pin circle to draw an orthogonal wire.
+				Tap or click any component or wire on the schematic canvas to edit values, rotate, or set a
+				Thévenin load port. Tap or click any pin circle to draw an orthogonal wire.
 			</p>
 		</div>
 
@@ -411,7 +412,7 @@
 
 			<Separator />
 
-			<div class="flex items-center justify-between gap-2">
+			<div class="flex min-h-11 items-center justify-between gap-2 py-1 lg:min-h-0 lg:py-0">
 				<div class="flex flex-col gap-0.5">
 					<Label for="inspector-snap-grid">Grid Snapping</Label>
 					<span class="text-[11px] text-muted-foreground">20 px pitch alignment</span>
@@ -423,7 +424,7 @@
 				/>
 			</div>
 
-			<div class="flex items-center justify-between gap-2">
+			<div class="flex min-h-11 items-center justify-between gap-2 py-1 lg:min-h-0 lg:py-0">
 				<div class="flex flex-col gap-0.5">
 					<Label for="inspector-show-grid">Show Grid</Label>
 					<span class="text-[11px] text-muted-foreground">20 px dots & major lines</span>
@@ -435,7 +436,7 @@
 				/>
 			</div>
 
-			<div class="flex items-center justify-between gap-2">
+			<div class="flex min-h-11 items-center justify-between gap-2 py-1 lg:min-h-0 lg:py-0">
 				<div class="flex flex-col gap-0.5">
 					<Label for="inspector-live-overlays">Live V / I Overlays</Label>
 					<span class="text-[11px] text-muted-foreground">Show node & branch badges</span>

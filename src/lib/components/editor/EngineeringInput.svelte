@@ -167,12 +167,12 @@
 			onblur={handleBlur}
 			onkeydown={handleKeyDown}
 			class={cn(
-				'font-engineering flex h-8 w-full rounded-md border border-input bg-card px-2.5 py-1 text-xs sm:text-sm text-foreground shadow-2xs transition-colors duration-150',
+				'font-engineering flex h-11 w-full rounded-md border border-input bg-card px-2.5 py-1 text-base text-foreground shadow-2xs transition-colors duration-150 sm:h-8 sm:text-sm lg:text-xs',
 				'placeholder:text-muted-foreground/80',
 				'hover:border-muted-foreground/50',
 				'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
 				'disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-muted',
-				unit && 'pr-8',
+				unit && 'pr-10 sm:pr-8',
 				!evaluation.valid && 'border-destructive focus-visible:ring-destructive',
 				className
 			)}
@@ -180,7 +180,7 @@
 		/>
 		{#if unit}
 			<span
-				class="pointer-events-none absolute right-2.5 font-engineering text-[11px] text-muted-foreground select-none"
+				class="pointer-events-none absolute right-3 font-engineering text-xs text-muted-foreground select-none sm:right-2.5 sm:text-[11px]"
 			>
 				{unit}
 			</span>

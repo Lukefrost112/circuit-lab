@@ -64,7 +64,7 @@
 	}
 </script>
 
-<div class={cn('flex flex-col gap-3', className)}>
+<div class={cn('flex min-w-0 flex-col gap-3', className)}>
 	<div class="flex flex-wrap items-baseline justify-between gap-2">
 		<h3 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
 			Step-by-Step Analysis
@@ -80,10 +80,12 @@
 			activeMethod = next as MethodId;
 		}}
 	>
-		<TabsList class="flex h-auto w-full flex-wrap justify-start gap-1">
+		<TabsList
+			class="flex h-auto w-full flex-nowrap justify-start gap-1 overflow-x-auto no-scrollbar [-webkit-overflow-scrolling:touch] md:flex-wrap"
+		>
 			{#each METHOD_TABS as tab (tab.id)}
 				{@const res = solution.methods[tab.id]}
-				<TabsTrigger value={tab.id} class="gap-1.5">
+				<TabsTrigger value={tab.id} class="min-h-11 shrink-0 gap-1.5 px-3 md:min-h-0 md:px-2.5">
 					<span>{tab.label}</span>
 					{#if res && !res.applicable}
 						<span
@@ -134,7 +136,7 @@
 						variant="outline"
 						size="sm"
 						onclick={toggleAllSteps}
-						class="h-7 gap-1 px-2 text-[11px]"
+						class="h-11 min-h-11 gap-1 px-3 text-xs md:h-7 md:min-h-0 md:px-2 md:text-[11px]"
 					>
 						{#if allExpanded}
 							<ChevronsDownUp class="size-3" aria-hidden="true" />
@@ -170,7 +172,7 @@
 				{#each currentMethod.steps as step, idx (`step-${activeMethod}-${idx}`)}
 					{@const itemId = `step-${activeMethod}-${idx}`}
 					<AccordionItem value={itemId} title={step.title}>
-						<div class="flex flex-col gap-2">
+						<div class="flex min-w-0 flex-col gap-2">
 							{#if step.description}
 								<p class="text-xs leading-relaxed text-muted-foreground">
 									{step.description}
@@ -187,7 +189,7 @@
 							{/if}
 
 							{#if step.latex && step.latex.length > 0}
-								<div class="flex flex-col gap-1 rounded-sm bg-background/60 px-2.5 py-1.5">
+								<div class="flex min-w-0 flex-col gap-1 overflow-hidden rounded-sm bg-background/60 px-2.5 py-1.5">
 									{#each step.latex as eq, eqIdx (`${itemId}-eq-${eqIdx}`)}
 										<MathBlock latex={eq} />
 									{/each}
@@ -195,7 +197,7 @@
 							{/if}
 
 							{#if step.matrixLatex}
-								<div class="rounded-sm border border-border/70 bg-background/60 px-2.5 py-1.5">
+								<div class="min-w-0 overflow-hidden rounded-sm border border-border/70 bg-background/60 px-2.5 py-1.5">
 									<MathBlock latex={step.matrixLatex} />
 								</div>
 							{/if}
@@ -205,7 +207,7 @@
 			</Accordion>
 
 			{#if currentMethod.summaryLatex}
-				<div class="rounded-md border border-border bg-card px-3.5 py-2.5">
+				<div class="min-w-0 overflow-hidden rounded-md border border-border bg-card px-3.5 py-2.5">
 					<div class="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
 						Summary
 					</div>

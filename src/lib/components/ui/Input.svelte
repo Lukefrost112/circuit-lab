@@ -26,7 +26,7 @@
 	{disabled}
 	aria-invalid={error ? 'true' : undefined}
 	class={cn(
-		'flex h-8 w-full rounded-md border border-input bg-card px-2.5 py-1 text-xs sm:text-sm text-foreground shadow-2xs transition-colors duration-150',
+		'flex h-11 w-full rounded-md border border-input bg-card px-2.5 py-1 text-base text-foreground shadow-2xs transition-colors duration-150 sm:h-8 sm:text-sm lg:text-xs',
 		'placeholder:text-muted-foreground/80',
 		'hover:border-muted-foreground/50',
 		'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',

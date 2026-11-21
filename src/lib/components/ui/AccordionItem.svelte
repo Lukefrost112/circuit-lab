@@ -48,13 +48,13 @@
 		{disabled}
 		onclick={handleToggle}
 		class={cn(
-			'flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-xs font-semibold text-foreground transition-colors duration-150 select-none',
+			'flex min-h-11 w-full cursor-pointer items-center justify-between gap-2 px-3 py-2.5 text-left text-xs font-semibold text-foreground transition-colors duration-150 select-none lg:min-h-0 lg:py-2',
 			'hover:bg-accent/50',
 			'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
 			'disabled:cursor-not-allowed disabled:opacity-50'
 		)}
 	>
-		<span class="flex items-center gap-2 truncate">
+		<span class="flex min-w-0 flex-wrap items-center gap-2 whitespace-normal text-left leading-snug">
 			{title}
 			{@render headerExtra?.()}
 		</span>

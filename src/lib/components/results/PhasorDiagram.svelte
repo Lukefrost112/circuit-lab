@@ -237,15 +237,15 @@
 	const arrowCurrentId = `${uid}-arrow-i`;
 </script>
 
-<div class={cn('flex flex-col gap-3', className)}>
+<div class={cn('flex min-w-0 flex-col gap-3', className)}>
 	<div class="flex flex-wrap items-center justify-between gap-2">
-		<div class="flex items-center gap-1.5">
+		<div class="flex flex-wrap items-center gap-1.5">
 			<button
 				type="button"
 				onclick={() => (showVoltages = !showVoltages)}
 				aria-pressed={showVoltages}
 				class={cn(
-					'inline-flex cursor-pointer items-center gap-1.5 rounded-sm border px-2 py-1 text-[11px] font-medium transition-colors duration-150',
+					'inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-sm border px-3 py-2 text-xs font-medium transition-colors duration-150 sm:min-h-0 sm:px-2 sm:py-1 sm:text-[11px]',
 					'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 					showVoltages
 						? 'border-voltage/40 bg-voltage/10 text-voltage'
@@ -260,7 +260,7 @@
 				onclick={() => (showCurrents = !showCurrents)}
 				aria-pressed={showCurrents}
 				class={cn(
-					'inline-flex cursor-pointer items-center gap-1.5 rounded-sm border px-2 py-1 text-[11px] font-medium transition-colors duration-150',
+					'inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-sm border px-3 py-2 text-xs font-medium transition-colors duration-150 sm:min-h-0 sm:px-2 sm:py-1 sm:text-[11px]',
 					'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 					showCurrents
 						? 'border-branch-current/40 bg-branch-current/10 text-branch-current'
@@ -274,27 +274,27 @@
 
 		{#if activeEntry}
 			<div
-				class="font-engineering flex items-center gap-2 rounded-sm border border-border bg-surface-rail px-2 py-0.5 text-[11px] text-foreground"
+				class="font-engineering flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 rounded-sm border border-border bg-surface-rail px-2.5 py-1 text-[11px] text-foreground sm:w-auto sm:px-2 sm:py-0.5"
 			>
 				<span
 					class={cn(
-						'font-semibold',
+						'shrink-0 font-semibold',
 						activeEntry.category === 'voltage' ? 'text-voltage' : 'text-branch-current'
 					)}
 				>
 					{activeEntry.label}
 				</span>
-				<span>{activeEntry.formatted}</span>
+				<span class="min-w-0 break-words">{activeEntry.formatted}</span>
 			</div>
 		{:else}
-			<span class="text-[11px] text-muted-foreground">
-				Normalized independently · Hover or click phasors
+			<span class="w-full text-[11px] text-muted-foreground sm:w-auto">
+				Normalized independently · Tap or hover phasors
 			</span>
 		{/if}
 	</div>
 
 	<div class="flex flex-col gap-3">
-		<div class="mx-auto w-full max-w-[280px]">
+		<div class="mx-auto w-full max-w-[300px] sm:max-w-[280px]">
 			<svg
 				viewBox="0 0 320 320"
 				role="img"
@@ -488,7 +488,7 @@
 								if (entry.componentId) onSelectComponent?.(entry.componentId);
 							}}
 							class={cn(
-								'flex w-full cursor-pointer items-center justify-between gap-2 rounded-sm border px-2 py-1 text-left text-xs transition-colors duration-150',
+								'flex min-h-11 w-full cursor-pointer flex-wrap items-center justify-between gap-x-2 gap-y-0.5 rounded-sm border px-3 py-2 text-left text-xs transition-colors duration-150 sm:min-h-0 sm:flex-nowrap sm:px-2 sm:py-1',
 								'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
 								isSelected || isHovered
 									? 'border-primary/40 bg-primary/10'
@@ -507,7 +507,7 @@
 									{entry.label}
 								</span>
 							</span>
-							<span class="font-engineering whitespace-nowrap text-[11px] text-muted-foreground">
+							<span class="font-engineering min-w-0 max-w-full break-words text-[11px] text-muted-foreground sm:truncate sm:whitespace-nowrap">
 								{entry.formatted}
 							</span>
 						</button>

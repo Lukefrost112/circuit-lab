@@ -35,7 +35,7 @@
 		{disabled}
 		aria-invalid={error ? 'true' : undefined}
 		class={cn(
-			'flex h-8 w-full appearance-none rounded-md border border-input bg-card py-1 pr-7 pl-2.5 text-xs sm:text-sm text-foreground shadow-2xs transition-colors duration-150 cursor-pointer',
+			'flex h-11 w-full appearance-none rounded-md border border-input bg-card py-1 pr-8 pl-2.5 text-base text-foreground shadow-2xs transition-colors duration-150 cursor-pointer sm:h-8 sm:pr-7 sm:text-sm lg:text-xs',
 			'hover:border-muted-foreground/50',
 			'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
 			'disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-muted',
@@ -55,7 +55,7 @@
 		{/if}
 	</select>
 	<ChevronDown
-		class="pointer-events-none absolute right-2 size-3.5 text-muted-foreground"
+		class="pointer-events-none absolute right-2.5 size-4 text-muted-foreground sm:right-2 sm:size-3.5"
 		aria-hidden="true"
 	/>
 </div>
