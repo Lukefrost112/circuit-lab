@@ -25,3 +25,4 @@ export { default as TableCell } from './TableCell.svelte';
 export { default as Accordion } from './Accordion.svelte';
 export { default as AccordionItem } from './AccordionItem.svelte';
 export { default as Tooltip } from './Tooltip.svelte';
+export { default as Sheet } from './Sheet.svelte';
