@@ -92,6 +92,21 @@ export function solveCircuit(
 		};
 	}
 
+	const hasVoltmeter = workingDoc.components.some((c) => c.kind === 'voltmeter');
+	const electricalDoc: CircuitDocument = hasVoltmeter
+		? {
+				...workingDoc,
+				components: workingDoc.components.filter((c) => c.kind !== 'voltmeter')
+			}
+		: workingDoc;
+
+	const rawTarget = options?.theveninTarget;
+	const safeTheveninTarget: TheveninTarget | undefined =
+		rawTarget?.kind === 'component' &&
+		workingDoc.components.some((c) => c.id === rawTarget.componentId && c.kind === 'voltmeter')
+			? undefined
+			: rawTarget;
+
 	const requested = options?.methods ?? ALL_METHODS;
 	const methods: Partial<Record<MethodId, MethodResult>> = {};
 	let theveninNorton: TheveninNortonResult | undefined;
@@ -99,22 +114,22 @@ export function solveCircuit(
 	for (const methodId of requested) {
 		switch (methodId) {
 			case 'kcl_kvl':
-				methods.kcl_kvl = solveKclKvl(workingDoc, mna);
+				methods.kcl_kvl = solveKclKvl(electricalDoc, mna);
 				break;
 			case 'nodal':
-				methods.nodal = solveNodal(workingDoc, mna);
+				methods.nodal = solveNodal(electricalDoc, mna);
 				break;
 			case 'mesh':
-				methods.mesh = solveMesh(workingDoc, mna);
+				methods.mesh = solveMesh(electricalDoc, mna);
 				break;
 			case 'superposition':
-				methods.superposition = solveSuperposition(workingDoc, mna);
+				methods.superposition = solveSuperposition(electricalDoc, mna);
 				break;
 			case 'source_transform':
-				methods.source_transform = solveSourceTransform(workingDoc, mna);
+				methods.source_transform = solveSourceTransform(electricalDoc, mna);
 				break;
 			case 'thevenin_norton': {
-				const res = solveTheveninNorton(workingDoc, mna, options?.theveninTarget);
+				const res = solveTheveninNorton(electricalDoc, mna, safeTheveninTarget);
 				methods.thevenin_norton = res.methodResult;
 				theveninNorton = res.theveninNorton;
 				break;
@@ -124,6 +139,26 @@ export function solveCircuit(
 
 	let allVerified = true;
 	let maxDiscrepancy = 0;
+
+	// Verify ideal voltmeter differential voltage and zero-disturbance invariants
+	for (const br of Object.values(mna.branches)) {
+		if (br.kind !== 'voltmeter') continue;
+		const vA = mna.nodeVoltages[br.nodeA]?.voltage;
+		const vB = mna.nodeVoltages[br.nodeB]?.voltage;
+		if (!vA || !vB) {
+			allVerified = false;
+			continue;
+		}
+		const expectedV = vA.sub(vB);
+		const vDiff = br.voltage.sub(expectedV).abs();
+		const iDiff = br.current.abs();
+		const pDiff = Math.abs(br.realPower) + Math.abs(br.reactivePower);
+		const vmDiff = Math.max(vDiff, iDiff, pDiff);
+		if (vmDiff > maxDiscrepancy) maxDiscrepancy = vmDiff;
+		if (vmDiff >= 1e-8) {
+			allVerified = false;
+		}
+	}
 
 	if (unknownSolution) {
 		if (!unknownSolution.valid) {

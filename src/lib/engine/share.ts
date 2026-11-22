@@ -266,7 +266,16 @@ function validateTheveninTarget(
 	if (raw.kind === 'component') {
 		if (typeof raw.componentId === 'string') {
 			const id = raw.componentId.trim();
-			if (id && components.some((c) => c.id === id)) {
+			if (
+				id &&
+				components.some(
+					(c) =>
+						c.id === id &&
+						c.kind !== 'ground' &&
+						c.kind !== 'terminal' &&
+						c.kind !== 'voltmeter'
+				)
+			) {
 				return { kind: 'component', componentId: id };
 			}
 		}

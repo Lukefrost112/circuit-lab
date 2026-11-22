@@ -902,4 +902,65 @@ describe('solveUnknownParameter — Exact Analytical Inverse Circuit Solver', ()
 		expect(c2Cand.discrepancy).toBeLessThan(1e-8);
 		expect(c2Solved.allVerified).toBe(true);
 	});
+
+	it('solves unknown source Vs given ideal Voltmeter VM1 spanning two series loads R1 + R2 as a branch_voltage constraint', () => {
+		// V1 = Vs across R1=1k, R2=2k, R3=3k in series.
+		// VM1 spans R1 + R2: V_VM1 = Vs * (1k + 2k) / (1k + 2k + 3k) = 0.5 * Vs.
+		// Target V_VM1 = 8 V => exact Vs = 16 V!
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', 0, 4, 90, '1'),
+				comp('R1', 'resistor', 4, 2, 0, '1k'),
+				comp('R2', 'resistor', 10, 2, 0, '2k'),
+				comp('R3', 'resistor', 14, 4, 90, '3k'),
+				comp('G1', 'ground', 0, 6, 0, '0'),
+				comp('VM1', 'voltmeter', 7, -2, 0, '0')
+			],
+			wires: [
+				wire('w1', [0, 2], [2, 2]),
+				wire('w2', [6, 2], [8, 2]),
+				wire('w3', [12, 2], [14, 2]),
+				wire('w4', [0, 6], [14, 6]),
+				wire('w_vm_p', [5, -2], [0, -2], [0, 2]),
+				wire('w_vm_n', [9, -2], [12, -2], [12, 2])
+			],
+			unknownProblem: {
+				componentId: 'V1',
+				symbol: 'Vs',
+				constraint: {
+					kind: 'branch_voltage',
+					targetId: 'VM1',
+					value: '8',
+					label: 'V_VM1'
+				}
+			}
+		};
+
+		const full = solveCircuit(doc);
+		expect(full.unknownSolution?.valid).toBe(true);
+		expect(full.unknownSolution?.solutions).toHaveLength(1);
+		expect(full.unknownSolution?.solutions[0].value.re).toBeCloseTo(16, 9);
+		expect(full.unknownSolution?.solutions[0].verified).toBe(true);
+		expect(full.mna.valid).toBe(true);
+		expect(full.mna.branches['VM1'].voltage.re).toBeCloseTo(8, 9);
+		expect(full.allVerified).toBe(true);
+		expect(full.maxDiscrepancy).toBeLessThan(1e-8);
+
+		// Voltmeter itself cannot be marked as an unknown parameter
+		const invalidUnknown = solveUnknownParameter(doc, {
+			componentId: 'VM1',
+			constraint: { kind: 'branch_voltage', targetId: 'R1', value: '2' }
+		});
+		expect(invalidUnknown.valid).toBe(false);
+
+		// Voltmeter cannot be used as a branch_current constraint
+		const invalidKind = solveUnknownParameter(doc, {
+			componentId: 'V1',
+			constraint: { kind: 'branch_current', targetId: 'VM1', value: '1m' }
+		});
+		expect(invalidKind.valid).toBe(false);
+	});
 });

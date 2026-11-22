@@ -85,7 +85,8 @@ const KIND_PREFIX: Record<ComponentKind, string> = {
 	voltage_source: 'V',
 	current_source: 'I',
 	ground: 'GND',
-	terminal: 'T'
+	terminal: 'T',
+	voltmeter: 'VM'
 };
 
 interface NormalizedElement {

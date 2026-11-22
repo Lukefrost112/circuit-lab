@@ -172,7 +172,8 @@ const ALLOWED_KINDS = new Set<ComponentKind>([
 	'voltage_source',
 	'current_source',
 	'ground',
-	'terminal'
+	'terminal',
+	'voltmeter'
 ]);
 
 const ALLOWED_UNIT_SYSTEMS = new Set<UnitSystemId>([
@@ -559,7 +560,7 @@ function parseCircuitDocumentFormat(obj: Record<string, unknown>): CircuitImport
 		}
 
 		let valueStr = '';
-		if (kind === 'ground' || kind === 'terminal') {
+		if (kind === 'ground' || kind === 'terminal' || kind === 'voltmeter') {
 			valueStr = typeof raw.value === 'string' ? raw.value : '0';
 		} else {
 			if (typeof raw.value !== 'string' || raw.value.trim() === '') {
@@ -803,7 +804,7 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 
 		if (typeof raw.kind !== 'string' || !ALLOWED_KINDS.has(raw.kind as ComponentKind)) {
 			errors.push(
-				`${prefix} (${elId ?? '?'}): invalid kind "${String(raw.kind)}". Allowed: resistor, capacitor, inductor, voltage_source, current_source, ground, terminal.`
+				`${prefix} (${elId ?? '?'}): invalid kind "${String(raw.kind)}". Allowed: resistor, capacitor, inductor, voltage_source, current_source, ground, terminal, voltmeter.`
 			);
 			return;
 		}
@@ -919,7 +920,13 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 				: undefined;
 
 		let algebraicParsed: { multiplier: number; symbol: string } | null = null;
-		if (kind !== 'ground' && kind !== 'terminal' && rawValTrimmed !== '' && !isUnknownPlaceholder) {
+		if (
+			kind !== 'ground' &&
+			kind !== 'terminal' &&
+			kind !== 'voltmeter' &&
+			rawValTrimmed !== '' &&
+			!isUnknownPlaceholder
+		) {
 			if (raw.unknown === true || matchesTopLevelUnknown || topLevelTermMult !== undefined) {
 				algebraicParsed =
 					parseAlgebraicUnknownValue(
@@ -946,6 +953,7 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 		const isMarkedUnknown =
 			kind !== 'ground' &&
 			kind !== 'terminal' &&
+			kind !== 'voltmeter' &&
 			(raw.unknown === true ||
 				isUnknownPlaceholder ||
 				matchesTopLevelUnknown ||
@@ -984,8 +992,8 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 
 		// Validate value (allowing "?" / "unknown" / algebraic expression when element is marked unknown)
 		let valueStr = '';
-		if (kind === 'ground' || kind === 'terminal') {
-			valueStr = typeof raw.value === 'string' ? raw.value.trim() : '0';
+		if (kind === 'ground' || kind === 'terminal' || kind === 'voltmeter') {
+			valueStr = typeof raw.value === 'string' && raw.value.trim() !== '' ? raw.value.trim() : '0';
 		} else if (isMarkedUnknown) {
 			const defaultPlaceholder = inferredImpedanceMode
 				? kind === 'inductor'

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { getPresetById } from '$lib/data/presets';
 import { Complex } from '../complex';
 import { solveCircuit } from '../solve';
 import type { CircuitComponent, CircuitDocument } from '../types';
@@ -317,5 +318,77 @@ describe('All 6 Pedagogical Method Solvers + Cross-Verification Gate', () => {
 		expect(full.methods.kcl_kvl!.applicable).toBe(true);
 		expect(full.methods.kcl_kvl!.verifiedAgainstMna).toBe(true);
 		expect(full.allVerified).toBe(true);
+	});
+
+	it('9. Ideal Voltmeters spanning multiple loads pass all 6 pedagogical methods with allVerified=true and maxDiscrepancy < 1e-8', () => {
+		// 9a. DC Divider preset with VM1 spanning across R1 + R2 (V_N1 - V_0 = 12 V) and VM2 across R1 (4 V)
+		const dividerPreset = getPresetById('dc-divider')!;
+		const dividerWithVm: CircuitDocument = {
+			...dividerPreset.document,
+			components: [
+				...dividerPreset.document.components,
+				comp('VM1', 'voltmeter', 8, 0, 0, '0'), // +:(6,0) -> (4,4), -:(10,0) -> (12,10)
+				comp('VM_OPEN', 'voltmeter', 24, 0, 0, '0') // unconnected voltmeter must not disturb methods
+			],
+			wires: [
+				...dividerPreset.document.wires,
+				wire('w_vm1_p', [6, 0], [4, 0], [4, 4]),
+				wire('w_vm1_n', [10, 0], [22, 0], [22, 10], [18, 10])
+			]
+		};
+		const dividerSol = solveCircuit(dividerWithVm);
+		expect(dividerSol.mna.valid).toBe(true);
+		expect(dividerSol.mna.powerBalance.balanced).toBe(true);
+		expect(dividerSol.mna.branches['VM1'].voltage.re).toBeCloseTo(12, 9);
+		expect(dividerSol.mna.branches['VM1'].current.abs()).toBe(0);
+		expect(dividerSol.allVerified).toBe(true);
+		expect(dividerSol.maxDiscrepancy).toBeLessThan(1e-8);
+
+		// 9b. DC Wheatstone Bridge preset with VM1 spanning across R1 + R5 (node N1 to right bridge node)
+		const bridgePreset = getPresetById('dc-wheatstone-bridge')!;
+		const bridgeWithVm: CircuitDocument = {
+			...bridgePreset.document,
+			components: [
+				...bridgePreset.document.components,
+				comp('VM1', 'voltmeter', 14, -2, 0, '0') // +:(12,-2)->(4,2), -:(16,-2)->(18,8)
+			],
+			wires: [
+				...bridgePreset.document.wires,
+				wire('w_bvm_p', [12, -2], [4, -2], [4, 2]),
+				wire('w_bvm_n', [16, -2], [22, -2], [22, 8], [18, 8])
+			]
+		};
+		const bridgeSol = solveCircuit(bridgeWithVm);
+		expect(bridgeSol.mna.valid).toBe(true);
+		expect(bridgeSol.mna.powerBalance.balanced).toBe(true);
+		const expectedBridgeVm = bridgeSol.mna.branches['R1'].voltage.add(
+			bridgeSol.mna.branches['R5'].voltage
+		);
+		expect(bridgeSol.mna.branches['VM1'].voltage.sub(expectedBridgeVm).abs()).toBeLessThan(1e-9);
+		expect(bridgeSol.allVerified).toBe(true);
+		expect(bridgeSol.maxDiscrepancy).toBeLessThan(1e-8);
+
+		// 9c. AC Impedance Supernode preset with VM1 spanning across C1 + R1 (between N2 and GND) and VM2 across L1 + R3 (between N3 and GND)
+		const acPreset = getPresetById('ac-impedance-supernode')!;
+		const acWithVm: CircuitDocument = {
+			...acPreset.document,
+			components: [
+				...acPreset.document.components,
+				comp('VM1', 'voltmeter', 16, 0, 0, '0') // +:(14,0)->(6,4)[N1], -:(18,0)->(28,4)[N4]
+			],
+			wires: [
+				...acPreset.document.wires,
+				wire('w_acvm_p', [14, 0], [4, 0], [4, 4]),
+				wire('w_acvm_n', [18, 0], [28, 0], [28, 4])
+			]
+		};
+		const acSol = solveCircuit(acWithVm);
+		expect(acSol.mna.valid).toBe(true);
+		expect(acSol.mna.powerBalance.balanced).toBe(true);
+		const vN1 = acSol.mna.nodeVoltages[acSol.mna.branches['VM1'].nodeA].voltage;
+		const vN4 = acSol.mna.nodeVoltages[acSol.mna.branches['VM1'].nodeB].voltage;
+		expect(acSol.mna.branches['VM1'].voltage.sub(vN1.sub(vN4)).abs()).toBeLessThan(1e-9);
+		expect(acSol.allVerified).toBe(true);
+		expect(acSol.maxDiscrepancy).toBeLessThan(1e-8);
 	});
 });

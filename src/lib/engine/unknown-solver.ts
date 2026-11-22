@@ -59,7 +59,8 @@ const DEFAULT_SYMBOL_BY_KIND: Record<ComponentKind, string> = {
 	capacitor: 'C',
 	inductor: 'L',
 	ground: 'GND',
-	terminal: 'T'
+	terminal: 'T',
+	voltmeter: 'VM'
 };
 
 const UNIT_BY_KIND: Partial<Record<ComponentKind, string>> = {
@@ -2676,6 +2677,30 @@ export function solveUnknownParameter(
 				[],
 				termsMeta
 			);
+		}
+		if (targetComp.kind === 'voltmeter') {
+			if (constraint.kind !== 'branch_voltage') {
+				return makeFailure(
+					comp,
+					problem,
+					methodName,
+					`Voltmeter "${targetComp.label}" only measures voltage (select Branch Voltage as the measurement constraint).`,
+					[],
+					termsMeta
+				);
+			}
+			const graph = buildElectricalGraph({ ...doc, unknownProblem: undefined });
+			const [vmA, vmB] = graph.componentNodes[targetComp.id] ?? [];
+			if (!vmA || !vmB || !graph.nodes[vmA] || !graph.nodes[vmB]) {
+				return makeFailure(
+					comp,
+					problem,
+					methodName,
+					`Voltmeter "${targetComp.label}" has an unconnected probe — wire both + and − terminals before using it as a constraint.`,
+					[],
+					termsMeta
+				);
+			}
 		}
 	}
 

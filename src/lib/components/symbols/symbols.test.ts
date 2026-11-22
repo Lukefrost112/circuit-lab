@@ -50,7 +50,7 @@ describe('settings store', () => {
 
 describe('getComponentPinGridOffsets', () => {
 	const twoTerminalPassives: SymbolKind[] = ['resistor', 'capacitor', 'inductor'];
-	const twoTerminalSources: SymbolKind[] = ['voltage_source', 'current_source'];
+	const twoTerminalSources: SymbolKind[] = ['voltage_source', 'current_source', 'voltmeter'];
 	const oneTerminalKinds: SymbolKind[] = ['ground', 'terminal', 'probe'];
 
 	it('rotates 2-terminal passive components accurately across 0, 90, 180, 270 degrees', () => {
@@ -157,6 +157,7 @@ describe('CircuitSymbol rendering & IEEE/IEC switching', () => {
 			'current_source',
 			'ground',
 			'terminal',
+			'voltmeter',
 			'wire',
 			'probe'
 		];
@@ -186,6 +187,14 @@ describe('CircuitSymbol rendering & IEEE/IEC switching', () => {
 			shortcut: 'R',
 			defaultValue: 1000,
 			unit: 'Ω'
+		});
+
+		const voltmeterItem = PALETTE_ITEMS.find((item) => item.id === 'voltmeter');
+		expect(voltmeterItem).toMatchObject({
+			kind: 'voltmeter',
+			label: 'Voltmeter',
+			shortcut: 'M',
+			category: 'connections'
 		});
 	});
 });

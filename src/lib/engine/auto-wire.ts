@@ -374,7 +374,7 @@ function registerWireInOccupancy(
 export function autoWireDocument(doc: CircuitDocument): AutoWireResult {
 	const baseWires = doc.wires.map(cloneWire);
 
-	if (doc.components.length < 2) {
+	if (doc.components.filter((c) => c.kind !== 'voltmeter').length < 2) {
 		return {
 			wires: baseWires,
 			addedWires: [],
@@ -393,10 +393,46 @@ export function autoWireDocument(doc: CircuitDocument): AutoWireResult {
 	const interiorObstacles = new Set<string>();
 	const bodyMarginCells = new Set<string>();
 	const pinCellToPinIds = new Map<string, number[]>();
+	const voltmeterObstaclePins: Array<{ x: number; y: number; initialNodeId: string }> = [];
+	const voltmeterObstaclePinCells = new Set<string>();
 
 	for (const comp of doc.components) {
 		const rawPins = initialGraph.componentPins[comp.id] ?? getPinPositions(comp);
 		const compNodes = initialGraph.componentNodes[comp.id] ?? [];
+
+		// Voltmeters are excluded from Phase A automatic connection inference,
+		// but their bodies and pins remain obstacles so circuit wires route cleanly around them.
+		if (comp.kind === 'voltmeter') {
+			if (rawPins.length === 2) {
+				const p0 = rawPins[0];
+				const p1 = rawPins[1];
+				voltmeterObstaclePins.push(
+					{ x: p0.x, y: p0.y, initialNodeId: compNodes[0] ?? '' },
+					{ x: p1.x, y: p1.y, initialNodeId: compNodes[1] ?? '' }
+				);
+				voltmeterObstaclePinCells.add(cellKey(p0.x, p0.y));
+				voltmeterObstaclePinCells.add(cellKey(p1.x, p1.y));
+				if (p0.y === p1.y && p0.x !== p1.x) {
+					const minX = Math.min(p0.x, p1.x);
+					const maxX = Math.max(p0.x, p1.x);
+					for (let x = minX + 1; x < maxX; x++) {
+						interiorObstacles.add(cellKey(x, p0.y));
+						bodyMarginCells.add(cellKey(x, p0.y - 1));
+						bodyMarginCells.add(cellKey(x, p0.y + 1));
+					}
+				} else if (p0.x === p1.x && p0.y !== p1.y) {
+					const minY = Math.min(p0.y, p1.y);
+					const maxY = Math.max(p0.y, p1.y);
+					for (let y = minY + 1; y < maxY; y++) {
+						interiorObstacles.add(cellKey(p0.x, y));
+						bodyMarginCells.add(cellKey(p0.x - 1, y));
+						bodyMarginCells.add(cellKey(p0.x + 1, y));
+					}
+				}
+			}
+			continue;
+		}
+
 		const twoTerm = isTwoTerminalKind(comp.kind);
 		const ids: number[] = [];
 
@@ -596,7 +632,7 @@ export function autoWireDocument(doc: CircuitDocument): AutoWireResult {
 			for (let x = minX + 1; x < maxX; x++) {
 				const ck = cellKey(x, a.y);
 				if (interiorObstacles.has(ck)) return false;
-				if (pinCellToPinIds.has(ck)) return false;
+				if (pinCellToPinIds.has(ck) || voltmeterObstaclePinCells.has(ck)) return false;
 			}
 			return true;
 		}
@@ -606,7 +642,7 @@ export function autoWireDocument(doc: CircuitDocument): AutoWireResult {
 			for (let y = minY + 1; y < maxY; y++) {
 				const ck = cellKey(a.x, y);
 				if (interiorObstacles.has(ck)) return false;
-				if (pinCellToPinIds.has(ck)) return false;
+				if (pinCellToPinIds.has(ck) || voltmeterObstaclePinCells.has(ck)) return false;
 			}
 			return true;
 		}
@@ -996,6 +1032,12 @@ export function autoWireDocument(doc: CircuitDocument): AutoWireResult {
 		if (p.y < minY) minY = p.y;
 		if (p.y > maxY) maxY = p.y;
 	}
+	for (const vp of voltmeterObstaclePins) {
+		if (vp.x < minX) minX = vp.x;
+		if (vp.x > maxX) maxX = vp.x;
+		if (vp.y < minY) minY = vp.y;
+		if (vp.y > maxY) maxY = vp.y;
+	}
 	for (const w of baseWires) {
 		for (const pt of w.points) {
 			if (pt.x < minX) minX = pt.x;
@@ -1064,6 +1106,16 @@ export function autoWireDocument(doc: CircuitDocument): AutoWireResult {
 		}
 		list.push(p);
 	}
+	// Keep placed voltmeter pins as foreign-pin obstacles so auto-wired nets never touch them
+	voltmeterObstaclePins.forEach((vp, idx) => {
+		const ck = cellKey(vp.x, vp.y);
+		if (pinCellFinalRoots.has(ck)) return;
+		const owner =
+			vp.initialNodeId && initialNodeToFinalRoot.has(vp.initialNodeId)
+				? initialNodeToFinalRoot.get(vp.initialNodeId)!
+				: -(100000 + idx + 1);
+		addSetMap(pinCellFinalRoots, ck, owner);
+	});
 
 	// =========================================================================
 	// Step 4: Phase B — Obstacle-Avoiding Orthogonal Manhattan A* Grid Router

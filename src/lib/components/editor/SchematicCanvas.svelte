@@ -230,7 +230,8 @@
 		'voltage_source',
 		'current_source',
 		'ground',
-		'terminal'
+		'terminal',
+		'voltmeter'
 	]);
 
 	function isPlacementTool(tool: EditorTool): tool is ComponentKind {
@@ -1397,6 +1398,7 @@
 			w: () => circuit.setActiveTool('wire'),
 			g: () => circuit.setActiveTool('ground'),
 			t: () => circuit.setActiveTool('terminal'),
+			m: () => circuit.setActiveTool('voltmeter'),
 			p: () => circuit.setActiveTool('probe')
 		};
 
@@ -1427,7 +1429,33 @@
 	function getComponentDisplayMeta(comp: CircuitComponent): {
 		isUnknownComp: boolean;
 		displayVal: string;
+		isVoltmeterReading?: boolean;
+		isVoltmeterOpen?: boolean;
 	} {
+		if (comp.kind === 'voltmeter') {
+			const branch = circuit.solution.mna.valid ? circuit.solution.mna.branches[comp.id] : undefined;
+			if (branch) {
+				const formattedV = formatComplexOverlay(branch.voltage, 'V', circuit.document.mode, {
+					precision: settings.precision,
+					angleDisplay: settings.angleDisplay,
+					showDcFractions: settings.showDcFractions,
+					unitSystem: settings.unitSystem
+				});
+				return {
+					isUnknownComp: false,
+					displayVal: formattedV,
+					isVoltmeterReading: true,
+					isVoltmeterOpen: false
+				};
+			}
+			return {
+				isUnknownComp: false,
+				displayVal: 'Open',
+				isVoltmeterReading: true,
+				isVoltmeterOpen: true
+			};
+		}
+
 		const unknownTerm =
 			getUnknownTerms(circuit.document.unknownProblem).find(
 				(t) => t.componentId === comp.id
@@ -1611,7 +1639,7 @@
 		const branches: BranchOverlayItem[] = [];
 
 		for (const comp of circuit.document.components) {
-			if (comp.kind === 'ground' || comp.kind === 'terminal') continue;
+			if (comp.kind === 'ground' || comp.kind === 'terminal' || comp.kind === 'voltmeter') continue;
 			const branch = circuit.solution.mna.branches[comp.id];
 			if (!branch) continue;
 
@@ -2328,6 +2356,7 @@
 							kind={comp.kind}
 							variant="schematic"
 							asGroup={true}
+							rotation={comp.rotation}
 							sourceMode={getSourceModeForComp(comp)}
 							terminalLabel={comp.terminalName || comp.label}
 						/>
@@ -2354,10 +2383,19 @@
 								x={labelLayout.valueX}
 								y={labelLayout.valueY}
 								text-anchor={labelLayout.anchor}
-								fill={isUnknownComp ? 'var(--warning)' : 'var(--muted-foreground)'}
+								fill={displayMeta.isVoltmeterReading
+									? displayMeta.isVoltmeterOpen
+										? 'var(--muted-foreground)'
+										: 'var(--voltage)'
+									: isUnknownComp
+										? 'var(--warning)'
+										: 'var(--muted-foreground)'}
 								font-family="var(--font-mono)"
-								font-size="10"
-								font-weight={isUnknownComp ? '600' : undefined}
+								font-size={displayMeta.isVoltmeterReading ? '10.5' : '10'}
+								font-weight={isUnknownComp ||
+								(displayMeta.isVoltmeterReading && !displayMeta.isVoltmeterOpen)
+									? '600'
+									: undefined}
 								style="font-variant-numeric: tabular-nums;"
 							>
 								{displayVal}
@@ -2463,6 +2501,7 @@
 							kind={circuit.activeTool}
 							variant="schematic"
 							asGroup={true}
+							rotation={circuit.placementRotation}
 							sourceMode={circuit.activeSourceMode}
 							terminalLabel={circuit.activeTool === 'terminal' ? 'T' : undefined}
 						/>
@@ -2631,7 +2670,10 @@
 		>
 			{#if circuit.selectedComponent}
 				{@const selectedComp = circuit.selectedComponent}
-				{@const isTwoTerminal = selectedComp.kind !== 'ground' && selectedComp.kind !== 'terminal'}
+				{@const isTwoTerminal =
+					selectedComp.kind !== 'ground' &&
+					selectedComp.kind !== 'terminal' &&
+					selectedComp.kind !== 'voltmeter'}
 				{@const isTheveninActive =
 					circuit.theveninTarget?.kind === 'component' &&
 					circuit.theveninTarget.componentId === selectedComp.id}

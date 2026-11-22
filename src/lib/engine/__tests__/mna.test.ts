@@ -625,4 +625,126 @@ describe('solveMNA — 15+ classic DC & AC circuits + error diagnostics', () => 
 		expect(negRealZ.valid).toBe(false);
 		expect(negRealZ.diagnostics.some((d) => d.code === 'INVALID_VALUE')).toBe(true);
 	});
+
+	// 19. Ideal Voltmeter (DC multi-load span, zero disturbance, open probe warning, same-node, and AC phasor span)
+	it('19. Measures exact differential voltage with ideal voltmeter without disturbing currents or power balance', () => {
+		// Series DC circuit: V1 = 12 V across R1 = 1 Ω, R2 = 2 Ω, R3 = 3 Ω (I = 2 A)
+		// V(R1) = 2 V, V(R2) = 4 V, V(R3) = 6 V.
+		// VM1 spans across R1 + R2 -> V_VM1 = V_N1 - V_N3 = 12 - 6 = 6 V (= V_R1 + V_R2)
+		const baseDoc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', 0, 4, 90, '12'), // +:(0,2), -:(0,6)
+				comp('R1', 'resistor', 4, 2, 0, '1'), // a:(2,2), b:(6,2)
+				comp('R2', 'resistor', 10, 2, 0, '2'), // a:(8,2), b:(12,2)
+				comp('R3', 'resistor', 14, 4, 90, '3'), // a:(14,2), b:(14,6)
+				comp('G1', 'ground', 0, 6, 0, '0')
+			],
+			wires: [
+				wire('w1', [0, 2], [2, 2]),
+				wire('w2', [6, 2], [8, 2]),
+				wire('w3', [12, 2], [14, 2]),
+				wire('w4', [0, 6], [14, 6])
+			]
+		};
+
+		const baseSol = solveMNA(baseDoc);
+		expect(baseSol.valid).toBe(true);
+
+		const withVmDoc: CircuitDocument = {
+			...baseDoc,
+			components: [
+				...baseDoc.components,
+				// VM1 placed above R1 + R2: +:(5,-2) wired to (0,2), -:(9,-2) wired to (12,2)
+				comp('VM1', 'voltmeter', 7, -2, 0, '0'),
+				// VM2 placed with both probes on same node (ground): reads 0 V cleanly
+				comp('VM2', 'voltmeter', 7, 10, 0, '0')
+			],
+			wires: [
+				...baseDoc.wires,
+				wire('w_vm1_p', [5, -2], [0, -2], [0, 2]),
+				wire('w_vm1_n', [9, -2], [12, -2], [12, 2]),
+				wire('w_vm2_p', [5, 10], [5, 6]),
+				wire('w_vm2_n', [9, 10], [9, 6])
+			]
+		};
+
+		const vmSol = solveMNA(withVmDoc);
+		expect(vmSol.valid).toBe(true);
+		expect(vmSol.powerBalance.balanced).toBe(true);
+		expect(Math.abs(vmSol.powerBalance.totalRealPower)).toBeLessThan(1e-10);
+		expect(vmSol.powerBalance.totalAbsorbedReal).toBeCloseTo(
+			baseSol.powerBalance.totalAbsorbedReal,
+			12
+		);
+
+		// Zero disturbance to all active branch currents and node voltages
+		for (const id of ['V1', 'R1', 'R2', 'R3']) {
+			expect(vmSol.branches[id].current.sub(baseSol.branches[id].current).abs()).toBeLessThan(
+				1e-12
+			);
+			expect(vmSol.branches[id].voltage.sub(baseSol.branches[id].voltage).abs()).toBeLessThan(
+				1e-12
+			);
+		}
+
+		// VM1 reads exact V_R1 + V_R2 = 6 V, I = 0, P = 0
+		const vm1 = vmSol.branches['VM1'];
+		expect(vm1).toBeDefined();
+		expect(vm1.kind).toBe('voltmeter');
+		expect(vm1.isMeasurementOnly).toBe(true);
+		expect(vm1.voltage.re).toBeCloseTo(6, 12);
+		expect(vm1.current.abs()).toBeCloseTo(0, 12);
+		expect(vm1.realPower).toBe(0);
+		expect(vm1.reactivePower).toBe(0);
+
+		// VM2 across same node reads 0 V with no warning/error
+		expect(vmSol.branches['VM2'].voltage.abs()).toBeCloseTo(0, 12);
+		expect(vmSol.diagnostics.some((d) => d.code === 'VOLTMETER_UNCONNECTED')).toBe(false);
+
+		// Unconnected voltmeter emits non-blocking VOLTMETER_UNCONNECTED warning and leaves circuit valid
+		const openVmDoc: CircuitDocument = {
+			...baseDoc,
+			components: [...baseDoc.components, comp('VM_OPEN', 'voltmeter', 20, -4, 0, '0')]
+		};
+		const openSol = solveMNA(openVmDoc);
+		expect(openSol.valid).toBe(true);
+		expect(openSol.branches['VM_OPEN']).toBeUndefined();
+		expect(
+			openSol.diagnostics.some(
+				(d) =>
+					d.severity === 'warning' &&
+					d.code === 'VOLTMETER_UNCONNECTED' &&
+					d.componentIds?.includes('VM_OPEN')
+			)
+		).toBe(true);
+
+		// AC Voltmeter across R1 + L1 in series RLC reads exact complex phasor V_R1 + V_L1
+		const acDoc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'ac',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', 0, 2, 90, '10∠0°'), // +:(0,0), -:(0,4)
+				comp('R1', 'resistor', 2, 0, 0, '1'), // a:(0,0), b:(4,0)
+				comp('L1', 'inductor', 6, 0, 0, '2+j1', { valueMode: 'impedance', unit: 'Ω' }), // a:(4,0), b:(8,0)
+				comp('C1', 'capacitor', 8, 2, 90, '5', { valueMode: 'impedance', unit: 'Ω' }), // a:(8,0), b:(8,4)
+				comp('G1', 'ground', 0, 4, 0, '0'),
+				comp('VM_AC', 'voltmeter', 4, -4, 0, '0') // +:(2,-4), -:(6,-4)
+			],
+			wires: [
+				wire('w_gnd', [0, 4], [8, 4]),
+				wire('w_vm_p', [2, -4], [0, -4], [0, 0]),
+				wire('w_vm_n', [6, -4], [8, -4], [8, 0])
+			]
+		};
+		const acSol = solveMNA(acDoc);
+		expect(acSol.valid).toBe(true);
+		expect(acSol.powerBalance.balanced).toBe(true);
+		const expectedAcVm = acSol.branches['R1'].voltage.add(acSol.branches['L1'].voltage);
+		expect(acSol.branches['VM_AC'].voltage.sub(expectedAcVm).abs()).toBeLessThan(1e-11);
+		expect(acSol.branches['VM_AC'].current.abs()).toBe(0);
+	});
 });

@@ -956,5 +956,45 @@ Let me know if you want node voltages calculated!`;
 		const solvedAgain = solveCircuit(reimported.document);
 		expect(solvedAgain.allVerified).toBe(true);
 	});
+
+	it('imports ideal voltmeters from AI netlist and round-trips through exportCircuitJson / parseCircuitImport', () => {
+		const aiNetlistWithVm = JSON.stringify({
+			schemaVersion: 1,
+			name: 'Divider with Voltmeter',
+			mode: 'dc',
+			elements: [
+				{ id: 'V1', kind: 'voltage_source', label: 'V1', from: 'N1', to: '0', value: '12' },
+				{ id: 'R1', kind: 'resistor', label: 'R1', from: 'N1', to: 'N2', value: '2k' },
+				{ id: 'R2', kind: 'resistor', label: 'R2', from: 'N2', to: '0', value: '4k' },
+				{ id: 'VM1', kind: 'voltmeter', label: 'VM1', from: 'N2', to: '0' }
+			]
+		});
+
+		const imported = parseCircuitImport(aiNetlistWithVm);
+		expect(imported.ok).toBe(true);
+		if (!imported.ok) return;
+
+		const vm = imported.document.components.find((c) => c.kind === 'voltmeter');
+		expect(vm).toBeDefined();
+		expect(vm?.label).toBe('VM1');
+
+		const solved = solveCircuit(imported.document);
+		expect(solved.mna.valid).toBe(true);
+		expect(solved.mna.branches[vm!.id].voltage.re).toBeCloseTo(8, 9);
+		expect(solved.mna.branches[vm!.id].current.abs()).toBe(0);
+		expect(solved.allVerified).toBe(true);
+
+		const exported = exportCircuitJson(imported.document);
+		expect(exported).toContain('"kind": "voltmeter"');
+
+		const reimported = parseCircuitImport(exported);
+		expect(reimported.ok).toBe(true);
+		if (!reimported.ok) return;
+		expect(reimported.sourceFormat).toBe('circuit-document');
+		const solvedAgain = solveCircuit(reimported.document);
+		expect(solvedAgain.mna.valid).toBe(true);
+		expect(solvedAgain.mna.branches[vm!.id].voltage.re).toBeCloseTo(8, 9);
+		expect(solvedAgain.allVerified).toBe(true);
+	});
 });
 

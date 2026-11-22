@@ -1,6 +1,17 @@
 <script lang="ts">
-	import { Cable, Eraser, Link2, RotateCw, Target, Trash2, Unlink, X } from 'lucide-svelte';
+	import {
+		ArrowLeftRight,
+		Cable,
+		Eraser,
+		Link2,
+		RotateCw,
+		Target,
+		Trash2,
+		Unlink,
+		X
+	} from 'lucide-svelte';
 	import { CircuitSymbol } from '$lib/components/symbols';
+	import { formatComplexParts } from '$lib/components/results/formatters';
 	import { Button, Input, Label, Select, Switch } from '$lib/components/ui';
 	import {
 		areUnknownKindsCompatible,
@@ -36,7 +47,8 @@
 		voltage_source: 'Voltage Source',
 		current_source: 'Current Source',
 		ground: 'Ground (0 V)',
-		terminal: 'Port Terminal'
+		terminal: 'Port Terminal',
+		voltmeter: 'Voltmeter'
 	};
 
 	const UNIT_BY_KIND: Partial<Record<ComponentKind, string>> = {
@@ -85,10 +97,12 @@
 	const isImpedanceMode = $derived(
 		Boolean(selectedComp && isReactive && isImpedanceSpecified(selectedComp))
 	);
+	const isVoltmeter = $derived(selectedComp?.kind === 'voltmeter');
 	const isTwoTerminal = $derived(
 		selectedComp !== null &&
 			selectedComp.kind !== 'ground' &&
-			selectedComp.kind !== 'terminal'
+			selectedComp.kind !== 'terminal' &&
+			selectedComp.kind !== 'voltmeter'
 	);
 	const isAcMode = $derived(AC_ENABLED && circuit.document.mode === 'ac');
 	const isTheveninTarget = $derived(
@@ -96,6 +110,34 @@
 			circuit.theveninTarget?.kind === 'component' &&
 			circuit.theveninTarget.componentId === selectedComp.id
 	);
+
+	const selectedVoltmeterReading = $derived.by(() => {
+		if (!selectedComp || selectedComp.kind !== 'voltmeter') return null;
+		const [nodeA, nodeB] = circuit.graph.componentNodes[selectedComp.id] ?? [];
+		const branch = circuit.solution.mna.valid
+			? circuit.solution.mna.branches[selectedComp.id]
+			: undefined;
+		if (!branch) {
+			return {
+				connected: false as const,
+				nodeA: nodeA || null,
+				nodeB: nodeB || null
+			};
+		}
+		const formatted = formatComplexParts(branch.voltage, 'V', circuit.solution.mna.mode, {
+			angleDisplay: settings.angleDisplay,
+			precision: settings.precision,
+			showDcFractions: settings.showDcFractions,
+			unitSystem: settings.unitSystem
+		});
+		return {
+			connected: true as const,
+			nodeA: branch.nodeA,
+			nodeB: branch.nodeB,
+			primary: formatted.primary,
+			secondary: formatted.secondary
+		};
+	});
 
 	const activeUnknownProblem = $derived(circuit.document.unknownProblem);
 	const activeUnknownTerms = $derived(getUnknownTerms(activeUnknownProblem));
@@ -144,7 +186,17 @@
 	];
 
 	const twoTerminalComponents = $derived(
-		circuit.document.components.filter((c) => c.kind !== 'ground' && c.kind !== 'terminal')
+		circuit.document.components.filter(
+			(c) => c.kind !== 'ground' && c.kind !== 'terminal' && c.kind !== 'voltmeter'
+		)
+	);
+
+	const connectedVoltmeters = $derived(
+		circuit.document.components.filter((c) => {
+			if (c.kind !== 'voltmeter') return false;
+			const [nA, nB] = circuit.graph.componentNodes[c.id] ?? [];
+			return Boolean(nA && nB && circuit.graph.nodes[nA] && circuit.graph.nodes[nB]);
+		})
 	);
 
 	const constraintTargetOptions = $derived.by(() => {
@@ -155,10 +207,20 @@
 				label: `Node ${nid}`
 			}));
 		}
-		return twoTerminalComponents.map((c) => ({
+		const base = twoTerminalComponents.map((c) => ({
 			value: c.id,
 			label: `${c.label} (${KIND_LABELS[c.kind]})`
 		}));
+		if (activeUnknownProblem.constraint.kind === 'branch_voltage') {
+			return [
+				...base,
+				...connectedVoltmeters.map((vm) => ({
+					value: vm.id,
+					label: `${vm.label} (${KIND_LABELS[vm.kind]})`
+				}))
+			];
+		}
+		return base;
 	});
 
 	const constraintUnit = $derived.by(() => {
@@ -306,8 +368,13 @@
 
 		const isPrevNode = prevKind === 'node_voltage';
 		const isNextNode = nextKind === 'node_voltage';
+		const currentTargetComp = circuit.document.components.find(
+			(c) => c.id === activeUnknownProblem.constraint.targetId
+		);
+		const invalidVoltmeterForKind =
+			currentTargetComp?.kind === 'voltmeter' && nextKind !== 'branch_voltage';
 		const nextTargetId =
-			isPrevNode === isNextNode
+			isPrevNode === isNextNode && !invalidVoltmeterForKind
 				? activeUnknownProblem.constraint.targetId
 				: pickDefaultTargetForKind(nextKind, selectedComp.id);
 
@@ -552,6 +619,42 @@
 							if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
 						}}
 					/>
+				</div>
+			{:else if selectedComp.kind === 'voltmeter' && selectedVoltmeterReading}
+				<div
+					class="flex flex-col gap-1.5 rounded-[4px] border border-border bg-surface-rail/50 px-3 py-2.5"
+				>
+					<div class="flex items-baseline justify-between gap-2">
+						<span class="text-[11px] font-medium text-muted-foreground">
+							Measured Voltage (V<sub>+</sub> − V<sub>−</sub>)
+						</span>
+						{#if selectedVoltmeterReading.connected}
+							<span class="font-engineering text-[10px] text-muted-foreground">
+								{selectedVoltmeterReading.nodeA === '0' ? 'GND' : selectedVoltmeterReading.nodeA} (+)
+								→ {selectedVoltmeterReading.nodeB === '0'
+									? 'GND'
+									: selectedVoltmeterReading.nodeB} (−)
+							</span>
+						{/if}
+					</div>
+					{#if selectedVoltmeterReading.connected}
+						<div class="font-engineering text-base font-semibold text-voltage">
+							{selectedVoltmeterReading.primary}
+						</div>
+						{#if selectedVoltmeterReading.secondary}
+							<div class="font-engineering text-xs text-muted-foreground">
+								{selectedVoltmeterReading.secondary}
+							</div>
+						{/if}
+						<p class="text-[11px] leading-snug text-muted-foreground">
+							Ideal open-circuit probe (I = 0 A, P = 0 W)
+						</p>
+					{:else}
+						<div class="font-engineering text-sm font-medium text-muted-foreground">Open</div>
+						<p class="text-[11px] leading-snug text-muted-foreground">
+							Connect both + and − probes to circuit nodes to read differential voltage.
+						</p>
+					{/if}
 				</div>
 			{:else if selectedComp.kind !== 'ground'}
 				{#if isReactive && isAcMode}
@@ -902,6 +1005,18 @@
 					<span>Delete</span>
 				</Button>
 			</div>
+
+			{#if isVoltmeter}
+				<Button
+					variant="outline"
+					size="sm"
+					class="min-h-11 w-full lg:h-8 lg:min-h-0"
+					onclick={() => circuit.flipComponentPolarity(selectedComp.id)}
+				>
+					<ArrowLeftRight class="size-3.5" aria-hidden="true" />
+					<span>Flip Polarity (±)</span>
+				</Button>
+			{/if}
 
 			{#if isTwoTerminal}
 				<Button

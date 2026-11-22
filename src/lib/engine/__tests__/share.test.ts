@@ -490,4 +490,54 @@ describe('Shareable Circuit URL Codec (share.ts)', () => {
 				.abs()
 		).toBeLessThan(1e-12);
 	});
+
+	it('round-trips a circuit containing an ideal voltmeter losslessly through #c=v1.', async () => {
+		const base = makeDcDividerDoc();
+		const docWithVm: CircuitDocument = {
+			...base,
+			components: [
+				...base.components,
+				{ id: 'VM1', kind: 'voltmeter', label: 'VM1', x: 8, y: 0, rotation: 0, value: '0' }
+			],
+			wires: [
+				...base.wires,
+				{
+					id: 'w_vm_p',
+					points: [
+						{ x: 6, y: 0 },
+						{ x: 4, y: 0 },
+						{ x: 4, y: 4 }
+					]
+				},
+				{
+					id: 'w_vm_n',
+					points: [
+						{ x: 10, y: 0 },
+						{ x: 12, y: 0 },
+						{ x: 12, y: 4 }
+					]
+				}
+			]
+		};
+
+		const origSol = solveCircuit(docWithVm);
+		expect(origSol.mna.valid).toBe(true);
+		expect(origSol.mna.branches['VM1'].voltage.re).toBeCloseTo(4, 9);
+
+		const hash = await encodeCircuitToHash({ document: docWithVm, unitSystem: 'kohm-v-ma' });
+		expect(hash).toMatch(/^#c=v1\.[A-Za-z0-9_-]+$/);
+
+		const decoded = await decodeCircuitFromHash(hash);
+		expect(decoded).not.toBeNull();
+		if (!decoded) return;
+
+		const vm = decoded.document.components.find((c) => c.id === 'VM1');
+		expect(vm?.kind).toBe('voltmeter');
+		expect(vm?.label).toBe('VM1');
+
+		const decodedSol = solveCircuit(decoded.document);
+		expect(decodedSol.mna.valid).toBe(true);
+		expect(decodedSol.mna.branches['VM1'].voltage.re).toBeCloseTo(4, 9);
+		expect(decodedSol.allVerified).toBe(true);
+	});
 });

@@ -287,7 +287,7 @@
 			{#if connectionsList.length > 0}
 				<AccordionItem
 					value="connections"
-					title="Wiring & Ports"
+					title="Wiring & Probes"
 					triggerClass={accordionTriggerClass}
 					contentClass={accordionContentClass}
 				>

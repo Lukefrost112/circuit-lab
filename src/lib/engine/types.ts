@@ -18,7 +18,8 @@ export type ComponentKind =
 	| 'voltage_source'
 	| 'current_source'
 	| 'ground'
-	| 'terminal';
+	| 'terminal'
+	| 'voltmeter';
 
 /**
  * Reserved component kinds for v2 dependent sources (VCVS, VCCS, CCVS, CCCS).
@@ -245,6 +246,8 @@ export interface BranchResult {
 	/** Power factor P / |S|, or null if |S| == 0 */
 	powerFactor: number | null;
 	powerFactorType?: 'leading' | 'lagging' | 'unity';
+	/** True for ideal non-intrusive measurement instruments (e.g. ideal voltmeter, Y = 0, I = 0) */
+	isMeasurementOnly?: boolean;
 }
 
 export interface PowerSummary {

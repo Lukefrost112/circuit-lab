@@ -61,7 +61,8 @@ const DEFAULT_UNITS: Record<ComponentKind, string | undefined> = {
 	voltage_source: 'V',
 	current_source: 'A',
 	ground: undefined,
-	terminal: undefined
+	terminal: undefined,
+	voltmeter: undefined
 };
 
 const LABEL_PREFIXES: Record<ComponentKind, string> = {
@@ -71,7 +72,8 @@ const LABEL_PREFIXES: Record<ComponentKind, string> = {
 	voltage_source: 'V',
 	current_source: 'I',
 	ground: 'GND',
-	terminal: 'T'
+	terminal: 'T',
+	voltmeter: 'VM'
 };
 
 function cloneDocument(doc: CircuitDocument): CircuitDocument {
@@ -196,6 +198,7 @@ function getDefaultValue(kind: ComponentKind, sourceMode: SourceMode): string {
 			return sourceMode === 'ac' ? '10m∠0°' : '10m';
 		case 'ground':
 		case 'terminal':
+		case 'voltmeter':
 			return '0';
 	}
 }
@@ -521,6 +524,20 @@ class CircuitStore {
 
 		this.recordSnapshot();
 		const nextRot = ((target.rotation + 90) % 360) as Rotation;
+		this._document = {
+			...this._document,
+			components: this._document.components.map((c) =>
+				c.id === id ? { ...c, rotation: nextRot } : c
+			)
+		};
+	}
+
+	flipComponentPolarity(id: string): void {
+		const target = this._document.components.find((c) => c.id === id);
+		if (!target) return;
+
+		this.recordSnapshot();
+		const nextRot = ((target.rotation + 180) % 360) as Rotation;
 		this._document = {
 			...this._document,
 			components: this._document.components.map((c) =>
@@ -989,7 +1006,16 @@ class CircuitStore {
 		}
 
 		if (typeof theveninTarget === 'string') {
-			if (theveninTarget && cloned.components.some((c) => c.id === theveninTarget)) {
+			if (
+				theveninTarget &&
+				cloned.components.some(
+					(c) =>
+						c.id === theveninTarget &&
+						c.kind !== 'ground' &&
+						c.kind !== 'terminal' &&
+						c.kind !== 'voltmeter'
+				)
+			) {
 				this._theveninTarget = { kind: 'component', componentId: theveninTarget };
 			} else {
 				this._theveninTarget = undefined;
@@ -997,7 +1023,13 @@ class CircuitStore {
 		} else if (theveninTarget) {
 			if (
 				theveninTarget.kind === 'component' &&
-				cloned.components.some((c) => c.id === theveninTarget.componentId)
+				cloned.components.some(
+					(c) =>
+						c.id === theveninTarget.componentId &&
+						c.kind !== 'ground' &&
+						c.kind !== 'terminal' &&
+						c.kind !== 'voltmeter'
+				)
 			) {
 				this._theveninTarget = {
 					kind: 'component',
@@ -1053,7 +1085,15 @@ class CircuitStore {
 	}
 
 	setTheveninComponent(id: string): void {
-		if (!this._document.components.some((c) => c.id === id)) return;
+		const target = this._document.components.find((c) => c.id === id);
+		if (
+			!target ||
+			target.kind === 'ground' ||
+			target.kind === 'terminal' ||
+			target.kind === 'voltmeter'
+		) {
+			return;
+		}
 		this._theveninTarget = { kind: 'component', componentId: id };
 	}
 

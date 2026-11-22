@@ -56,10 +56,16 @@
 		});
 	});
 
-	const sortedBranches = $derived.by<BranchResult[]>(() => {
-		return Object.values(mna.branches).sort((a, b) =>
-			a.label.localeCompare(b.label, undefined, { numeric: true })
-		);
+	const voltmeterBranches = $derived.by<BranchResult[]>(() => {
+		return Object.values(mna.branches)
+			.filter((b) => b.kind === 'voltmeter')
+			.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
+	});
+
+	const activeBranches = $derived.by<BranchResult[]>(() => {
+		return Object.values(mna.branches)
+			.filter((b) => b.kind !== 'voltmeter')
+			.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
 	});
 
 	const passiveOptions = $derived(
@@ -103,7 +109,7 @@
 				{/if}
 			</span>
 			<span class="font-engineering whitespace-nowrap text-muted-foreground">
-				· {sortedNodes.length} {sortedNodes.length === 1 ? 'node' : 'nodes'} · {sortedBranches.length} {sortedBranches.length === 1 ? 'branch' : 'branches'}
+				· {sortedNodes.length} {sortedNodes.length === 1 ? 'node' : 'nodes'} · {activeBranches.length} {activeBranches.length === 1 ? 'branch' : 'branches'}
 			</span>
 		</div>
 
@@ -133,6 +139,70 @@
 			{/if}
 		</div>
 	</div>
+
+	<!-- Voltmeter Readings -->
+	{#if voltmeterBranches.length > 0}
+		<section aria-label="Voltmeter Readings" class="py-3">
+			<div class="mb-2 flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 px-4">
+				<h3 class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+					Voltmeter Readings
+				</h3>
+				<span class="text-[11px] text-muted-foreground">
+					Differential V<sub>+</sub> − V<sub>−</sub> · Ideal open probe
+				</span>
+			</div>
+			<Table variant="flush">
+				<TableHeader class="border-t border-border bg-surface-rail/50">
+					<TableRow class="hover:bg-transparent">
+						<TableHead class="h-7 pl-4 pr-2 text-[10px]">Meter</TableHead>
+						<TableHead class="h-7 px-2 text-[10px]">Terminals (+ → −)</TableHead>
+						<TableHead class="h-7 pl-2 pr-4 text-right text-[10px]">Voltage</TableHead>
+					</TableRow>
+				</TableHeader>
+				<TableBody>
+					{#each voltmeterBranches as vm (vm.componentId)}
+						{@const vParts = formatComplexParts(vm.voltage, 'V', mna.mode, formatOpts)}
+						{@const isSelected = selectedComponentId === vm.componentId}
+						<TableRow
+							data-selected={isSelected ? 'true' : undefined}
+							class={cn(
+								onSelectComponent && 'cursor-pointer',
+								isSelected && 'bg-primary/10 hover:bg-primary/15'
+							)}
+							tabindex={onSelectComponent ? 0 : undefined}
+							onclick={() => onSelectComponent?.(vm.componentId)}
+							onkeydown={(e) => {
+								if (onSelectComponent && (e.key === 'Enter' || e.key === ' ')) {
+									e.preventDefault();
+									onSelectComponent(vm.componentId);
+								}
+							}}
+						>
+							<TableCell class="py-2.5 pl-4 pr-2 font-engineering font-semibold text-foreground">
+								{vm.label}
+							</TableCell>
+							<TableCell class="px-2 py-2.5 font-engineering text-[11px] text-muted-foreground">
+								{vm.nodeA === '0' ? '0 (GND)' : vm.nodeA} (+) → {vm.nodeB === '0'
+									? '0 (GND)'
+									: vm.nodeB} (−)
+							</TableCell>
+							<TableCell
+								tabular
+								class="whitespace-nowrap py-2.5 pl-2 pr-4 text-right font-semibold text-voltage"
+							>
+								<div class="whitespace-nowrap">{vParts.primary}</div>
+								{#if vParts.secondary}
+									<div class="whitespace-nowrap text-[11px] font-normal text-muted-foreground">
+										{vParts.secondary}
+									</div>
+								{/if}
+							</TableCell>
+						</TableRow>
+					{/each}
+				</TableBody>
+			</Table>
+		</section>
+	{/if}
 
 	<!-- Node Voltages -->
 	<section aria-label="Final Node Voltages" class="py-3">
@@ -201,7 +271,7 @@
 
 		<!-- Mobile Flush Interactive Branch List (< sm) -->
 		<div class="flex flex-col divide-y divide-border border-t border-border sm:hidden">
-			{#each sortedBranches as branch (branch.componentId)}
+			{#each activeBranches as branch (branch.componentId)}
 				{@const vParts = formatComplexParts(branch.voltage, 'V', mna.mode, formatOpts)}
 				{@const iParts = formatComplexParts(branch.current, 'A', mna.mode, formatOpts)}
 				{@const isSupplied = branch.realPower < -1e-12}
@@ -299,7 +369,7 @@
 					</TableRow>
 				</TableHeader>
 				<TableBody>
-					{#each sortedBranches as branch (branch.componentId)}
+					{#each activeBranches as branch (branch.componentId)}
 						{@const vParts = formatComplexParts(branch.voltage, 'V', mna.mode, formatOpts)}
 						{@const iParts = formatComplexParts(branch.current, 'A', mna.mode, formatOpts)}
 						{@const isSupplied = branch.realPower < -1e-12}

@@ -67,7 +67,7 @@ function assertWiresAvoidInteriorCells(doc: CircuitDocument, wires: CircuitWire[
 function assertNoSelfShorts(doc: CircuitDocument): void {
 	const graph = buildElectricalGraph(doc);
 	for (const comp of doc.components) {
-		if (comp.kind === 'ground' || comp.kind === 'terminal') continue;
+		if (comp.kind === 'ground' || comp.kind === 'terminal' || comp.kind === 'voltmeter') continue;
 		const nodes = graph.componentNodes[comp.id];
 		expect(nodes).toHaveLength(2);
 		expect(nodes[0]).not.toBe(nodes[1]);
@@ -280,5 +280,40 @@ describe('algorithmic autoWireDocument', () => {
 		expect(singleRes.addedWires).toHaveLength(0);
 		expect(singleRes.connectionsAdded).toBe(0);
 		expect(singleRes.skippedReason).toBe('too_few_components');
+	});
+
+	it('ignores placed voltmeters in Phase A while routing circuit wires cleanly around them', () => {
+		// Unwired simple divider with an unconnected voltmeter placed directly in the middle
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			name: 'Divider with Placed Voltmeter',
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				{ id: 'V1', kind: 'voltage_source', label: 'V1', x: 4, y: 8, rotation: 90, value: '12' },
+				{ id: 'R1', kind: 'resistor', label: 'R1', x: 10, y: 4, rotation: 0, value: '2k' },
+				{ id: 'R2', kind: 'resistor', label: 'R2', x: 16, y: 8, rotation: 90, value: '4k' },
+				{ id: 'G1', kind: 'ground', label: 'GND', x: 4, y: 12, rotation: 0, value: '0' },
+				// Voltmeter placed in the interior of the loop
+				{ id: 'VM1', kind: 'voltmeter', label: 'VM1', x: 10, y: 8, rotation: 0, value: '0' }
+			],
+			wires: []
+		};
+
+		const result = autoWireDocument(doc);
+		expect(result.addedWires.length).toBeGreaterThan(0);
+
+		const wired: CircuitDocument = { ...doc, wires: result.wires };
+		assertNoSelfShorts(wired);
+		assertWiresAvoidInteriorCells(wired, result.addedWires);
+
+		// Voltmeter remains unwired (not accidentally wired in series with loads)
+		const graph = buildElectricalGraph(wired);
+		expect(graph.componentNodes['VM1']).toEqual(['', '']);
+
+		// Underlying circuit solves cleanly with expected divider voltage (8 V)
+		const mna = solveMNA(wired);
+		expect(mna.valid).toBe(true);
+		expect(mna.branches['R2'].voltage.abs()).toBeCloseTo(8, 6);
 	});
 });

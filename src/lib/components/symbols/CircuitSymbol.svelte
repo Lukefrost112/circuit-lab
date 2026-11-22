@@ -6,6 +6,7 @@
 		SYMBOL_PIN_OFFSETS,
 		type SourceMode,
 		type SymbolKind,
+		type SymbolRotation,
 		type SymbolVariant
 	} from './catalog';
 
@@ -15,6 +16,8 @@
 		standard?: SchematicStandard;
 		sourceMode?: SourceMode;
 		terminalLabel?: string;
+		/** Optional schematic rotation so inner instrument letters (e.g. voltmeter "V") stay upright. */
+		rotation?: SymbolRotation;
 		/**
 		 * When true in `variant === 'schematic'`, renders only an inner `<g>` centered at `(0, 0)`
 		 * so the symbol can be embedded inside an outer schematic `<svg>` transform group.
@@ -30,6 +33,7 @@
 		standard,
 		sourceMode = 'dc',
 		terminalLabel,
+		rotation = 0,
 		asGroup = false,
 		size,
 		class: className,
@@ -101,6 +105,11 @@
 					{terminalLabel}
 				</text>
 			{/if}
+		{:else if kind === 'voltmeter'}
+			<path d="M 2 12 L 4.5 12" />
+			<circle cx="12" cy="12" r="7.5" />
+			<path d="M 19.5 12 L 22 12" />
+			<path d="M 9.2 8.7 L 12 15.6 L 14.8 8.7" />
 		{:else if kind === 'wire'}
 			<circle cx="4.5" cy="16.5" r="2" />
 			<path d="M 6.5 16.5 L 12 16.5 L 12 7.5 L 17.5 7.5" />
@@ -170,6 +179,20 @@
 					{terminalLabel}
 				</text>
 			{/if}
+		{:else if kind === 'voltmeter'}
+			<path d="M -40 0 L -16 0" />
+			<circle cx="0" cy="0" r="16" />
+			<path d="M 16 0 L 40 0" />
+			<g transform={rotation ? `rotate(${-rotation})` : undefined}>
+				<path d="M -5.5 -6 L 0 6.5 L 5.5 -6" />
+			</g>
+			<!-- Polarity markers near pin 0 (+) and pin 1 (−) -->
+			<g transform="translate(-23, -9) {rotation ? `rotate(${-rotation})` : ''}" stroke-width="1.5">
+				<path d="M -3 0 L 3 0 M 0 -3 L 0 3" />
+			</g>
+			<g transform="translate(23, -9) {rotation ? `rotate(${-rotation})` : ''}" stroke-width="1.5">
+				<path d="M -3 0 L 3 0" />
+			</g>
 		{:else if kind === 'wire'}
 			<path d="M -40 0 L 40 0" />
 		{:else if kind === 'probe'}

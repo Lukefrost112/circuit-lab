@@ -188,9 +188,11 @@ export function solveMNA(doc: CircuitDocument, options?: SolveMnaOptions): MnaSo
 	const twoTerminalComps = doc.components.filter(
 		(c) => c.kind !== 'ground' && c.kind !== 'terminal'
 	);
+	const activeComps = twoTerminalComps.filter((c) => c.kind !== 'voltmeter');
+	const voltmeters = twoTerminalComps.filter((c) => c.kind === 'voltmeter');
 
 	// Components requiring auxiliary branch current unknowns in MNA
-	const voltageBranches: CircuitComponent[] = twoTerminalComps.filter(
+	const voltageBranches: CircuitComponent[] = activeComps.filter(
 		(c) => c.kind === 'voltage_source' || (mode === 'dc' && c.kind === 'inductor')
 	);
 	const voltageBranchAuxMap = new Map<string, number>();
@@ -206,7 +208,7 @@ export function solveMNA(doc: CircuitDocument, options?: SolveMnaOptions): MnaSo
 	const componentImpedance = new Map<string, Complex | null>();
 	const currentSourceValues = new Map<string, Complex>();
 
-	for (const comp of twoTerminalComps) {
+	for (const comp of activeComps) {
 		const [nodeA, nodeB] = graph.componentNodes[comp.id];
 
 		switch (comp.kind) {
@@ -295,7 +297,7 @@ export function solveMNA(doc: CircuitDocument, options?: SolveMnaOptions): MnaSo
 	let totalAbsorbedReal = 0;
 	let totalSuppliedReal = 0;
 
-	for (const comp of twoTerminalComps) {
+	for (const comp of activeComps) {
 		const [nodeA, nodeB] = graph.componentNodes[comp.id];
 		const vA = nodeVoltages[nodeA]?.voltage ?? Complex.zero();
 		const vB = nodeVoltages[nodeB]?.voltage ?? Complex.zero();
@@ -358,6 +360,32 @@ export function solveMNA(doc: CircuitDocument, options?: SolveMnaOptions): MnaSo
 			apparentPower,
 			powerFactor,
 			powerFactorType
+		};
+	}
+
+	// Post-solve ideal voltmeter readouts (open circuit: Y = 0, I = 0, S = 0)
+	for (const vm of voltmeters) {
+		const [nodeA, nodeB] = graph.componentNodes[vm.id] ?? [];
+		if (!nodeA || !nodeB || !nodeVoltages[nodeA] || !nodeVoltages[nodeB]) {
+			continue;
+		}
+		const voltage = nodeVoltages[nodeA].voltage.sub(nodeVoltages[nodeB].voltage);
+		branches[vm.id] = {
+			componentId: vm.id,
+			label: vm.label,
+			kind: 'voltmeter',
+			isMeasurementOnly: true,
+			nodeA,
+			nodeB,
+			voltage,
+			current: Complex.zero(),
+			impedance: null,
+			complexPower: Complex.zero(),
+			realPower: 0,
+			reactivePower: 0,
+			apparentPower: 0,
+			powerFactor: null,
+			powerFactorType: undefined
 		};
 	}
 

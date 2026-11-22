@@ -6,6 +6,7 @@ export type SymbolKind =
 	| 'current_source'
 	| 'ground'
 	| 'terminal'
+	| 'voltmeter'
 	| 'wire'
 	| 'probe';
 
@@ -86,6 +87,7 @@ export const COMPONENT_PINS: Record<SymbolKind, ReadonlyArray<PinGridOffset>> = 
 	inductor: TWO_TERMINAL_PASSIVE_PINS,
 	voltage_source: TWO_TERMINAL_SOURCE_PINS,
 	current_source: TWO_TERMINAL_SOURCE_PINS,
+	voltmeter: TWO_TERMINAL_SOURCE_PINS,
 	ground: GROUND_PINS,
 	terminal: ONE_TERMINAL_PINS,
 	probe: ONE_TERMINAL_PINS,
@@ -154,6 +156,15 @@ export const SYMBOL_PIN_OFFSETS: Record<SymbolKind, SymbolGeometrySpec> = {
 		width: 40,
 		height: 40,
 		pins: [{ name: 'a', x: 0, y: 0 }]
+	},
+	voltmeter: {
+		viewBox: '-40 -20 80 40',
+		width: 80,
+		height: 40,
+		pins: [
+			{ name: '+', x: -40, y: 0 },
+			{ name: '-', x: 40, y: 0 }
+		]
 	},
 	probe: {
 		viewBox: '-20 -20 40 40',
@@ -306,6 +317,15 @@ export const PALETTE_ITEMS: ReadonlyArray<PaletteItem> = [
 		category: 'connections',
 		kind: 'terminal',
 		description: 'Open port terminal (e.g. A / B for Thévenin & Norton)'
+	},
+	{
+		id: 'voltmeter',
+		label: 'Voltmeter',
+		name: 'Voltmeter',
+		shortcut: 'M',
+		category: 'connections',
+		kind: 'voltmeter',
+		description: 'Ideal differential voltmeter (V+ − V− across any two points or multiple loads)'
 	},
 	{
 		id: 'probe',

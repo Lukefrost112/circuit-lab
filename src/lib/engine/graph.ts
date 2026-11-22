@@ -113,9 +113,17 @@ export function getPinPositions(comp: CircuitComponent): PinPosition[] {
 	}
 
 	const pin0Name =
-		comp.kind === 'voltage_source' ? '+' : comp.kind === 'current_source' ? 'in' : 'a';
+		comp.kind === 'voltage_source' || comp.kind === 'voltmeter'
+			? '+'
+			: comp.kind === 'current_source'
+				? 'in'
+				: 'a';
 	const pin1Name =
-		comp.kind === 'voltage_source' ? '-' : comp.kind === 'current_source' ? 'out' : 'b';
+		comp.kind === 'voltage_source' || comp.kind === 'voltmeter'
+			? '-'
+			: comp.kind === 'current_source'
+				? 'out'
+				: 'b';
 
 	const off0 = rotateOffset(-2, 0, comp.rotation);
 	const off1 = rotateOffset(2, 0, comp.rotation);
@@ -218,6 +226,7 @@ export function buildElectricalGraph(doc: CircuitDocument): ElectricalGraph {
 		pins: NodePinAttachment[];
 		points: GridPoint[];
 		hasGround: boolean;
+		hasElectricalPin: boolean;
 		minY: number;
 		minX: number;
 	}
@@ -232,6 +241,7 @@ export function buildElectricalGraph(doc: CircuitDocument): ElectricalGraph {
 				pins: [],
 				points: [],
 				hasGround: false,
+				hasElectricalPin: false,
 				minY: Infinity,
 				minX: Infinity
 			};
@@ -267,12 +277,17 @@ export function buildElectricalGraph(doc: CircuitDocument): ElectricalGraph {
 			if (comp.kind === 'ground') {
 				bucket.hasGround = true;
 			}
+			if (comp.kind !== 'voltmeter') {
+				bucket.hasElectricalPin = true;
+			}
 		}
 		compPinRoots.set(comp.id, roots);
 	}
 
-	// Filter to buckets that contain at least one component pin
-	const activeBuckets = Array.from(buckets.values()).filter((b) => b.pins.length > 0);
+	// Filter to buckets that contain at least one electrical (non-voltmeter) component pin
+	const activeBuckets = Array.from(buckets.values()).filter(
+		(b) => b.pins.length > 0 && b.hasElectricalPin
+	);
 	const groundBuckets = activeBuckets.filter((b) => b.hasGround);
 
 	const rootToNodeId = new Map<number, string>();
@@ -345,7 +360,7 @@ export function buildElectricalGraph(doc: CircuitDocument): ElectricalGraph {
 	const componentNodes: Record<string, string[]> = {};
 	for (const comp of doc.components) {
 		const roots = compPinRoots.get(comp.id) ?? [];
-		componentNodes[comp.id] = roots.map((r) => rootToNodeId.get(r)!);
+		componentNodes[comp.id] = roots.map((r) => rootToNodeId.get(r) ?? '');
 	}
 
 	return {
@@ -535,8 +550,21 @@ export function validateCircuitTopology(
 	const { doc, nodes, componentNodes } = graph;
 
 	const activeComponents = doc.components.filter(
-		(c) => c.kind !== 'ground' && c.kind !== 'terminal'
+		(c) => c.kind !== 'ground' && c.kind !== 'terminal' && c.kind !== 'voltmeter'
 	);
+	const voltmeters = doc.components.filter((c) => c.kind === 'voltmeter');
+
+	for (const vm of voltmeters) {
+		const [nA, nB] = componentNodes[vm.id] ?? [];
+		if (!nA || !nB || !nodes[nA] || !nodes[nB]) {
+			diagnostics.push({
+				severity: 'warning',
+				code: 'VOLTMETER_UNCONNECTED',
+				message: `Voltmeter ${vm.label} has an unconnected probe — wire its + and − terminals to circuit nodes to read voltage.`,
+				componentIds: [vm.id]
+			});
+		}
+	}
 
 	if (activeComponents.length === 0) {
 		diagnostics.push({

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render } from 'svelte/server';
 import { PRESETS } from '$lib/data/presets';
+import { FinalAnswersCard } from '$lib/components/results';
 import { Complex } from '$lib/engine';
 import { circuit } from '$lib/stores/circuit.svelte';
 import { settings } from '$lib/stores/settings.svelte';
@@ -840,5 +841,68 @@ describe('editor Svelte components SSR rendering', () => {
 			props: { kind: 'capacitor', value: '-j1', isAcMode: false, onCommit: () => {} }
 		});
 		expect(dcCapOut.body).toContain('DC steady state: open circuit (I = 0 A)');
+	});
+
+	it('renders ideal Voltmeter VM1 in SchematicCanvas, PropertyInspector, and FinalAnswersCard with live differential voltage and Flip Polarity', () => {
+		circuit.loadPreset('dc-divider');
+		const vm = circuit.addComponent('voltmeter', 8, 0, { rotation: 0 });
+		expect(vm.label).toBe('VM1');
+
+		// Initially unconnected -> shows Open in canvas and inspector, and hides Value/Unknown/Thévenin controls
+		circuit.selectComponent(vm.id);
+		const openInspector = render(PropertyInspector);
+		expect(openInspector.body).toContain('VM1');
+		expect(openInspector.body).toContain('Voltmeter');
+		expect(openInspector.body).toContain('Open');
+		expect(openInspector.body).toContain('Flip Polarity');
+		expect(openInspector.body).not.toContain('id="comp-value"');
+		expect(openInspector.body).not.toContain('id="comp-unknown-toggle"');
+		expect(openInspector.body).not.toContain('Analyze Thévenin / Norton Across Element');
+
+		// Wire VM1 across R1: +:(6,0)->(4,4)[N1=12V], -:(10,0)->(12,4)[N2=8V] => reads +4 V
+		circuit.addWire([
+			{ x: 6, y: 0 },
+			{ x: 4, y: 0 },
+			{ x: 4, y: 4 }
+		]);
+		circuit.addWire([
+			{ x: 10, y: 0 },
+			{ x: 12, y: 0 },
+			{ x: 12, y: 4 }
+		]);
+
+		expect(circuit.solution.mna.valid).toBe(true);
+		expect(circuit.solution.mna.branches[vm.id]?.voltage.re).toBeCloseTo(4, 9);
+
+		const canvasOut = render(SchematicCanvas);
+		expect(canvasOut.body).toContain('data-symbol-kind="voltmeter"');
+		expect(canvasOut.body).toContain('VM1');
+		expect(canvasOut.body).toContain('4 V');
+
+		const inspectorOut = render(PropertyInspector);
+		expect(inspectorOut.body).toContain('Measured Voltage');
+		expect(inspectorOut.body).toContain('4 V');
+		expect(inspectorOut.body).toContain('Flip Polarity');
+
+		const resultsOut = render(FinalAnswersCard, {
+			props: {
+				solution: circuit.solution,
+				document: circuit.document,
+				selectedComponentId: vm.id
+			}
+		});
+		expect(resultsOut.body).toContain('Voltmeter Readings');
+		expect(resultsOut.body).toContain('VM1');
+		expect(resultsOut.body).toContain('4 V');
+
+		// Flip Polarity (±) rotates 180° in 1 undoable step, inverting reading to -4 V
+		circuit.flipComponentPolarity(vm.id);
+		expect(circuit.selectedComponent?.rotation).toBe(180);
+		expect(circuit.solution.mna.branches[vm.id]?.voltage.re).toBeCloseTo(-4, 9);
+
+		// setTheveninComponent ignores voltmeters
+		circuit.clearTheveninTarget();
+		circuit.setTheveninComponent(vm.id);
+		expect(circuit.theveninTarget).toBeUndefined();
 	});
 });

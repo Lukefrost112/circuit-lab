@@ -439,6 +439,7 @@ export function formatComponentDisplayValue(
 ): string {
 	if (comp.kind === 'ground') return '';
 	if (comp.kind === 'terminal') return '';
+	if (comp.kind === 'voltmeter') return '';
 
 	const unitMap: Record<string, string> = {
 		resistor: 'Ω',
