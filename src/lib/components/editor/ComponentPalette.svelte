@@ -3,6 +3,7 @@
 	import { CircuitSymbol, PALETTE_ITEMS, type PaletteItem, type SourceMode } from '$lib/components/symbols';
 	import { Accordion, AccordionItem, Input } from '$lib/components/ui';
 	import type { ComponentKind } from '$lib/engine';
+	import { AC_ENABLED } from '$lib/env';
 	import { circuit, type EditorTool } from '$lib/stores/circuit.svelte';
 	import { cn } from '$lib/utils';
 
@@ -58,7 +59,12 @@
 		onSelectTool?.();
 	}
 
+	function isItemDisabled(item: PaletteItem): boolean {
+		return !AC_ENABLED && item.sourceMode === 'ac';
+	}
+
 	function handleSelectPaletteItem(item: PaletteItem) {
+		if (isItemDisabled(item)) return;
 		if (item.kind === 'wire') {
 			circuit.setActiveTool('wire');
 		} else if (item.kind === 'probe') {
@@ -184,18 +190,23 @@
 				>
 					<div class="flex flex-col gap-0.5">
 						{#each sourcesList as item (item.id)}
-							{@const active = isItemActive(item)}
+							{@const disabled = isItemDisabled(item)}
+							{@const active = !disabled && isItemActive(item)}
 							<button
 								type="button"
-								title={item.description}
+								{disabled}
+								aria-disabled={disabled ? 'true' : undefined}
+								title={disabled ? 'AC Phasor Analysis — Coming Soon' : item.description}
 								onclick={() => handleSelectPaletteItem(item)}
 								class={cn(
-									'flex w-full cursor-pointer items-center justify-between rounded-[4px] border text-left transition-colors duration-150',
+									'flex w-full items-center justify-between rounded-[4px] border text-left transition-colors duration-150',
 									isSheet ? 'min-h-11 gap-2 px-3 py-2 text-sm' : 'gap-1.5 px-2 py-1.5 text-xs',
 									'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-									active
-										? 'border-primary/45 bg-card font-medium text-foreground'
-										: 'border-transparent text-foreground/90 hover:bg-accent/70 hover:text-foreground'
+									disabled
+										? 'cursor-not-allowed border-transparent text-muted-foreground opacity-60'
+										: active
+											? 'cursor-pointer border-primary/45 bg-card font-medium text-foreground'
+											: 'cursor-pointer border-transparent text-foreground/90 hover:bg-accent/70 hover:text-foreground'
 								)}
 							>
 								<span class={cn('flex min-w-0 items-center', isSheet ? 'gap-2.5' : 'gap-1.5')}>
@@ -204,11 +215,22 @@
 										variant="icon"
 										sourceMode={item.sourceMode ?? 'dc'}
 										size={isSheet ? 22 : 18}
-										class={cn('shrink-0', active ? 'text-primary' : 'text-foreground')}
+										class={cn(
+											'shrink-0',
+											disabled
+												? 'text-muted-foreground'
+												: active
+													? 'text-primary'
+													: 'text-foreground'
+										)}
 									/>
 									<span class="truncate">{item.name}</span>
 								</span>
-								{#if !isSheet}
+								{#if disabled}
+									<span class="font-engineering shrink-0 rounded-[3px] border border-border px-1 py-0.5 text-[9px] uppercase text-muted-foreground">
+										Soon
+									</span>
+								{:else if !isSheet}
 									<span class="font-engineering shrink-0 text-[10px] text-muted-foreground/80">
 										{item.shortcut}
 									</span>

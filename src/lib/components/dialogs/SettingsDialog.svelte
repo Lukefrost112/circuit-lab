@@ -3,6 +3,7 @@
 	import { CircuitSymbol } from '$lib/components/symbols';
 	import { Button, Dialog, Label, Separator, Switch } from '$lib/components/ui';
 	import { UNIT_SYSTEMS } from '$lib/engine';
+	import { AC_ENABLED } from '$lib/env';
 	import {
 		settings,
 		type AcMagnitudeMode,
@@ -117,23 +118,45 @@
 
 		<!-- Complex Number Display (AC) -->
 		<section class="flex flex-col gap-2">
-			<Label>Complex Number Display (AC)</Label>
+			<div class="flex items-center gap-2">
+				<Label class={cn(!AC_ENABLED && 'text-muted-foreground')}>Complex Number Display (AC)</Label>
+				{#if !AC_ENABLED}
+					<span class="rounded-[3px] border border-border bg-surface-rail px-1.5 py-0.5 font-engineering text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+						Coming Soon
+					</span>
+				{/if}
+			</div>
 			<div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
 				{#each ANGLE_OPTIONS as opt (opt.value)}
 					{@const active = settings.angleDisplay === opt.value}
 					<button
 						type="button"
-						onclick={() => (settings.angleDisplay = opt.value)}
+						disabled={!AC_ENABLED}
+						aria-disabled={!AC_ENABLED ? 'true' : undefined}
+						title={!AC_ENABLED ? 'AC Phasor Analysis — Coming Soon' : undefined}
+						onclick={() => {
+							if (!AC_ENABLED) return;
+							settings.angleDisplay = opt.value;
+						}}
 						aria-pressed={active}
 						class={cn(
-							'flex min-h-11 cursor-pointer flex-col justify-center gap-0.5 rounded-[4px] border px-3 py-2 text-left transition-colors duration-150 sm:min-h-0',
+							'flex min-h-11 flex-col justify-center gap-0.5 rounded-[4px] border px-3 py-2 text-left transition-colors duration-150 sm:min-h-0',
 							'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-							active
-								? 'border-primary bg-primary/8 text-foreground'
-								: 'border-border bg-background/50 text-muted-foreground hover:border-foreground/25 hover:bg-accent/40 hover:text-foreground'
+							!AC_ENABLED
+								? 'cursor-not-allowed border-border bg-background/40 text-muted-foreground opacity-55'
+								: active
+									? 'cursor-pointer border-primary bg-primary/8 text-foreground'
+									: 'cursor-pointer border-border bg-background/50 text-muted-foreground hover:border-foreground/25 hover:bg-accent/40 hover:text-foreground'
 						)}
 					>
-						<span class="text-xs font-semibold text-foreground">{opt.label}</span>
+						<span
+							class={cn(
+								'text-xs font-semibold',
+								!AC_ENABLED ? 'text-muted-foreground' : 'text-foreground'
+							)}
+						>
+							{opt.label}
+						</span>
 						<span class="font-engineering text-[11px] text-muted-foreground">{opt.example}</span>
 					</button>
 				{/each}
@@ -166,21 +189,35 @@
 			</section>
 
 			<section class="flex flex-col gap-2">
-				<Label>AC Magnitude Convention</Label>
+				<div class="flex items-center gap-2">
+					<Label class={cn(!AC_ENABLED && 'text-muted-foreground')}>AC Magnitude Convention</Label>
+					{#if !AC_ENABLED}
+						<span class="rounded-[3px] border border-border bg-surface-rail px-1.5 py-0.5 font-engineering text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+							Coming Soon
+						</span>
+					{/if}
+				</div>
 				<div class="grid grid-cols-2 gap-1.5">
 					{#each AC_MAG_OPTIONS as opt (opt.value)}
 						{@const active = settings.acMagnitudeMode === opt.value}
 						<button
 							type="button"
-							onclick={() => (settings.acMagnitudeMode = opt.value)}
+							disabled={!AC_ENABLED}
+							aria-disabled={!AC_ENABLED ? 'true' : undefined}
+							onclick={() => {
+								if (!AC_ENABLED) return;
+								settings.acMagnitudeMode = opt.value;
+							}}
 							aria-pressed={active}
-							title={opt.detail}
+							title={!AC_ENABLED ? 'AC Phasor Analysis — Coming Soon' : opt.detail}
 							class={cn(
-								'min-h-11 cursor-pointer rounded-[4px] border px-2.5 py-1.5 text-center text-xs font-medium transition-colors duration-150 sm:min-h-0',
+								'min-h-11 rounded-[4px] border px-2.5 py-1.5 text-center text-xs font-medium transition-colors duration-150 sm:min-h-0',
 								'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-								active
-									? 'border-primary bg-primary/8 text-primary'
-									: 'border-border bg-background/50 text-foreground hover:border-foreground/25 hover:bg-accent/40'
+								!AC_ENABLED
+									? 'cursor-not-allowed border-border bg-background/40 text-muted-foreground opacity-55'
+									: active
+										? 'cursor-pointer border-primary bg-primary/8 text-primary'
+										: 'cursor-pointer border-border bg-background/50 text-foreground hover:border-foreground/25 hover:bg-accent/40'
 							)}
 						>
 							{opt.label}

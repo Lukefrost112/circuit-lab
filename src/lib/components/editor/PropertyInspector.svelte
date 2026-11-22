@@ -9,6 +9,7 @@
 		type ComponentKind,
 		type ConstraintKind
 	} from '$lib/engine';
+	import { AC_ENABLED } from '$lib/env';
 	import { circuit } from '$lib/stores/circuit.svelte';
 	import { settings } from '$lib/stores/settings.svelte';
 	import EngineeringInput from './EngineeringInput.svelte';
@@ -78,7 +79,7 @@
 			selectedComp.kind !== 'ground' &&
 			selectedComp.kind !== 'terminal'
 	);
-	const isAcMode = $derived(circuit.document.mode === 'ac');
+	const isAcMode = $derived(AC_ENABLED && circuit.document.mode === 'ac');
 	const isTheveninTarget = $derived(
 		selectedComp !== null &&
 			circuit.theveninTarget?.kind === 'component' &&
@@ -293,7 +294,7 @@
 	}
 
 	function commitPhase() {
-		if (!selectedComp || !isSource) return;
+		if (!AC_ENABLED || !selectedComp || !isSource) return;
 		const deg = Number(phaseDraft);
 		if (!Number.isFinite(deg)) {
 			phaseDraft = String(selectedComp.phaseDeg ?? 0);
@@ -317,7 +318,7 @@
 	}
 
 	function commitSourceFrequency() {
-		if (!selectedComp || !isSource) return;
+		if (!AC_ENABLED || !selectedComp || !isSource) return;
 		const trimmed = sourceFreqDraft.trim();
 		if (trimmed === '') {
 			if (selectedComp.frequencyHz !== undefined) {
@@ -337,6 +338,7 @@
 	}
 
 	function commitGlobalFrequency() {
+		if (!AC_ENABLED) return;
 		const hz = Number(globalFreqDraft);
 		if (!Number.isFinite(hz) || hz <= 0) {
 			globalFreqDraft = String(circuit.document.frequencyHz);
@@ -364,7 +366,7 @@
 					<CircuitSymbol
 						kind={selectedComp.kind}
 						variant="icon"
-						sourceMode={isAcMode || /[∠@j]/i.test(selectedComp.value) ? 'ac' : 'dc'}
+						sourceMode={AC_ENABLED && (isAcMode || /[∠@j]/i.test(selectedComp.value)) ? 'ac' : 'dc'}
 						terminalLabel={selectedComp.terminalName || selectedComp.label}
 						size={20}
 					/>

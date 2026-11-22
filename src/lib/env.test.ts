@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { getSettingsStorageKey, resolveDeployEnv } from './env';
+import {
+	DEFAULT_PRODUCTION_GA_ID,
+	getSettingsStorageKey,
+	resolveAcEnabled,
+	resolveDeployEnv,
+	resolveGaMeasurementId
+} from './env';
 
 describe('resolveDeployEnv', () => {
 	it('resolves staging regardless of casing, whitespace, or isProd flag', () => {
@@ -35,5 +41,51 @@ describe('getSettingsStorageKey', () => {
 	it('preserves the canonical storage key for production and development', () => {
 		expect(getSettingsStorageKey('production')).toBe('circuit-lab:settings:v1');
 		expect(getSettingsStorageKey('development')).toBe('circuit-lab:settings:v1');
+	});
+});
+
+describe('resolveGaMeasurementId', () => {
+	it('never resolves a GA ID on staging or development even when overridden', () => {
+		expect(resolveGaMeasurementId('staging')).toBeUndefined();
+		expect(resolveGaMeasurementId('staging', 'G-CUSTOM1234')).toBeUndefined();
+		expect(resolveGaMeasurementId('development')).toBeUndefined();
+		expect(resolveGaMeasurementId('development', 'G-CUSTOM1234')).toBeUndefined();
+	});
+
+	it('defaults to DEFAULT_PRODUCTION_GA_ID on production', () => {
+		expect(DEFAULT_PRODUCTION_GA_ID).toBe('G-48B7SBXB21');
+		expect(resolveGaMeasurementId('production')).toBe('G-48B7SBXB21');
+		expect(resolveGaMeasurementId('production', '')).toBe('G-48B7SBXB21');
+		expect(resolveGaMeasurementId('production', '   ')).toBe('G-48B7SBXB21');
+	});
+
+	it('supports explicit production override or disabling via "none"', () => {
+		expect(resolveGaMeasurementId('production', ' G-TEST9999 ')).toBe('G-TEST9999');
+		expect(resolveGaMeasurementId('production', 'none')).toBeUndefined();
+		expect(resolveGaMeasurementId('production', '  NONE  ')).toBeUndefined();
+		expect(resolveGaMeasurementId('production', 'None')).toBeUndefined();
+	});
+});
+
+describe('resolveAcEnabled', () => {
+	it('disables AC by default on production and enables it on staging and development', () => {
+		expect(resolveAcEnabled('production')).toBe(false);
+		expect(resolveAcEnabled('staging')).toBe(true);
+		expect(resolveAcEnabled('development')).toBe(true);
+	});
+
+	it('honors explicit true/false overrides regardless of environment', () => {
+		expect(resolveAcEnabled('production', 'true')).toBe(true);
+		expect(resolveAcEnabled('production', '  TRUE ')).toBe(true);
+		expect(resolveAcEnabled('staging', 'false')).toBe(false);
+		expect(resolveAcEnabled('development', ' False ')).toBe(false);
+	});
+
+	it('ignores empty or unrecognized overrides and falls back to env default', () => {
+		expect(resolveAcEnabled('production', '')).toBe(false);
+		expect(resolveAcEnabled('production', '   ')).toBe(false);
+		expect(resolveAcEnabled('production', 'yes')).toBe(false);
+		expect(resolveAcEnabled('staging', 'invalid')).toBe(true);
+		expect(resolveAcEnabled('development', '0')).toBe(true);
 	});
 });

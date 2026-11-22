@@ -1,6 +1,7 @@
 <script lang="ts">
 	import {
 		AlertCircle,
+		AlertTriangle,
 		ArrowRight,
 		Check,
 		CheckCircle2,
@@ -13,6 +14,7 @@
 	import { AI_CIRCUIT_IMPORT_PROMPT, parseCircuitImport } from '$lib/engine/io';
 	import type { CircuitDocument, ConstraintKind } from '$lib/engine/types';
 	import { UNIT_SYSTEMS } from '$lib/engine/units';
+	import { AC_ENABLED } from '$lib/env';
 	import { cn } from '$lib/utils';
 
 	type Props = {
@@ -99,6 +101,9 @@
 	const parseResult = $derived(
 		aiOutputText.trim() === '' ? null : parseCircuitImport(aiOutputText)
 	);
+	const isBlockedAcImport = $derived(
+		!AC_ENABLED && Boolean(parseResult?.ok && parseResult.document.mode === 'ac')
+	);
 
 	async function copyPrompt() {
 		try {
@@ -117,7 +122,7 @@
 	}
 
 	function handleRenderAndSolve() {
-		if (!parseResult || !parseResult.ok) return;
+		if (!parseResult || !parseResult.ok || isBlockedAcImport) return;
 		onImportDocument(parseResult.document);
 		aiOutputText = '';
 		open = false;
@@ -217,53 +222,69 @@
 
 			{#if parseResult}
 				{#if parseResult.ok}
-					{@const elementCount = parseResult.document.components.filter(
-						(c) => c.kind !== 'ground' && c.kind !== 'terminal'
-					).length}
-					{@const detectedUnitSystem = parseResult.document.unitSystem}
-					{@const detectedUnknown = parseResult.document.unknownProblem}
-					<div
-						class="flex flex-col gap-1.5 rounded-[4px] border border-success/40 bg-success/10 px-3 py-2 text-xs"
-					>
-						<div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-semibold text-success">
-							<CheckCircle2 class="size-4 shrink-0" aria-hidden="true" />
-							<span>
-								{#if parseResult.sourceFormat === 'ai-netlist'}
-									{parseResult.layoutMode === 'visual-grid'
-										? 'AI Netlist → Exact Visual Layout'
-										: 'AI Netlist → Auto-Layout'}
-								{:else}
-									Circuit Document
-								{/if}
-							</span>
-							<span class="font-engineering text-[11px]">
-								· {elementCount} elements ({parseResult.document.mode.toUpperCase()})
-							</span>
-						</div>
-						{#if detectedUnitSystem || detectedUnknown}
-							<div class="flex flex-wrap items-center gap-x-3 gap-y-1 pl-6 font-engineering text-[11px] text-foreground/85">
-								{#if detectedUnitSystem}
-									<span>Units: {UNIT_SYSTEMS[detectedUnitSystem].shortLabel}</span>
-								{/if}
-								{#if detectedUnknown}
-									{@const sym = detectedUnknown.symbol || detectedUnknown.componentId}
-									{@const cLabel =
-										detectedUnknown.constraint.label ||
-										`${CONSTRAINT_KIND_LABELS[detectedUnknown.constraint.kind]}(${detectedUnknown.constraint.targetId})`}
-									<span>
-										Unknown: Find {sym} (given {cLabel} = {detectedUnknown.constraint.value})
-									</span>
-								{/if}
+					{#if isBlockedAcImport}
+						<div
+							role="alert"
+							class="flex flex-col gap-1 rounded-[4px] border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning"
+						>
+							<div class="flex items-center gap-1.5 font-semibold">
+								<AlertTriangle class="size-4 shrink-0" aria-hidden="true" />
+								AC Phasor Analysis — Coming Soon
 							</div>
-						{/if}
-						{#if parseResult.warnings.length > 0}
-							<ul class="list-disc pl-5 text-[11px] text-muted-foreground">
-								{#each parseResult.warnings as warning, idx (idx)}
-									<li>{warning}</li>
-								{/each}
-							</ul>
-						{/if}
-					</div>
+							<p class="pl-5.5 text-[11px] leading-relaxed text-foreground">
+								AC steady-state circuits are coming soon in Production. Open this circuit on Staging
+								or change mode to DC.
+							</p>
+						</div>
+					{:else}
+						{@const elementCount = parseResult.document.components.filter(
+							(c) => c.kind !== 'ground' && c.kind !== 'terminal'
+						).length}
+						{@const detectedUnitSystem = parseResult.document.unitSystem}
+						{@const detectedUnknown = parseResult.document.unknownProblem}
+						<div
+							class="flex flex-col gap-1.5 rounded-[4px] border border-success/40 bg-success/10 px-3 py-2 text-xs"
+						>
+							<div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-semibold text-success">
+								<CheckCircle2 class="size-4 shrink-0" aria-hidden="true" />
+								<span>
+									{#if parseResult.sourceFormat === 'ai-netlist'}
+										{parseResult.layoutMode === 'visual-grid'
+											? 'AI Netlist → Exact Visual Layout'
+											: 'AI Netlist → Auto-Layout'}
+									{:else}
+										Circuit Document
+									{/if}
+								</span>
+								<span class="font-engineering text-[11px]">
+									· {elementCount} elements ({parseResult.document.mode.toUpperCase()})
+								</span>
+							</div>
+							{#if detectedUnitSystem || detectedUnknown}
+								<div class="flex flex-wrap items-center gap-x-3 gap-y-1 pl-6 font-engineering text-[11px] text-foreground/85">
+									{#if detectedUnitSystem}
+										<span>Units: {UNIT_SYSTEMS[detectedUnitSystem].shortLabel}</span>
+									{/if}
+									{#if detectedUnknown}
+										{@const sym = detectedUnknown.symbol || detectedUnknown.componentId}
+										{@const cLabel =
+											detectedUnknown.constraint.label ||
+											`${CONSTRAINT_KIND_LABELS[detectedUnknown.constraint.kind]}(${detectedUnknown.constraint.targetId})`}
+										<span>
+											Unknown: Find {sym} (given {cLabel} = {detectedUnknown.constraint.value})
+										</span>
+									{/if}
+								</div>
+							{/if}
+							{#if parseResult.warnings.length > 0}
+								<ul class="list-disc pl-5 text-[11px] text-muted-foreground">
+									{#each parseResult.warnings as warning, idx (idx)}
+										<li>{warning}</li>
+									{/each}
+								</ul>
+							{/if}
+						</div>
+					{/if}
 				{:else}
 					<div
 						role="alert"
@@ -291,7 +312,7 @@
 		<Button
 			variant="default"
 			size="sm"
-			disabled={!parseResult?.ok}
+			disabled={!parseResult?.ok || isBlockedAcImport}
 			onclick={handleRenderAndSolve}
 			class="min-h-11 sm:min-h-0"
 		>

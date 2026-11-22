@@ -1,5 +1,14 @@
 <script lang="ts">
-	import { AlertCircle, Check, CheckCircle2, Copy, Download, Link2, Upload } from 'lucide-svelte';
+	import {
+		AlertCircle,
+		AlertTriangle,
+		Check,
+		CheckCircle2,
+		Copy,
+		Download,
+		Link2,
+		Upload
+	} from 'lucide-svelte';
 	import {
 		Button,
 		Dialog,
@@ -10,6 +19,7 @@
 	} from '$lib/components/ui';
 	import { exportCircuitJson, parseCircuitImport } from '$lib/engine/io';
 	import type { CircuitDocument } from '$lib/engine/types';
+	import { AC_ENABLED } from '$lib/env';
 
 	type Props = {
 		open?: boolean;
@@ -35,6 +45,9 @@
 	const exportedJson = $derived(exportCircuitJson(document));
 	const parsedResult = $derived(
 		importText.trim() === '' ? null : parseCircuitImport(importText)
+	);
+	const isBlockedAcImport = $derived(
+		!AC_ENABLED && Boolean(parsedResult?.ok && parsedResult.document.mode === 'ac')
 	);
 
 	async function copyExportJson() {
@@ -75,7 +88,7 @@
 	}
 
 	function handleConfirmImport() {
-		if (!parsedResult || !parsedResult.ok) return;
+		if (!parsedResult || !parsedResult.ok || isBlockedAcImport) return;
 		onImportDocument(parsedResult.document);
 		importText = '';
 		open = false;
@@ -184,26 +197,42 @@
 
 			{#if parsedResult}
 				{#if parsedResult.ok}
-					<div
-						class="flex flex-col gap-1 rounded-[4px] border border-success/40 bg-success/10 px-3 py-2 text-xs"
-					>
-						<div class="flex items-center gap-1.5 font-semibold text-success">
-							<CheckCircle2 class="size-4 shrink-0" aria-hidden="true" />
-							Ready to import: {parsedResult.document.components.length} components
-							({parsedResult.sourceFormat === 'ai-netlist'
-								? parsedResult.layoutMode === 'visual-grid'
-									? 'AI Netlist → Exact Visual Layout'
-									: 'AI Netlist → Auto-Layout'
-								: 'Circuit Document'})
+					{#if isBlockedAcImport}
+						<div
+							role="alert"
+							class="flex flex-col gap-1 rounded-[4px] border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning"
+						>
+							<div class="flex items-center gap-1.5 font-semibold">
+								<AlertTriangle class="size-4 shrink-0" aria-hidden="true" />
+								AC Phasor Analysis — Coming Soon
+							</div>
+							<p class="pl-5.5 text-[11px] leading-relaxed text-foreground">
+								AC steady-state circuits are coming soon in Production. Open this circuit on Staging
+								or change mode to DC.
+							</p>
 						</div>
-						{#if parsedResult.warnings.length > 0}
-							<ul class="list-disc pl-5 text-[11px] text-muted-foreground">
-								{#each parsedResult.warnings as warning, idx (idx)}
-									<li>{warning}</li>
-								{/each}
-							</ul>
-						{/if}
-					</div>
+					{:else}
+						<div
+							class="flex flex-col gap-1 rounded-[4px] border border-success/40 bg-success/10 px-3 py-2 text-xs"
+						>
+							<div class="flex items-center gap-1.5 font-semibold text-success">
+								<CheckCircle2 class="size-4 shrink-0" aria-hidden="true" />
+								Ready to import: {parsedResult.document.components.length} components
+								({parsedResult.sourceFormat === 'ai-netlist'
+									? parsedResult.layoutMode === 'visual-grid'
+										? 'AI Netlist → Exact Visual Layout'
+										: 'AI Netlist → Auto-Layout'
+									: 'Circuit Document'})
+							</div>
+							{#if parsedResult.warnings.length > 0}
+								<ul class="list-disc pl-5 text-[11px] text-muted-foreground">
+									{#each parsedResult.warnings as warning, idx (idx)}
+										<li>{warning}</li>
+									{/each}
+								</ul>
+							{/if}
+						</div>
+					{/if}
 				{:else}
 					<div
 						role="alert"
@@ -226,7 +255,7 @@
 				<Button
 					variant="default"
 					size="sm"
-					disabled={!parsedResult?.ok}
+					disabled={!parsedResult?.ok || isBlockedAcImport}
 					onclick={handleConfirmImport}
 					class="min-h-11 sm:min-h-0"
 				>

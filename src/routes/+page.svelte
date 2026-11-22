@@ -19,7 +19,8 @@
 		ScanLine,
 		Settings,
 		SlidersHorizontal,
-		Sun
+		Sun,
+		X
 	} from 'lucide-svelte';
 	import {
 		ImportFromAIDialog,
@@ -53,7 +54,7 @@
 		encodeCircuitToHash,
 		type CircuitDocument
 	} from '$lib/engine';
-	import { DEPLOY_COMMIT_SHA, IS_STAGING } from '$lib/env';
+	import { AC_ENABLED, DEPLOY_COMMIT_SHA, IS_STAGING } from '$lib/env';
 	import { circuit } from '$lib/stores/circuit.svelte';
 	import { settings } from '$lib/stores/settings.svelte';
 	import { cn } from '$lib/utils';
@@ -71,6 +72,7 @@
 	let aiOpen = $state(false);
 	let settingsOpen = $state(false);
 	let linkCopied = $state(false);
+	let acComingSoonNotice = $state<string | null>(null);
 
 	let linkCopiedTimer: ReturnType<typeof setTimeout> | undefined;
 	let mobileMenuCloseTimer: ReturnType<typeof setTimeout> | undefined;
@@ -143,13 +145,26 @@
 		}
 	}
 
+	const AC_PRODUCTION_NOTICE =
+		'AC Phasor Analysis is coming soon in Production. This AC circuit can be opened on Staging.';
+
 	function handleSelectPreset(preset: CircuitPreset) {
+		if (!AC_ENABLED && preset.document.mode === 'ac') {
+			acComingSoonNotice = AC_PRODUCTION_NOTICE;
+			return;
+		}
+		acComingSoonNotice = null;
 		circuit.loadPreset(preset.id);
 		rightTab = 'results';
 		rightRailOpen = true;
 	}
 
 	function handleImportDocument(doc: CircuitDocument) {
+		if (!AC_ENABLED && doc.mode === 'ac') {
+			acComingSoonNotice = AC_PRODUCTION_NOTICE;
+			return;
+		}
+		acComingSoonNotice = null;
 		if (doc.unitSystem) {
 			settings.unitSystem = doc.unitSystem;
 		}
@@ -168,6 +183,11 @@
 		if (!hash || !hash.includes('c=')) return;
 		const payload = await decodeCircuitFromHash(hash);
 		if (!payload) return;
+		if (!AC_ENABLED && payload.document.mode === 'ac') {
+			acComingSoonNotice = AC_PRODUCTION_NOTICE;
+			return;
+		}
+		acComingSoonNotice = null;
 		const effectiveUnitSystem = payload.unitSystem ?? payload.document.unitSystem;
 		if (effectiveUnitSystem) {
 			settings.unitSystem = effectiveUnitSystem;
@@ -355,16 +375,30 @@
 					type="button"
 					role="radio"
 					aria-checked={circuit.document.mode === 'ac'}
-					onclick={() => circuit.setMode('ac')}
+					disabled={!AC_ENABLED}
+					aria-disabled={!AC_ENABLED ? 'true' : undefined}
+					title={!AC_ENABLED ? 'AC Phasor Analysis — Coming Soon' : undefined}
+					aria-label={!AC_ENABLED ? 'AC mode coming soon' : undefined}
+					onclick={() => {
+						if (!AC_ENABLED) return;
+						circuit.setMode('ac');
+					}}
 					class={cn(
-						'relative inline-flex h-full cursor-pointer items-center justify-center rounded-[3px] border px-2 text-xs transition-colors duration-150 after:absolute after:-inset-y-3 after:inset-x-0 sm:px-2.5 lg:after:hidden',
+						'relative inline-flex h-full items-center justify-center rounded-[3px] border px-2 text-xs transition-colors duration-150 after:absolute after:-inset-y-3 after:inset-x-0 sm:px-2.5 lg:after:hidden',
 						'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
-						circuit.document.mode === 'ac'
-							? 'border-border/80 bg-card font-semibold text-foreground shadow-2xs'
-							: 'border-transparent font-medium text-muted-foreground hover:text-foreground'
+						!AC_ENABLED
+							? 'cursor-not-allowed border-transparent font-medium text-muted-foreground opacity-60'
+							: circuit.document.mode === 'ac'
+								? 'cursor-pointer border-border/80 bg-card font-semibold text-foreground shadow-2xs'
+								: 'cursor-pointer border-transparent font-medium text-muted-foreground hover:text-foreground'
 					)}
 				>
-					AC
+					<span>AC</span>
+					{#if !AC_ENABLED}
+						<span class="hidden sm:inline ml-1 text-[9px] font-engineering uppercase text-muted-foreground">
+							Soon
+						</span>
+					{/if}
 				</button>
 			</div>
 
@@ -441,7 +475,12 @@
 		<!-- Right: Dialog Launchers, Theme Toggle, Overflow Menu & Inspector Toggle -->
 		<div class="flex shrink-0 items-center gap-0.5 sm:gap-1">
 			<div class="hidden items-center gap-0.5 md:flex">
-				<Tooltip content="Browse curated DC & AC circuit presets" side="bottom">
+				<Tooltip
+					content={AC_ENABLED
+						? 'Browse curated DC & AC circuit presets'
+						: 'Browse curated DC circuit presets'}
+					side="bottom"
+				>
 					<Button
 						variant="ghost"
 						size="sm"
@@ -567,6 +606,27 @@
 			</Tooltip>
 		</div>
 	</header>
+
+	{#if acComingSoonNotice}
+		<div
+			role="status"
+			aria-live="polite"
+			class="flex shrink-0 items-center justify-between gap-2 border-b border-warning/35 bg-warning/10 px-3 py-1.5 text-xs text-foreground"
+		>
+			<div class="flex min-w-0 items-center gap-2">
+				<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true"></span>
+				<span class="leading-snug">{acComingSoonNotice}</span>
+			</div>
+			<button
+				type="button"
+				aria-label="Dismiss notice"
+				onclick={() => (acComingSoonNotice = null)}
+				class="relative inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-[4px] text-muted-foreground transition-colors duration-150 hover:bg-warning/15 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring after:absolute after:-inset-2 lg:after:hidden"
+			>
+				<X class="size-3.5" aria-hidden="true" />
+			</button>
+		</div>
+	{/if}
 
 	<!-- Mobile & Tablet AC Frequency Popover (< lg) -->
 	{#if freqPopoverOpen && circuit.document.mode === 'ac'}

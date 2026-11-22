@@ -23,6 +23,7 @@ import {
 	type UnknownProblemSpec
 } from '$lib/engine';
 import type { SourceMode } from '$lib/components/symbols';
+import { AC_ENABLED } from '$lib/env';
 import { settings } from './settings.svelte';
 
 export type EditorTool = 'select' | 'wire' | 'probe' | ComponentKind;
@@ -195,7 +196,7 @@ class CircuitStore {
 	private _selectedComponentId = $state<string | null>(null);
 	private _selectedWireId = $state<string | null>(null);
 	private _activeTool = $state<EditorTool>('select');
-	private _activeSourceMode = $state<SourceMode>(initialPreset.document.mode);
+	private _activeSourceMode = $state<SourceMode>(AC_ENABLED ? initialPreset.document.mode : 'dc');
 	private _placementRotation = $state<Rotation>(0);
 	private _theveninTarget = $state<TheveninTarget | undefined>(
 		initialPreset.theveninLoadId
@@ -270,6 +271,10 @@ class CircuitStore {
 		return this._activeSourceMode;
 	}
 	set activeSourceMode(mode: SourceMode) {
+		if (mode === 'ac' && !AC_ENABLED) {
+			this._activeSourceMode = 'dc';
+			return;
+		}
 		this._activeSourceMode = mode;
 	}
 
@@ -383,9 +388,10 @@ class CircuitStore {
 	}
 
 	setActiveTool(tool: EditorTool, sourceMode?: SourceMode): void {
+		if (!AC_ENABLED && sourceMode === 'ac') return;
 		this._activeTool = tool;
 		if (sourceMode) {
-			this._activeSourceMode = sourceMode;
+			this._activeSourceMode = AC_ENABLED ? sourceMode : 'dc';
 		}
 	}
 
@@ -412,7 +418,8 @@ class CircuitStore {
 	): CircuitComponent {
 		this.recordSnapshot();
 
-		const sourceMode = opts?.sourceMode ?? this._activeSourceMode;
+		const requestedSourceMode = opts?.sourceMode ?? this._activeSourceMode;
+		const sourceMode: SourceMode = AC_ENABLED ? requestedSourceMode : 'dc';
 		const generated = nextUniqueLabel(kind, this._document.components);
 		const label = opts?.label?.trim() || generated.label;
 
@@ -435,8 +442,8 @@ class CircuitStore {
 			rotation: opts?.rotation ?? this._placementRotation,
 			value,
 			numericValue: parsedNumeric ?? undefined,
-			phaseDeg: opts?.phaseDeg,
-			frequencyHz: opts?.frequencyHz,
+			phaseDeg: AC_ENABLED ? opts?.phaseDeg : undefined,
+			frequencyHz: AC_ENABLED ? opts?.frequencyHz : undefined,
 			unit: opts?.unit ?? DEFAULT_UNITS[kind],
 			terminalName:
 				kind === 'terminal' ? (opts?.terminalName ?? generated.terminalName ?? 'A') : undefined
@@ -611,6 +618,7 @@ class CircuitStore {
 	}
 
 	setMode(mode: AnalysisMode): void {
+		if (mode === 'ac' && !AC_ENABLED) return;
 		if (this._document.mode === mode) return;
 		this.recordSnapshot();
 		this._document = {
@@ -690,6 +698,7 @@ class CircuitStore {
 	loadPreset(presetId: string): boolean {
 		const preset = getPresetById(presetId);
 		if (!preset) return false;
+		if (!AC_ENABLED && preset.document.mode === 'ac') return false;
 		this.loadDocument(preset.document, preset.theveninLoadId);
 		this._activeMethod = preset.featuredMethod;
 		return true;

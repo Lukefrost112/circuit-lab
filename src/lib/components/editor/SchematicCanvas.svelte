@@ -28,6 +28,7 @@
 		type ComponentKind,
 		type GridPoint
 	} from '$lib/engine';
+	import { AC_ENABLED } from '$lib/env';
 	import { circuit, type EditorTool } from '$lib/stores/circuit.svelte';
 	import { settings } from '$lib/stores/settings.svelte';
 	import { cn } from '$lib/utils';
@@ -1225,7 +1226,7 @@
 		// Tool shortcuts matching PALETTE_ITEMS
 		const shortcutMap: Record<string, () => void> = {
 			v: () => circuit.setActiveTool('voltage_source', 'dc'),
-			a: () => circuit.setActiveTool('voltage_source', 'ac'),
+			...(AC_ENABLED ? { a: () => circuit.setActiveTool('voltage_source', 'ac') } : {}),
 			i: () => circuit.setActiveTool('current_source', 'dc'),
 			c: () => circuit.setActiveTool('capacitor'),
 			l: () => circuit.setActiveTool('inductor'),
@@ -1253,6 +1254,7 @@
 	}
 
 	function getSourceModeForComp(comp: CircuitComponent): 'dc' | 'ac' {
+		if (!AC_ENABLED) return 'dc';
 		if (circuit.document.mode === 'ac') return 'ac';
 		if (/[∠@j]/i.test(comp.value) || comp.phaseDeg !== undefined) return 'ac';
 		return 'dc';
