@@ -13,3 +13,4 @@ export { solveSuperposition } from './methods/superposition';
 export { solveSourceTransform } from './methods/source-transform';
 export { solveTheveninNorton, resolveTheveninTarget } from './methods/thevenin-norton';
 export * from './share';
+export * from './auto-wire';

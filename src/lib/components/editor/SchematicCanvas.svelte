@@ -1,6 +1,7 @@
 <script lang="ts">
 	import {
 		BookOpen,
+		Cable,
 		CornerDownRight,
 		Eraser,
 		FileCode2,
@@ -62,6 +63,8 @@
 		onComponentInspect?: (id: string) => void;
 		onOpenPalette?: () => void;
 		onMobileInspect?: (id?: string) => void;
+		onAutoWire?: () => void;
+		autoWireFeedback?: string | null;
 		class?: string;
 	}
 
@@ -72,8 +75,37 @@
 		onComponentInspect,
 		onOpenPalette,
 		onMobileInspect,
+		onAutoWire,
+		autoWireFeedback = null,
 		class: className
 	}: Props = $props();
+
+	let localAutoWireFeedback = $state<string | null>(null);
+	let localAutoWireTimer: ReturnType<typeof setTimeout> | undefined;
+	const effectiveAutoWireFeedback = $derived(autoWireFeedback ?? localAutoWireFeedback);
+
+	function triggerAutoWire(): void {
+		if (onAutoWire) {
+			onAutoWire();
+			return;
+		}
+		const res = circuit.autoWireCircuit();
+		if (res.addedWires > 0) {
+			localAutoWireFeedback = `Auto-wired (+${res.addedWires} ${res.addedWires === 1 ? 'wire' : 'wires'})`;
+		} else if (res.reason === 'already_connected') {
+			localAutoWireFeedback = 'All pins connected';
+		} else if (res.reason === 'too_few_components') {
+			localAutoWireFeedback = 'Place at least 2 components';
+		} else {
+			localAutoWireFeedback = 'No valid connections found';
+		}
+		if (localAutoWireTimer !== undefined) {
+			clearTimeout(localAutoWireTimer);
+		}
+		localAutoWireTimer = setTimeout(() => {
+			localAutoWireFeedback = null;
+		}, 2500);
+	}
 
 	let containerEl = $state<HTMLDivElement | undefined>(undefined);
 	let svgEl = $state<SVGSVGElement | undefined>(undefined);
@@ -238,10 +270,13 @@
 		}
 	});
 
-	// Cancel any pending rAF callback on unmount
+	// Cancel any pending rAF callback or feedback timer on unmount
 	$effect(() => {
 		return () => {
 			cancelPendingViewportUpdate();
+			if (localAutoWireTimer !== undefined) {
+				clearTimeout(localAutoWireTimer);
+			}
 		};
 	});
 
@@ -2588,10 +2623,21 @@
 				{/if}
 			</div>
 
-			<Separator orientation="vertical" class="hidden h-3.5 shrink-0 2xl:block" />
-			<span class="hidden truncate text-muted-foreground/80 2xl:inline">
-				{activeToolHint}
-			</span>
+			{#if effectiveAutoWireFeedback}
+				<Separator orientation="vertical" class="h-3.5 shrink-0" />
+				<span
+					role="status"
+					aria-live="polite"
+					class="truncate font-engineering text-foreground"
+				>
+					{effectiveAutoWireFeedback}
+				</span>
+			{:else}
+				<Separator orientation="vertical" class="hidden h-3.5 shrink-0 2xl:block" />
+				<span class="hidden truncate text-muted-foreground/80 2xl:inline">
+					{activeToolHint}
+				</span>
+			{/if}
 		</div>
 
 		<!-- Right: Flat Hairline Viewport & History Controls -->
@@ -2639,6 +2685,20 @@
 			</Tooltip>
 
 			<Separator orientation="vertical" class="mx-1 h-3.5" />
+
+			<Tooltip content="Auto-wire unconnected pins (algorithmic, no AI)" side="top">
+				<Button
+					variant="ghost"
+					size="sm"
+					class="h-6 gap-1 px-1.5 text-[11px] font-medium text-foreground/85 hover:bg-accent hover:text-foreground xl:px-2"
+					aria-label="Auto-wire unconnected pins"
+					disabled={circuit.document.components.length < 2}
+					onclick={triggerAutoWire}
+				>
+					<Cable class="size-3.5" aria-hidden="true" />
+					<span class="hidden xl:inline">Auto-Wire</span>
+				</Button>
+			</Tooltip>
 
 			<Tooltip content="Undo (Ctrl+Z)" side="top">
 				<Button

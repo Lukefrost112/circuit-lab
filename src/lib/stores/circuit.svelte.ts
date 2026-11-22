@@ -7,11 +7,13 @@
 import { PRESETS, getPresetById } from '$lib/data/presets';
 import {
 	areUnknownKindsCompatible,
+	autoWireDocument,
 	buildElectricalGraph,
 	getUnknownTerms,
 	parseEngineeringNumber,
 	solveCircuit,
 	type AnalysisMode,
+	type AutoWireResult,
 	type CircuitComponent,
 	type CircuitDocument,
 	type CircuitWire,
@@ -637,6 +639,24 @@ class CircuitStore {
 		if (this._selectedWireId === id) {
 			this._selectedWireId = null;
 		}
+	}
+
+	/**
+	 * Runs the deterministic algorithmic auto-wirer to connect open pins / islands
+	 * in a single undoable step without modifying existing wires.
+	 */
+	autoWireCircuit(): { addedWires: number; reason?: AutoWireResult['skippedReason'] } {
+		const result = autoWireDocument(this._document);
+		if (result.addedWires.length === 0) {
+			return { addedWires: 0, reason: result.skippedReason };
+		}
+		this.recordSnapshot();
+		this._document = {
+			...this._document,
+			wires: [...this._document.wires, ...result.addedWires]
+		};
+		this._selectedWireId = null;
+		return { addedWires: result.addedWires.length };
 	}
 
 	setMode(mode: AnalysisMode): void {

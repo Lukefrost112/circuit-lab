@@ -4,6 +4,7 @@
 	import {
 		BarChart3,
 		BookOpen,
+		Cable,
 		Check,
 		ChevronDown,
 		CircuitBoard,
@@ -73,9 +74,11 @@
 	let settingsOpen = $state(false);
 	let linkCopied = $state(false);
 	let acComingSoonNotice = $state<string | null>(null);
+	let autoWireFeedback = $state<string | null>(null);
 
 	let linkCopiedTimer: ReturnType<typeof setTimeout> | undefined;
 	let mobileMenuCloseTimer: ReturnType<typeof setTimeout> | undefined;
+	let autoWireFeedbackTimer: ReturnType<typeof setTimeout> | undefined;
 	let lastWrittenHash = '';
 
 	let freqDraft = $state(String(circuit.document.frequencyHz));
@@ -179,6 +182,28 @@
 		rightRailOpen = true;
 	}
 
+	function handleAutoWire() {
+		const res = circuit.autoWireCircuit();
+		if (res.addedWires > 0) {
+			autoWireFeedback = `Auto-wired (+${res.addedWires} ${res.addedWires === 1 ? 'wire' : 'wires'})`;
+		} else if (res.reason === 'already_connected') {
+			autoWireFeedback = 'All pins connected';
+		} else if (res.reason === 'too_few_components') {
+			autoWireFeedback = 'Place at least 2 components';
+		} else {
+			autoWireFeedback = 'No valid connections found';
+		}
+		if (autoWireFeedbackTimer !== undefined) {
+			clearTimeout(autoWireFeedbackTimer);
+		}
+		autoWireFeedbackTimer = setTimeout(() => {
+			autoWireFeedback = null;
+		}, 2500);
+		if (mobileTab !== 'canvas') {
+			mobileTab = 'canvas';
+		}
+	}
+
 	async function loadFromHash(hash: string) {
 		if (!hash || !hash.includes('c=')) return;
 		const payload = await decodeCircuitFromHash(hash);
@@ -267,6 +292,9 @@
 			}
 			if (mobileMenuCloseTimer !== undefined) {
 				clearTimeout(mobileMenuCloseTimer);
+			}
+			if (autoWireFeedbackTimer !== undefined) {
+				clearTimeout(autoWireFeedbackTimer);
 			}
 		};
 	});
@@ -628,6 +656,32 @@
 		</div>
 	{/if}
 
+	{#if autoWireFeedback}
+		<div
+			role="status"
+			aria-live="polite"
+			class="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-3 py-1.5 text-xs text-foreground lg:hidden"
+		>
+			<div class="flex min-w-0 items-center gap-2">
+				<Cable class="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+				<span class="truncate font-engineering leading-snug">{autoWireFeedback}</span>
+			</div>
+			<button
+				type="button"
+				aria-label="Dismiss auto-wire status"
+				onclick={() => {
+					autoWireFeedback = null;
+					if (autoWireFeedbackTimer !== undefined) {
+						clearTimeout(autoWireFeedbackTimer);
+					}
+				}}
+				class="relative inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-[4px] text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring after:absolute after:-inset-2"
+			>
+				<X class="size-3.5" aria-hidden="true" />
+			</button>
+		</div>
+	{/if}
+
 	<!-- Mobile & Tablet AC Frequency Popover (< lg) -->
 	{#if freqPopoverOpen && circuit.document.mode === 'ac'}
 		<button
@@ -799,6 +853,19 @@
 			<button
 				type="button"
 				role="menuitem"
+				disabled={circuit.document.components.length < 2}
+				onclick={() => {
+					mobileMenuOpen = false;
+					handleAutoWire();
+				}}
+				class="flex min-h-11 w-full cursor-pointer items-center gap-2.5 rounded-[4px] px-3 py-2 text-left text-sm font-medium text-foreground transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
+			>
+				<Cable class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+				<span>Auto-Wire Circuit</span>
+			</button>
+			<button
+				type="button"
+				role="menuitem"
 				disabled={circuit.document.components.length === 0 && circuit.document.wires.length === 0}
 				onclick={() => {
 					circuit.clearCircuit();
@@ -837,6 +904,8 @@
 					if (id) circuit.selectComponent(id);
 					mobileTab = 'inspector';
 				}}
+				onAutoWire={handleAutoWire}
+				{autoWireFeedback}
 			/>
 		</main>
 
@@ -893,7 +962,7 @@
 				aria-label="Element property inspector"
 				class="flex min-h-0 flex-1 flex-col overflow-y-auto bg-card p-0 lg:hidden"
 			>
-				<PropertyInspector />
+				<PropertyInspector onAutoWire={handleAutoWire} />
 			</section>
 		{/if}
 
@@ -963,7 +1032,7 @@
 						</TabsContent>
 
 						<TabsContent value="inspector">
-							<PropertyInspector />
+							<PropertyInspector onAutoWire={handleAutoWire} />
 						</TabsContent>
 					</div>
 				</Tabs>

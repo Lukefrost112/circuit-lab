@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Eraser, RotateCw, Target, Trash2, X } from 'lucide-svelte';
+	import { Cable, Eraser, RotateCw, Target, Trash2, X } from 'lucide-svelte';
 	import { CircuitSymbol } from '$lib/components/symbols';
 	import { Button, Input, Label, Select, Switch } from '$lib/components/ui';
 	import {
@@ -16,6 +16,12 @@
 	import { circuit } from '$lib/stores/circuit.svelte';
 	import { settings } from '$lib/stores/settings.svelte';
 	import EngineeringInput from './EngineeringInput.svelte';
+
+	interface Props {
+		onAutoWire?: () => void;
+	}
+
+	let { onAutoWire }: Props = $props();
 
 	const KIND_LABELS: Record<ComponentKind, string> = {
 		resistor: 'Resistor',
@@ -959,8 +965,18 @@
 		</div>
 
 		{#if circuit.document.components.length > 0 || circuit.document.wires.length > 0}
-			<!-- Mobile Workspace Clear Action (< lg) -->
-			<div class="px-4 py-3.5 lg:hidden">
+			<!-- Mobile Workspace Actions (< lg) -->
+			<div class="flex flex-col gap-2 px-4 py-3.5 lg:hidden">
+				<Button
+					variant="outline"
+					size="sm"
+					class="min-h-11 w-full"
+					disabled={circuit.document.components.length < 2}
+					onclick={() => (onAutoWire ? onAutoWire() : circuit.autoWireCircuit())}
+				>
+					<Cable class="size-3.5" aria-hidden="true" />
+					<span>Auto-Wire Circuit</span>
+				</Button>
 				<Button
 					variant="outline"
 					size="sm"

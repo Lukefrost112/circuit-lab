@@ -297,4 +297,33 @@ describe('circuit reactive store', () => {
 		circuit.deleteComponent('V2');
 		expect(circuit.document.unknownProblem).toBeUndefined();
 	});
+
+	it('auto-wires unlinked components into a valid MNA solution and restores unwired state in a single undo step', () => {
+		circuit.clearCircuit();
+		circuit.addComponent('voltage_source', 4, 8, { rotation: 90, value: '12' });
+		circuit.addComponent('resistor', 8, 4, { rotation: 0, value: '2k' });
+		circuit.addComponent('resistor', 12, 8, { rotation: 90, value: '4k' });
+		circuit.addComponent('ground', 4, 10, { rotation: 0 });
+
+		expect(circuit.document.wires).toHaveLength(0);
+		expect(circuit.solution.mna.valid).toBe(false);
+
+		const res = circuit.autoWireCircuit();
+		expect(res.addedWires).toBeGreaterThanOrEqual(3);
+		expect(res.reason).toBeUndefined();
+		expect(circuit.document.wires).toHaveLength(res.addedWires);
+		expect(circuit.solution.mna.valid).toBe(true);
+		expect(circuit.solution.mna.powerBalance.balanced).toBe(true);
+		expect(circuit.solution.mna.branches['R2'].voltage.re).toBeCloseTo(8, 6);
+
+		// Calling autoWireCircuit again is a no-op and does NOT push a redundant undo snapshot
+		const second = circuit.autoWireCircuit();
+		expect(second.addedWires).toBe(0);
+		expect(second.reason).toBe('already_connected');
+
+		// Single undo restores the unwired state cleanly
+		expect(circuit.undo()).toBe(true);
+		expect(circuit.document.wires).toHaveLength(0);
+		expect(circuit.solution.mna.valid).toBe(false);
+	});
 });
