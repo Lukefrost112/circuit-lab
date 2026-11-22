@@ -681,14 +681,14 @@
 							aria-label={selectedComp.kind === 'inductor'
 								? 'Inductor value specification'
 								: 'Capacitor value specification'}
-							class="grid min-h-11 grid-cols-2 gap-0.5 rounded-[4px] border border-border bg-surface-rail p-0.5 lg:h-8 lg:min-h-0"
+							class="grid h-auto min-h-11 grid-cols-2 gap-0.5 rounded-[4px] border border-border bg-surface-rail p-0.5 lg:h-8 lg:min-h-0"
 						>
 							<button
 								type="button"
 								role="radio"
 								aria-checked={!isImpedanceMode}
 								onclick={() => handlePassiveModeChange('physical')}
-								class={`min-h-10 cursor-pointer rounded-[3px] border px-2 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:h-full lg:min-h-0 lg:text-[11px] ${
+								class={`min-h-11 cursor-pointer rounded-[3px] border px-2 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:h-full lg:min-h-0 lg:text-[11px] ${
 									!isImpedanceMode
 										? 'border-border bg-card text-foreground'
 										: 'border-transparent text-muted-foreground hover:text-foreground'
@@ -701,7 +701,7 @@
 								role="radio"
 								aria-checked={isImpedanceMode}
 								onclick={() => handlePassiveModeChange('impedance')}
-								class={`min-h-10 cursor-pointer rounded-[3px] border px-2 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:h-full lg:min-h-0 lg:text-[11px] ${
+								class={`min-h-11 cursor-pointer rounded-[3px] border px-2 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:h-full lg:min-h-0 lg:text-[11px] ${
 									isImpedanceMode
 										? 'border-border bg-card text-foreground'
 										: 'border-transparent text-muted-foreground hover:text-foreground'
