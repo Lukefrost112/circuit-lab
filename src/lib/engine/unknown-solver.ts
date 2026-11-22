@@ -199,7 +199,7 @@ export function parseAlgebraicUnknownValue(
 	if (typeof raw !== 'string') return null;
 	const trimmed = raw.trim();
 	if (!trimmed || trimmed === '?' || trimmed.toLowerCase() === 'unknown') return null;
-	if (/[∠@]/.test(trimmed)) return null;
+	if (/[∠@<]/.test(trimmed)) return null;
 
 	const trimmedKnown = knownSymbol?.trim();
 	if (trimmedKnown) {

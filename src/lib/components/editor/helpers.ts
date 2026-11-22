@@ -479,7 +479,7 @@ export function formatComponentDisplayValue(
 		return formatEngineeringWithSystem(parsed.re, unit, 3, unitSystem);
 	}
 
-	const hasExplicitAngleOrJ = /[∠@j]/i.test(raw);
+	const hasExplicitAngleOrJ = /[∠@<j]/i.test(raw);
 	const effective =
 		!hasExplicitAngleOrJ && comp.phaseDeg !== undefined && Number.isFinite(comp.phaseDeg)
 			? Complex.fromPolar(parsed.re, comp.phaseDeg)

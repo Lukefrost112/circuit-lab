@@ -452,6 +452,7 @@
 				<div class="relative hidden items-center lg:flex">
 					<Input
 						type="number"
+						inputmode="decimal"
 						min="0.001"
 						step="any"
 						tabular

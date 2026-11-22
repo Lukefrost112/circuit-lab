@@ -1,4 +1,6 @@
 export { default as EngineeringInput } from './EngineeringInput.svelte';
+export { default as ImpedanceInput } from './ImpedanceInput.svelte';
+export { default as PhasorInput } from './PhasorInput.svelte';
 export { default as SchematicCanvas } from './SchematicCanvas.svelte';
 export { default as ComponentPalette } from './ComponentPalette.svelte';
 export { default as PropertyInspector } from './PropertyInspector.svelte';

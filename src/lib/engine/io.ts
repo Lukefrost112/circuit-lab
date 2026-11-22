@@ -976,7 +976,7 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 			isReactiveKind &&
 			(explicitValueMode === 'impedance' ||
 				rawUnit === 'Ω' ||
-				(!isMarkedUnknown && /[j∠@]/i.test(rawValTrimmed)));
+				(!isMarkedUnknown && /[j∠@<]/i.test(rawValTrimmed)));
 		const resolvedValueMode: PassiveValueMode | undefined = inferredImpedanceMode
 			? 'impedance'
 			: explicitValueMode;

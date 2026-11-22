@@ -1420,7 +1420,7 @@
 	function getSourceModeForComp(comp: CircuitComponent): 'dc' | 'ac' {
 		if (!AC_ENABLED) return 'dc';
 		if (circuit.document.mode === 'ac') return 'ac';
-		if (/[∠@j]/i.test(comp.value) || comp.phaseDeg !== undefined) return 'ac';
+		if (/[∠@<j]/i.test(comp.value) || comp.phaseDeg !== undefined) return 'ac';
 		return 'dc';
 	}
 

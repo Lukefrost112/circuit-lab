@@ -9,7 +9,6 @@
 		getDefaultUnknownSymbol,
 		getUnknownTerms,
 		isImpedanceSpecified,
-		parseComplexValue,
 		parseDirectImpedance,
 		parseEngineeringNumber,
 		type ComponentKind,
@@ -20,7 +19,9 @@
 	import { circuit } from '$lib/stores/circuit.svelte';
 	import { settings } from '$lib/stores/settings.svelte';
 	import EngineeringInput from './EngineeringInput.svelte';
-	import { computeWireCrossings, formatImpedanceDisplay } from './helpers';
+	import ImpedanceInput from './ImpedanceInput.svelte';
+	import PhasorInput from './PhasorInput.svelte';
+	import { computeWireCrossings } from './helpers';
 
 	interface Props {
 		onAutoWire?: () => void;
@@ -51,10 +52,6 @@
 
 	let labelDraft = $state('');
 	let terminalNameDraft = $state('');
-	let impedanceDraft = $state('');
-	let impedanceFocused = $state(false);
-	let impedanceInitialOnFocus = $state('');
-	let phaseDraft = $state('0');
 	let sourceFreqDraft = $state('');
 	let globalFreqDraft = $state(String(circuit.document.frequencyHz));
 	let unknownSymbolDraft = $state('');
@@ -65,20 +62,6 @@
 		if (selectedComp) {
 			labelDraft = selectedComp.label;
 			terminalNameDraft = selectedComp.terminalName ?? '';
-			if (!impedanceFocused) {
-				impedanceDraft = selectedComp.value;
-			}
-
-			const parsed = parseComplexValue(selectedComp.value);
-			if (selectedComp.phaseDeg !== undefined && Number.isFinite(selectedComp.phaseDeg)) {
-				phaseDraft = String(selectedComp.phaseDeg);
-			} else if (parsed && !parsed.isZero()) {
-				const deg = Math.abs(parsed.argDeg()) < 1e-9 ? 0 : Number(parsed.argDeg().toFixed(4));
-				phaseDraft = String(deg);
-			} else {
-				phaseDraft = '0';
-			}
-
 			sourceFreqDraft =
 				selectedComp.frequencyHz !== undefined ? String(selectedComp.frequencyHz) : '';
 		}
@@ -108,34 +91,6 @@
 			selectedComp.kind !== 'terminal'
 	);
 	const isAcMode = $derived(AC_ENABLED && circuit.document.mode === 'ac');
-	const impedanceEvaluation = $derived.by(() => {
-		if (!selectedComp || !isReactive || !isImpedanceMode) {
-			return { valid: true as const, formatted: '' };
-		}
-		const trimmed = impedanceDraft.trim();
-		if (!trimmed) {
-			return { valid: false as const, error: 'Impedance value is required' };
-		}
-		const parsed = parseDirectImpedance({
-			kind: selectedComp.kind,
-			value: trimmed,
-			unit: 'Ω',
-			valueMode: 'impedance'
-		});
-		if (!parsed) {
-			return {
-				valid: false as const,
-				error:
-					selectedComp.kind === 'inductor'
-						? 'Enter non-zero impedance (e.g. j1, j50, 2+j1, or 50) with R ≥ 0'
-						: 'Enter non-zero impedance (e.g. -j1, -j20, 1-j2, or 20) with R ≥ 0'
-			};
-		}
-		return {
-			valid: true as const,
-			formatted: formatImpedanceDisplay(parsed, settings.unitSystem, settings.precision)
-		};
-	});
 	const isTheveninTarget = $derived(
 		selectedComp !== null &&
 			circuit.theveninTarget?.kind === 'component' &&
@@ -463,7 +418,6 @@
 					converted = '-j1';
 				}
 			}
-			impedanceDraft = converted;
 			circuit.updateComponent(selectedComp.id, {
 				valueMode: 'impedance',
 				unit: 'Ω',
@@ -499,77 +453,6 @@
 				unit: 'F',
 				value: converted
 			});
-		}
-	}
-
-	function handleImpedanceFocus() {
-		if (!selectedComp) return;
-		impedanceFocused = true;
-		impedanceInitialOnFocus = selectedComp.value;
-	}
-
-	function commitImpedanceDraft() {
-		if (!selectedComp || !isReactive) return;
-		const trimmed = impedanceDraft.trim();
-		if (impedanceEvaluation.valid) {
-			if (
-				trimmed !== impedanceInitialOnFocus.trim() ||
-				selectedComp.valueMode !== 'impedance' ||
-				selectedComp.unit !== 'Ω'
-			) {
-				circuit.updateComponent(selectedComp.id, {
-					valueMode: 'impedance',
-					unit: 'Ω',
-					value: trimmed
-				});
-				impedanceInitialOnFocus = trimmed;
-			}
-		} else {
-			impedanceDraft = selectedComp.value;
-		}
-	}
-
-	function handleImpedanceBlur() {
-		impedanceFocused = false;
-		commitImpedanceDraft();
-	}
-
-	function handleImpedanceKeyDown(e: KeyboardEvent) {
-		if (!selectedComp) return;
-		if (e.key === 'Enter') {
-			e.preventDefault();
-			if (impedanceEvaluation.valid) {
-				commitImpedanceDraft();
-			}
-			(e.currentTarget as HTMLInputElement).blur();
-		} else if (e.key === 'Escape') {
-			e.preventDefault();
-			impedanceDraft = selectedComp.value;
-			(e.currentTarget as HTMLInputElement).blur();
-		}
-	}
-
-	function commitPhase() {
-		if (!AC_ENABLED || !selectedComp || !isSource) return;
-		const deg = Number(phaseDraft);
-		if (!Number.isFinite(deg)) {
-			phaseDraft = String(selectedComp.phaseDeg ?? 0);
-			return;
-		}
-
-		const raw = selectedComp.value.trim();
-		const hasExplicitAngleOrJ = /[∠@j]/i.test(raw);
-		const parsed = parseComplexValue(raw);
-
-		if (hasExplicitAngleOrJ && parsed) {
-			const mag = parsed.abs();
-			const magStr = formatEngineering(mag, '', 6).replace(/\s+/g, '');
-			circuit.updateComponent(selectedComp.id, {
-				phaseDeg: deg,
-				value: `${magStr}∠${deg}°`
-			});
-		} else {
-			circuit.updateComponent(selectedComp.id, { phaseDeg: deg });
 		}
 	}
 
@@ -622,7 +505,7 @@
 					<CircuitSymbol
 						kind={selectedComp.kind}
 						variant="icon"
-						sourceMode={AC_ENABLED && (isAcMode || /[∠@j]/i.test(selectedComp.value)) ? 'ac' : 'dc'}
+						sourceMode={AC_ENABLED && (isAcMode || /[∠@<j]/i.test(selectedComp.value)) ? 'ac' : 'dc'}
 						terminalLabel={selectedComp.terminalName || selectedComp.label}
 						size={20}
 					/>
@@ -714,60 +597,40 @@
 				{/if}
 
 				{#if isReactive && isImpedanceMode}
-					<div class="flex flex-col gap-1.5">
-						<Label for="comp-impedance">Impedance (Z)</Label>
-						<div class="flex flex-col gap-1">
-							<div class="relative flex items-center">
-								<input
-									id="comp-impedance"
-									type="text"
-									bind:value={impedanceDraft}
-									placeholder={selectedComp.kind === 'inductor'
-										? 'e.g. j1, j50, 2+j1'
-										: 'e.g. -j1, -j20, 1-j2'}
-									aria-invalid={!impedanceEvaluation.valid ? 'true' : undefined}
-									onfocus={handleImpedanceFocus}
-									onblur={handleImpedanceBlur}
-									onkeydown={handleImpedanceKeyDown}
-									class={`font-engineering flex h-11 min-h-11 w-full rounded-[4px] border bg-card px-2.5 py-1 pr-9 text-base text-foreground transition-colors duration-150 placeholder:text-muted-foreground/80 hover:border-muted-foreground/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-offset-background lg:h-8 lg:min-h-0 lg:pr-8 lg:text-xs ${
-										!impedanceEvaluation.valid
-											? 'border-destructive focus-visible:ring-destructive'
-											: 'border-input focus-visible:ring-ring'
-									}`}
-								/>
-								<span
-									class="pointer-events-none absolute right-3 font-engineering text-xs text-muted-foreground select-none lg:right-2.5 lg:text-[11px]"
-								>
-									Ω
-								</span>
-							</div>
-							{#if !impedanceEvaluation.valid && impedanceEvaluation.error}
-								<p class="text-[11px] leading-tight text-destructive" role="alert">
-									{impedanceEvaluation.error}
-								</p>
-							{:else if !isAcMode}
-								<p class="text-[11px] leading-tight text-muted-foreground">
-									DC steady state: {selectedComp.kind === 'capacitor'
-										? 'open circuit (I = 0 A)'
-										: 'short circuit (V = 0 V)'}
-								</p>
-							{:else if impedanceEvaluation.formatted}
-								<p class="font-engineering text-[11px] leading-tight text-muted-foreground">
-									= {impedanceEvaluation.formatted}
-								</p>
-							{/if}
-						</div>
-					</div>
+					<ImpedanceInput
+						kind={selectedComp.kind === 'inductor' ? 'inductor' : 'capacitor'}
+						value={selectedComp.value}
+						{isAcMode}
+						disabled={isUnknownComp}
+						idPrefix="comp-impedance"
+						onCommit={(val) =>
+							circuit.updateComponent(selectedComp.id, {
+								valueMode: 'impedance',
+								unit: 'Ω',
+								value: val
+							})}
+					/>
+				{:else if isSource && isAcMode}
+					<PhasorInput
+						idPrefix="comp-phasor"
+						label="AC Phasor"
+						value={selectedComp.value}
+						phaseDeg={selectedComp.phaseDeg}
+						unit={selectedComp.unit ?? UNIT_BY_KIND[selectedComp.kind] ?? ''}
+						disabled={isUnknownComp}
+						onCommit={({ value, phaseDeg }) =>
+							circuit.updateComponent(selectedComp.id, { value, phaseDeg })}
+					/>
 				{:else}
 					<div class="flex flex-col gap-1.5">
 						<Label for="comp-value">
-							{isSource ? (isAcMode ? 'Magnitude / Phasor' : 'DC Value') : 'Value'}
+							{isSource ? 'DC Value' : 'Value'}
 						</Label>
 						<EngineeringInput
 							id="comp-value"
 							value={selectedComp.value}
 							unit={selectedComp.unit ?? UNIT_BY_KIND[selectedComp.kind] ?? ''}
-							allowComplex={isSource && isAcMode}
+							allowComplex={false}
 							positiveOnly={isPassive}
 							allowZero={isSource}
 							onCommit={(val) => circuit.updateComponent(selectedComp.id, { value: val })}
@@ -777,41 +640,26 @@
 			{/if}
 
 			{#if isSource && isAcMode}
-				<div class="grid grid-cols-1 gap-2.5 min-[360px]:grid-cols-2">
-					<div class="flex flex-col gap-1.5">
-						<Label for="comp-phase">AC Phase (°)</Label>
-						<Input
-							id="comp-phase"
-							type="number"
-							step="any"
-							tabular
-							bind:value={phaseDraft}
-							onblur={commitPhase}
-							onkeydown={(e) => {
-								if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
-							}}
-						/>
-					</div>
-					<div class="flex flex-col gap-1.5">
-						<Label for="comp-freq">Source Freq (Hz)</Label>
-						<Input
-							id="comp-freq"
-							type="number"
-							min="0.001"
-							step="any"
-							tabular
-							placeholder={String(circuit.document.frequencyHz)}
-							bind:value={sourceFreqDraft}
-							onblur={commitSourceFrequency}
-							onkeydown={(e) => {
-								if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
-							}}
-						/>
-					</div>
+				<div class="flex flex-col gap-1.5">
+					<Label for="comp-freq">Source Freq (Hz)</Label>
+					<Input
+						id="comp-freq"
+						type="number"
+						inputmode="decimal"
+						min="0.001"
+						step="any"
+						tabular
+						placeholder={String(circuit.document.frequencyHz)}
+						bind:value={sourceFreqDraft}
+						onblur={commitSourceFrequency}
+						onkeydown={(e) => {
+							if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
+						}}
+					/>
+					<p class="text-[11px] leading-snug text-muted-foreground">
+						Optional per-source frequency enables multi-frequency AC Superposition.
+					</p>
 				</div>
-				<p class="text-[11px] leading-snug text-muted-foreground">
-					Optional per-source frequency enables multi-frequency AC Superposition.
-				</p>
 			{/if}
 		</div>
 
@@ -878,6 +726,7 @@
 								<Input
 									id="unknown-multiplier"
 									type="number"
+									inputmode="decimal"
 									step="any"
 									min={isPassive ? '0.000001' : undefined}
 									tabular
@@ -920,6 +769,7 @@
 											<div class="flex shrink-0 items-center gap-1.5">
 												<input
 													type="number"
+													inputmode="decimal"
 													step="any"
 													min={termComp.kind === 'resistor' ||
 													termComp.kind === 'capacitor' ||
@@ -1003,19 +853,28 @@
 							/>
 						</div>
 
-						<div class="flex flex-col gap-1.5">
-							<Label for="unknown-constraint-value">Target Value</Label>
-							<EngineeringInput
-								id="unknown-constraint-value"
+						{#if isAcMode && activeUnknownProblem.constraint.kind !== 'branch_power'}
+							<PhasorInput
+								idPrefix="unknown-target-phasor"
+								label="Target Value"
 								value={activeUnknownProblem.constraint.value}
 								unit={constraintUnit}
-								allowComplex={isAcMode &&
-									activeUnknownProblem.constraint.kind !== 'branch_power'}
-								positiveOnly={false}
-								allowZero={true}
-								onCommit={handleConstraintValueCommit}
+								onCommit={({ value }) => handleConstraintValueCommit(value)}
 							/>
-						</div>
+						{:else}
+							<div class="flex flex-col gap-1.5">
+								<Label for="unknown-constraint-value">Target Value</Label>
+								<EngineeringInput
+									id="unknown-constraint-value"
+									value={activeUnknownProblem.constraint.value}
+									unit={constraintUnit}
+									allowComplex={false}
+									positiveOnly={false}
+									allowZero={true}
+									onCommit={handleConstraintValueCommit}
+								/>
+							</div>
+						{/if}
 					</div>
 				{/if}
 			</div>
@@ -1170,6 +1029,7 @@
 					<Input
 						id="inspector-ac-freq"
 						type="number"
+						inputmode="decimal"
 						min="0.001"
 						step="any"
 						tabular

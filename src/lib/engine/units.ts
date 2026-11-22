@@ -208,7 +208,7 @@ function unwrapOuterParens(raw: string): string {
 /**
  * Parses a real or complex engineering value.
  * Supports:
- * - Polar: "50∠30°", "50@-30", "10k∠-45 deg", "100∠-90° Ω"
+ * - Polar: "50∠30°", "50@-30", "120<30", "10k∠-45 deg", "100<-90 Ω"
  * - Rectangular: "30+j40", "30-40j", "j100", "-j50", "j1 Ω", "-j1 Ω", "2 + j 1", "1-j", "j", "-j"
  * - Pure real engineering numbers: "10k", "470 Ω"
  */
@@ -222,7 +222,7 @@ export function parseComplexValue(input: string | number): Complex | null {
 	if (!trimmed) return null;
 
 	// Strip trailing common electrical units when attached after polar/complex forms like "50∠30° V"
-	const polarMatch = trimmed.match(/^(.+?)\s*(?:∠|@)\s*(.+?)(?:°|deg)?(?:\s*(?:Ω|ohms?|va|var|[vaw]))?$/i);
+	const polarMatch = trimmed.match(/^(.+?)\s*(?:∠|@|<)\s*(.+?)(?:°|deg)?(?:\s*(?:Ω|ohms?|va|var|[vaw]))?$/i);
 	if (polarMatch) {
 		const mag = parseEngineeringNumber(polarMatch[1]);
 		// Angle should be a plain number (possibly with ° or deg stripped)

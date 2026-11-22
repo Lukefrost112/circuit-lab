@@ -168,7 +168,7 @@ function inferMode(netlist: LayoutNetlistDocument): AnalysisMode {
 		if (el.sourceMode === 'ac' || el.phaseDeg !== undefined || el.valueMode === 'impedance') {
 			return 'ac';
 		}
-		if (typeof el.value === 'string' && /[∠@j]/i.test(el.value)) return 'ac';
+		if (typeof el.value === 'string' && /[∠@<j]/i.test(el.value)) return 'ac';
 	}
 	return 'dc';
 }

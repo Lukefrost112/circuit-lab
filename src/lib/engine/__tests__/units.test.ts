@@ -73,6 +73,37 @@ describe('units', () => {
 		expect(parseComplexValue('invalid')).toBeNull();
 	});
 
+	it('parses ASCII < polar notation for phasors and impedances', () => {
+		const a1 = parseComplexValue('120<30')!;
+		expect(a1).not.toBeNull();
+		expect(a1.re).toBeCloseTo(120 * Math.cos(Math.PI / 6), 10);
+		expect(a1.im).toBeCloseTo(60, 10);
+
+		const a2 = parseComplexValue('50 < -45')!;
+		expect(a2).not.toBeNull();
+		expect(a2.re).toBeCloseTo(50 * Math.cos(-Math.PI / 4), 10);
+		expect(a2.im).toBeCloseTo(50 * Math.sin(-Math.PI / 4), 10);
+
+		const a3 = parseComplexValue('10<0')!;
+		expect(a3).not.toBeNull();
+		expect(a3.re).toBeCloseTo(10, 12);
+		expect(a3.im).toBeCloseTo(0, 12);
+
+		const a4 = parseComplexValue('100<-90 Ω')!;
+		expect(a4).not.toBeNull();
+		expect(a4.re).toBeCloseTo(0, 10);
+		expect(a4.im).toBeCloseTo(-100, 10);
+
+		const a5 = parseComplexValue('10k<45')!;
+		expect(a5).not.toBeNull();
+		expect(a5.re).toBeCloseTo(10000 * Math.cos(Math.PI / 4), 8);
+		expect(a5.im).toBeCloseTo(10000 * Math.sin(Math.PI / 4), 8);
+
+		expect(parseComplexValue('<30')).toBeNull();
+		expect(parseComplexValue('120<')).toBeNull();
+		expect(parseComplexValue('120<abc')).toBeNull();
+	});
+
 	it('parses all textbook AC impedance strings with optional Ohm suffixes', () => {
 		const expectComplex = (raw: string, re: number, im: number) => {
 			const c = parseComplexValue(raw);

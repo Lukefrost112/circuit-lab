@@ -58,7 +58,7 @@
 			if (!parsed || !parsed.isFinite()) {
 				return {
 					valid: false,
-					error: 'Enter a scalar or phasor (e.g. 120∠30°, 50@-45, 30+j40)'
+					error: 'Enter a number or phasor (e.g. 120<30, 50@-45, 30+j40)'
 				};
 			}
 
@@ -160,6 +160,10 @@
 	<div class="relative flex items-center">
 		<input
 			type="text"
+			autocomplete="off"
+			autocapitalize="off"
+			autocorrect="off"
+			spellcheck={false}
 			bind:value={draft}
 			{disabled}
 			aria-invalid={!evaluation.valid ? 'true' : undefined}

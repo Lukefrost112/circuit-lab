@@ -382,7 +382,7 @@ export function parseSourceValue(comp: CircuitComponent, mode: AnalysisMode): Co
 	}
 
 	// AC mode: apply comp.phaseDeg if raw value didn't already carry angle/imaginary part
-	const hasExplicitAngleOrJ = /[∠@j]/i.test(raw);
+	const hasExplicitAngleOrJ = /[∠@<j]/i.test(raw);
 	if (!hasExplicitAngleOrJ && comp.phaseDeg !== undefined && Number.isFinite(comp.phaseDeg)) {
 		return Complex.fromPolar(parsed.re, comp.phaseDeg);
 	}
@@ -425,7 +425,7 @@ export function isImpedanceSpecified(
 	return (
 		comp.valueMode === 'impedance' ||
 		comp.unit === 'Ω' ||
-		/[j∠@]/i.test(comp.value ?? '')
+		/[j∠@<]/i.test(comp.value ?? '')
 	);
 }
 

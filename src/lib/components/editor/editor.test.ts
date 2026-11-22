@@ -8,7 +8,9 @@ import {
 	AC_FREQUENCY_PRESETS,
 	ComponentPalette,
 	EngineeringInput,
+	ImpedanceInput,
 	MOUSE_DRAG_THRESHOLD_PX,
+	PhasorInput,
 	PropertyInspector,
 	SchematicCanvas,
 	TOUCH_DRAG_THRESHOLD_PX,
@@ -716,5 +718,127 @@ describe('editor Svelte components SSR rendering', () => {
 		const connectedInspector = render(PropertyInspector);
 		expect(connectedInspector.body).toContain('Connected (Junction)');
 		expect(connectedInspector.body).toContain('Disconnect (Bridge)');
+	});
+
+	it('renders PhasorInput in Polar and a+jb modes without ∠ or ° inside input values', () => {
+		const polarOut = render(PhasorInput, {
+			props: {
+				value: '120∠30°',
+				unit: 'V',
+				label: 'AC Phasor',
+				idPrefix: 'test-phasor',
+				onCommit: () => {}
+			}
+		});
+		expect(polarOut.body).toContain('id="test-phasor-mag"');
+		expect(polarOut.body).toContain('value="120"');
+		expect(polarOut.body).toContain('id="test-phasor-phase"');
+		expect(polarOut.body).toContain('value="30"');
+		expect(polarOut.body).toContain('inputmode="decimal"');
+		expect(polarOut.body).toContain('= 120∠30° V (104 + j60 V)');
+		// Magnitude/Phase inputs must never embed Unicode ∠ or ° inside their value attributes
+		expect(polarOut.body).not.toContain('value="120∠30°"');
+
+		// Rectangular incoming value auto-initializes to a + jb mode
+		const rectOut = render(PhasorInput, {
+			props: {
+				value: '30+j40',
+				unit: 'V',
+				label: 'AC Phasor',
+				idPrefix: 'rect-phasor',
+				onCommit: () => {}
+			}
+		});
+		expect(rectOut.body).toContain('id="rect-phasor-re"');
+		expect(rectOut.body).toContain('value="30"');
+		expect(rectOut.body).toContain('id="rect-phasor-im"');
+		expect(rectOut.body).toContain('value="40"');
+		expect(rectOut.body).toContain('+ j');
+		expect(rectOut.body).toContain('= 30 + j40 V (50∠53.1° V)');
+
+		// Micro values use plain ASCII 'u' inside editable input fields
+		const microOut = render(PhasorInput, {
+			props: {
+				value: '4.7u∠-45°',
+				unit: 'A',
+				idPrefix: 'micro-phasor',
+				onCommit: () => {}
+			}
+		});
+		expect(microOut.body).toContain('value="4.7u"');
+		expect(microOut.body).toContain('value="-45"');
+	});
+
+	it('renders PropertyInspector with PhasorInput for AC sources/constraints and Pure jX / R+jX for reactive impedances', () => {
+		const acPreset = PRESETS.find((p) => p.document.mode === 'ac');
+		expect(acPreset).toBeDefined();
+		circuit.loadDocument(acPreset!.document);
+
+		// AC voltage source uses PhasorInput without separate AC Phase (°) input
+		const acSource = circuit.document.components.find((c) => c.kind === 'voltage_source')!;
+		circuit.selectComponent(acSource.id);
+		const acSourceOut = render(PropertyInspector);
+		expect(acSourceOut.body).toContain('id="comp-phasor-mag"');
+		expect(acSourceOut.body).toContain('id="comp-phasor-phase"');
+		expect(acSourceOut.body).toContain('Polar');
+		expect(acSourceOut.body).toContain('a + jb');
+		expect(acSourceOut.body).not.toContain('id="comp-phase"');
+
+		// AC unknown target constraint uses PhasorInput for voltage/current targets
+		circuit.setUnknownProblem({
+			componentId: acSource.id,
+			symbol: 'Vs',
+			terms: [{ componentId: acSource.id, multiplier: 1 }],
+			constraint: {
+				kind: 'node_voltage',
+				targetId: circuit.graph.nonRefNodeIds[0] ?? 'N1',
+				value: '50<-30'
+			}
+		});
+		const acUnknownOut = render(PropertyInspector);
+		expect(acUnknownOut.body).toContain('id="unknown-target-phasor-mag"');
+		expect(acUnknownOut.body).toContain('id="unknown-target-phasor-phase"');
+		expect(acUnknownOut.body).toContain('value="50"');
+		expect(acUnknownOut.body).toContain('value="-30"');
+		circuit.clearUnknownProblem();
+
+		// Direct-impedance inductor renders Pure jX with +j prefix pill and plain magnitude input
+		const ind = circuit.addComponent('inductor', 10, 10);
+		circuit.updateComponent(ind.id, { valueMode: 'impedance', unit: 'Ω', value: 'j50' });
+		circuit.selectComponent(ind.id);
+		const pureIndOut = render(PropertyInspector);
+		expect(pureIndOut.body).toContain('Pure jX');
+		expect(pureIndOut.body).toContain('R + jX');
+		expect(pureIndOut.body).toContain('+j');
+		expect(pureIndOut.body).toContain('id="comp-impedance-pure"');
+		expect(pureIndOut.body).toContain('value="50"');
+		expect(pureIndOut.body).toContain('= j50 Ω');
+		expect(pureIndOut.body).not.toContain('value="j50"');
+
+		// Direct-impedance capacitor renders Pure jX with −j prefix pill and plain magnitude input
+		const cap = circuit.addComponent('capacitor', 14, 10);
+		circuit.updateComponent(cap.id, { valueMode: 'impedance', unit: 'Ω', value: '-j20' });
+		circuit.selectComponent(cap.id);
+		const pureCapOut = render(PropertyInspector);
+		expect(pureCapOut.body).toContain('−j');
+		expect(pureCapOut.body).toContain('id="comp-impedance-pure"');
+		expect(pureCapOut.body).toContain('value="20"');
+		expect(pureCapOut.body).toContain('= -j20 Ω');
+
+		// Lossy inductor impedance auto-selects R + jX split inputs
+		circuit.updateComponent(ind.id, { valueMode: 'impedance', unit: 'Ω', value: '2+j1' });
+		circuit.selectComponent(ind.id);
+		const lossyIndOut = render(PropertyInspector);
+		expect(lossyIndOut.body).toContain('id="comp-impedance-r"');
+		expect(lossyIndOut.body).toContain('value="2"');
+		expect(lossyIndOut.body).toContain('id="comp-impedance-x"');
+		expect(lossyIndOut.body).toContain('value="1"');
+		expect(lossyIndOut.body).toContain('= 2 + j1 Ω');
+
+		// Standalone ImpedanceInput smoke check for DC mode caption
+		const dcCapOut = render(ImpedanceInput, {
+			props: { kind: 'capacitor', value: '-j1', isAcMode: false, onCommit: () => {} }
+		});
+		expect(dcCapOut.body).toContain('DC steady state: open circuit (I = 0 A)');
 	});
 });
