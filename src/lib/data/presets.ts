@@ -1,5 +1,5 @@
 /**
- * Curated library of 8 classic textbook DC & AC circuits for Circuit Lab.
+ * Curated library of 9 classic textbook DC & AC circuits for Circuit Lab.
  * All schematics use clean, non-overlapping orthogonal coordinates aligned
  * to the canonical 20 px grid (2-terminal pin offset ±2, 1-terminal pin offset 0).
  */
@@ -286,6 +286,43 @@ export const PRESETS: CircuitPreset[] = [
 				wire('w4', [18, 4], [20, 4]),
 				wire('w5', [24, 4], [26, 4], [26, 6]),
 				wire('w6', [4, 10], [26, 10])
+			]
+		}
+	},
+	{
+		id: 'ac-impedance-supernode',
+		name: 'AC Impedance Supernode',
+		category: 'ac',
+		featuredMethod: 'nodal',
+		description:
+			'Phasor-domain AC supernode network with direct reactance impedances (-j1 Ω capacitors, j1 Ω inductor) and a floating 10∠0° V source bridging nodes N2 and N3.',
+		theveninLoadId: 'R3',
+		document: {
+			schemaVersion: 1,
+			id: 'ac-impedance-supernode',
+			name: 'AC Impedance Supernode',
+			mode: 'ac',
+			frequencyHz: 60,
+			acMagnitudeMode: 'rms',
+			unitSystem: 'ohm-v-a',
+			components: [
+				comp('R1', 'resistor', 4, 8, 90, '1', { unit: 'Ω' }),
+				comp('C1', 'capacitor', 8, 4, 0, '-j1', { valueMode: 'impedance', unit: 'Ω' }),
+				comp('R2', 'resistor', 12, 8, 90, '2', { unit: 'Ω' }),
+				comp('Vs', 'voltage_source', 16, 4, 180, '10∠0°', { unit: 'V' }),
+				comp('C2', 'capacitor', 20, 8, 90, '-j1', { valueMode: 'impedance', unit: 'Ω' }),
+				comp('L1', 'inductor', 24, 4, 0, 'j1', { valueMode: 'impedance', unit: 'Ω' }),
+				comp('R3', 'resistor', 28, 8, 90, '2', { unit: 'Ω' }),
+				comp('G1', 'ground', 4, 10, 0, '0')
+			],
+			wires: [
+				wire('w1', [4, 6], [4, 4], [6, 4]),
+				wire('w2', [10, 4], [14, 4]),
+				wire('w3', [12, 4], [12, 6]),
+				wire('w4', [18, 4], [22, 4]),
+				wire('w5', [20, 4], [20, 6]),
+				wire('w6', [26, 4], [28, 4], [28, 6]),
+				wire('w7', [4, 10], [28, 10])
 			]
 		}
 	}

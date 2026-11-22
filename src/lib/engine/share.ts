@@ -50,6 +50,7 @@ function compactComponent(c: CircuitComponent): Record<string, unknown> {
 	if (c.phaseDeg !== undefined) out.phaseDeg = c.phaseDeg;
 	if (c.frequencyHz !== undefined) out.frequencyHz = c.frequencyHz;
 	if (c.unit !== undefined) out.unit = c.unit;
+	if (c.valueMode !== undefined) out.valueMode = c.valueMode;
 	if (c.terminalName !== undefined) out.terminalName = c.terminalName;
 	if (c.controlRef !== undefined) {
 		const ref: Record<string, unknown> = {};

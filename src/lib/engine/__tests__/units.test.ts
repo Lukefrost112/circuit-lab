@@ -73,6 +73,55 @@ describe('units', () => {
 		expect(parseComplexValue('invalid')).toBeNull();
 	});
 
+	it('parses all textbook AC impedance strings with optional Ohm suffixes', () => {
+		const expectComplex = (raw: string, re: number, im: number) => {
+			const c = parseComplexValue(raw);
+			expect(c, `Expected "${raw}" to parse`).not.toBeNull();
+			expect(c!.re).toBeCloseTo(re, 10);
+			expect(c!.im).toBeCloseTo(im, 10);
+		};
+
+		expectComplex('j', 0, 1);
+		expectComplex('+j', 0, 1);
+		expectComplex('-j', 0, -1);
+		expectComplex('j1', 0, 1);
+		expectComplex('-j1', 0, -1);
+		expectComplex('+j1', 0, 1);
+		expectComplex('1j', 0, 1);
+		expectComplex('-1j', 0, -1);
+		expectComplex('j50', 0, 50);
+		expectComplex('-j20', 0, -20);
+		expectComplex('j2k', 0, 2000);
+		expectComplex('-j500m', 0, -0.5);
+		expectComplex('j1.5k', 0, 1500);
+
+		expectComplex('2+j1', 2, 1);
+		expectComplex('2-j1', 2, -1);
+		expectComplex('1+j', 1, 1);
+		expectComplex('1-j', 1, -1);
+		expectComplex('2 + j 1', 2, 1);
+		expectComplex('100∠90°', 0, 100);
+		expectComplex('100∠-90°', 0, -100);
+
+		// Optional trailing Ω / ohm / ohms and outer parentheses
+		expectComplex('-j1 Ω', 0, -1);
+		expectComplex('j1 Ω', 0, 1);
+		expectComplex('j50 ohm', 0, 50);
+		expectComplex('-j20 ohms', 0, -20);
+		expectComplex('-j Ω', 0, -1);
+		expectComplex('1j Ω', 0, 1);
+		expectComplex('2+j1 Ω', 2, 1);
+		expectComplex('(2+j1) Ω', 2, 1);
+		expectComplex('1-j2 ohm', 1, -2);
+		expectComplex('100∠-90° Ω', 0, -100);
+		expectComplex('100∠90° ohms', 0, 100);
+		expectComplex('j2kΩ', 0, 2000);
+		expectComplex('-j500m Ω', 0, -0.5);
+
+		expect(parseComplexValue('Ω')).toBeNull();
+		expect(parseComplexValue('ohms')).toBeNull();
+	});
+
 	it('formats engineering numbers with SI prefixes', () => {
 		expect(formatEngineering(10000, 'Ω', 3)).toBe('10 kΩ');
 		expect(formatEngineering(10000, '', 3)).toBe('10k');

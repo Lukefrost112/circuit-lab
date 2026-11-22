@@ -16,7 +16,7 @@
  */
 
 import { Complex } from './complex';
-import { buildElectricalGraph } from './graph';
+import { buildElectricalGraph, isImpedanceSpecified } from './graph';
 import {
 	buildDeactivatedDocument,
 	formatLatexTerm,
@@ -32,6 +32,7 @@ import type {
 	CircuitDocument,
 	ComponentKind,
 	MnaSolution,
+	PassiveValueMode,
 	SolutionStep,
 	UnknownProblemSpec,
 	UnknownSolutionCandidate,
@@ -68,6 +69,17 @@ const UNIT_BY_KIND: Partial<Record<ComponentKind, string>> = {
 	capacitor: 'F',
 	inductor: 'H'
 };
+
+function isImpedanceUnknown(comp: CircuitComponent, mode: AnalysisMode): boolean {
+	return mode === 'ac' && isImpedanceSpecified(comp);
+}
+
+function getComponentUnknownUnit(comp: CircuitComponent, mode: AnalysisMode): string {
+	if (isImpedanceUnknown(comp, mode)) {
+		return 'Ω';
+	}
+	return UNIT_BY_KIND[comp.kind] ?? '';
+}
 
 export function getDefaultUnknownSymbol(kind: ComponentKind): string {
 	return DEFAULT_SYMBOL_BY_KIND[kind] ?? 'X';
@@ -269,9 +281,19 @@ export function substituteUnknownTerms(
 		componentId: string;
 		valueString: string;
 		overridePhaseDeg?: number;
+		valueMode?: PassiveValueMode;
+		unit?: string;
 	}>
 ): CircuitDocument {
-	const subMap = new Map<string, { valueString: string; overridePhaseDeg?: number }>();
+	const subMap = new Map<
+		string,
+		{
+			valueString: string;
+			overridePhaseDeg?: number;
+			valueMode?: PassiveValueMode;
+			unit?: string;
+		}
+	>();
 	for (const sub of substitutions) {
 		subMap.set(sub.componentId, sub);
 	}
@@ -281,12 +303,17 @@ export function substituteUnknownTerms(
 		components: doc.components.map((c) => {
 			const sub = subMap.get(c.id);
 			if (!sub) return c;
-			const parsedReal = parseEngineeringNumber(sub.valueString);
+			const nextValueMode = sub.valueMode ?? c.valueMode;
+			const nextUnit = sub.unit ?? c.unit;
+			const parsedReal =
+				nextValueMode === 'impedance' ? null : parseEngineeringNumber(sub.valueString);
 			return {
 				...c,
 				value: sub.valueString,
 				numericValue: parsedReal ?? undefined,
-				phaseDeg: sub.overridePhaseDeg
+				phaseDeg: sub.overridePhaseDeg,
+				...(nextValueMode !== undefined ? { valueMode: nextValueMode } : {}),
+				...(nextUnit !== undefined ? { unit: nextUnit } : {})
 			};
 		})
 	};
@@ -328,8 +355,13 @@ function formatRealCanonical(x: number): string {
 function formatCanonicalValueString(
 	val: Complex,
 	kind: ComponentKind,
-	mode: AnalysisMode
+	mode: AnalysisMode,
+	impedanceMode = false
 ): string {
+	if (impedanceMode && mode === 'ac' && (kind === 'inductor' || kind === 'capacitor')) {
+		const magStr = formatRealCanonical(Math.abs(val.re));
+		return kind === 'inductor' ? `j${magStr}` : `-j${magStr}`;
+	}
 	if (mode === 'dc' || !SOURCE_KINDS.has(kind)) {
 		return formatRealCanonical(val.re);
 	}
@@ -582,13 +614,14 @@ function buildTermSolvedValues(
 			mode === 'dc' || !SOURCE_KINDS.has(comp.kind)
 				? Complex.from(scaledRaw.re, 0)
 				: scaledRaw;
+		const impMode = isImpedanceUnknown(comp, mode);
 		return {
 			componentId: comp.id,
 			componentLabel: comp.label,
 			multiplier: term.multiplier,
 			value: scaled,
-			valueString: formatCanonicalValueString(scaled, comp.kind, mode),
-			unit: UNIT_BY_KIND[comp.kind] ?? ''
+			valueString: formatCanonicalValueString(scaled, comp.kind, mode, impMode),
+			unit: getComponentUnknownUnit(comp, mode)
 		};
 	});
 }
@@ -607,10 +640,12 @@ function withSubstitutedTerms(
 			mode === 'dc' || !SOURCE_KINDS.has(comp.kind)
 				? Complex.from(scaledRaw.re, 0)
 				: scaledRaw;
+		const impMode = isImpedanceUnknown(comp, mode);
 		return {
 			componentId: comp.id,
-			valueString: formatCanonicalValueString(scaled, comp.kind, mode),
-			overridePhaseDeg
+			valueString: formatCanonicalValueString(scaled, comp.kind, mode, impMode),
+			overridePhaseDeg,
+			...(impMode ? { valueMode: 'impedance' as const, unit: 'Ω' } : {})
 		};
 	});
 	return substituteUnknownTerms(doc, subs);
@@ -630,14 +665,23 @@ function verifyCandidateTerms(
 		mode === 'dc' || !SOURCE_KINDS.has(primaryComp.kind)
 			? Complex.from(baseValue.re, 0)
 			: baseValue;
-	const valueString = formatCanonicalValueString(cleanBase, primaryComp.kind, mode);
+	const primaryImpMode = isImpedanceUnknown(primaryComp, mode);
+	const valueString = formatCanonicalValueString(cleanBase, primaryComp.kind, mode, primaryImpMode);
 	const termValues = buildTermSolvedValues(resolvedTerms, cleanBase, mode);
+	const compById = new Map<string, CircuitComponent>(
+		resolvedTerms.map((rt) => [rt.comp.id, rt.comp])
+	);
 	const docSolved = substituteUnknownTerms(
 		doc,
-		termValues.map((tv) => ({
-			componentId: tv.componentId,
-			valueString: tv.valueString
-		}))
+		termValues.map((tv) => {
+			const c = compById.get(tv.componentId);
+			const impMode = c ? isImpedanceUnknown(c, mode) : false;
+			return {
+				componentId: tv.componentId,
+				valueString: tv.valueString,
+				...(impMode ? { valueMode: 'impedance' as const, unit: 'Ω' } : {})
+			};
+		})
 	);
 	const mnaSolved = solveMNA(docSolved, solveOpts);
 	const ySolved = measureConstraint(mnaSolved, constraint);
@@ -985,7 +1029,8 @@ function replaceWithShortSource(doc: CircuitDocument, comp: CircuitComponent): C
 						value: '0',
 						numericValue: 0,
 						phaseDeg: 0,
-						unit: 'V'
+						unit: 'V',
+						valueMode: undefined
 					}
 				: c
 		)
@@ -1004,7 +1049,8 @@ function replaceWithUnitResistor(doc: CircuitDocument, comp: CircuitComponent): 
 						value: '1',
 						numericValue: 1,
 						phaseDeg: undefined,
-						unit: 'Ω'
+						unit: 'Ω',
+						valueMode: undefined
 					}
 				: c
 		)
@@ -1178,7 +1224,8 @@ function measureOnOpenCircuit(
 function impedanceToPassiveValue(
 	zx: Complex,
 	kind: ComponentKind,
-	omega: number
+	omega: number,
+	impedanceMode = false
 ): { ok: true; value: number; conversionLatex: string } | { ok: false; error: string } {
 	if (!zx.isFinite()) {
 		return { ok: false, error: 'Computed required impedance is not finite.' };
@@ -1219,6 +1266,14 @@ function impedanceToPassiveValue(
 				error: `Required reactance X = ${formatEngineering(zx.im, 'Ω', 4)} is not inductive (requires X > 0); no physical positive inductor achieves this target.`
 			};
 		}
+		if (impedanceMode) {
+			const xlStr = formatLatexValue(Complex.from(zx.im, 0), 'dc');
+			return {
+				ok: true,
+				value: zx.im,
+				conversionLatex: `X_L = \\text{Im}(Z_x) = ${xlStr}\\;\\Omega \\implies Z_L = j${xlStr}\\;\\Omega`
+			};
+		}
 		const l = zx.im / omega;
 		return {
 			ok: true,
@@ -1239,6 +1294,15 @@ function impedanceToPassiveValue(
 		return {
 			ok: false,
 			error: `Required reactance X = ${formatEngineering(zx.im, 'Ω', 4)} is not capacitive (requires X < 0); no physical positive capacitor achieves this target.`
+		};
+	}
+	if (impedanceMode) {
+		const xc = -zx.im;
+		const xcStr = formatLatexValue(Complex.from(xc, 0), 'dc');
+		return {
+			ok: true,
+			value: xc,
+			conversionLatex: `X_C = -\\text{Im}(Z_x) = ${xcStr}\\;\\Omega \\implies Z_C = -j${xcStr}\\;\\Omega`
 		};
 	}
 	const c = -1 / (omega * zx.im);
@@ -1269,7 +1333,8 @@ function solveUnknownPassive(
 	const constraint = problem.constraint;
 	const sym = problem.symbol?.trim() || getDefaultUnknownSymbol(comp.kind);
 	const symTex = formatSymbolLatex(sym);
-	const xUnit = UNIT_BY_KIND[comp.kind] ?? '';
+	const impMode = isImpedanceUnknown(comp, mode);
+	const xUnit = getComponentUnknownUnit(comp, mode);
 	const ySymTex = getConstraintSymbolLatex(constraint, doc);
 	const yUnit = getConstraintUnit(constraint.kind);
 	const termsMeta = toResultTermsMeta(resolvedTerms);
@@ -1656,9 +1721,9 @@ function solveUnknownPassive(
 			if (comp.kind === 'resistor' && r > 1e-15) {
 				physicalValues.push(r);
 			} else if (comp.kind === 'inductor' && r > 1e-15) {
-				physicalValues.push(r / omega);
+				physicalValues.push(impMode ? r : r / omega);
 			} else if (comp.kind === 'capacitor' && r < -1e-15) {
-				physicalValues.push(-1 / (omega * r));
+				physicalValues.push(impMode ? -r : -1 / (omega * r));
 			}
 		}
 
@@ -1899,7 +1964,7 @@ function solveUnknownPassive(
 		);
 	}
 
-	const physical = impedanceToPassiveValue(zx, comp.kind, omega);
+	const physical = impedanceToPassiveValue(zx, comp.kind, omega, impMode);
 	if (!physical.ok) {
 		return makeFailure(comp, problem, methodName, physical.error, steps, termsMeta);
 	}
@@ -2148,7 +2213,7 @@ function solveMultiTermPassive(
 	const constraint = problem.constraint;
 	const sym = problem.symbol?.trim() || getDefaultUnknownSymbol(comp.kind);
 	const symTex = formatSymbolLatex(sym);
-	const xUnit = UNIT_BY_KIND[comp.kind] ?? '';
+	const xUnit = getComponentUnknownUnit(comp, mode);
 	const ySymTex = getConstraintSymbolLatex(constraint, doc);
 	const yUnit = getConstraintUnit(constraint.kind);
 	const yTargetTex = appendLatexSubscript(ySymTex, 'target');

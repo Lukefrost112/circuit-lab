@@ -817,4 +817,89 @@ describe('solveUnknownParameter — Exact Analytical Inverse Circuit Solver', ()
 		expect(negPassiveRes.valid).toBe(false);
 		expect(negPassiveRes.error).toMatch(/strictly positive/i);
 	});
+
+	it('19. Solves unknown Vs and unknown impedance-mode L/C in AC impedance supernode circuit', () => {
+		const supernodeBase: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'ac',
+			frequencyHz: 60,
+			acMagnitudeMode: 'rms',
+			components: [
+				comp('R1', 'resistor', 4, 8, 90, '1', { unit: 'Ω' }),
+				comp('C1', 'capacitor', 8, 4, 0, '-j1', { valueMode: 'impedance', unit: 'Ω' }),
+				comp('R2', 'resistor', 12, 8, 90, '2', { unit: 'Ω' }),
+				comp('Vs', 'voltage_source', 16, 4, 180, '10∠0°', { unit: 'V' }),
+				comp('C2', 'capacitor', 20, 8, 90, '-j1', { valueMode: 'impedance', unit: 'Ω' }),
+				comp('L1', 'inductor', 24, 4, 0, 'j1', { valueMode: 'impedance', unit: 'Ω' }),
+				comp('R3', 'resistor', 28, 8, 90, '2', { unit: 'Ω' }),
+				comp('G1', 'ground', 4, 10, 0, '0')
+			],
+			wires: [
+				wire('w1', [4, 6], [4, 4], [6, 4]),
+				wire('w2', [10, 4], [14, 4]),
+				wire('w3', [12, 4], [12, 6]),
+				wire('w4', [18, 4], [22, 4]),
+				wire('w5', [20, 4], [20, 6]),
+				wire('w6', [26, 4], [28, 4], [28, 6]),
+				wire('w7', [4, 10], [28, 10])
+			]
+		};
+
+		const baseline = solveCircuit(supernodeBase);
+		expect(baseline.mna.valid).toBe(true);
+		const vN2 = baseline.mna.nodeVoltages['N2'].voltage;
+		const vN2Str = `${vN2.re}${vN2.im >= 0 ? '+j' : '-j'}${Math.abs(vN2.im)}`;
+
+		// 19a: Solve for unknown floating source Vs given V(N2) -> exact 10∠0° V
+		const vsSolved = solveCircuit({
+			...supernodeBase,
+			unknownProblem: {
+				componentId: 'Vs',
+				symbol: 'Vs',
+				constraint: { kind: 'node_voltage', targetId: 'N2', value: vN2Str, label: 'V_1' }
+			}
+		});
+		expect(vsSolved.unknownSolution?.valid).toBe(true);
+		expect(vsSolved.unknownSolution?.solutions[0].value.re).toBeCloseTo(10, 8);
+		expect(vsSolved.unknownSolution?.solutions[0].value.im).toBeCloseTo(0, 8);
+		expect(vsSolved.unknownSolution?.solutions[0].verified).toBe(true);
+		expect(vsSolved.allVerified).toBe(true);
+		expect(vsSolved.maxDiscrepancy).toBeLessThan(1e-8);
+
+		// 19b: Solve for unknown impedance-mode inductor L1 -> exact j1 Ω
+		const l1Solved = solveCircuit({
+			...supernodeBase,
+			unknownProblem: {
+				componentId: 'L1',
+				symbol: 'X_L',
+				constraint: { kind: 'node_voltage', targetId: 'N2', value: vN2Str }
+			}
+		});
+		expect(l1Solved.unknownSolution?.valid).toBe(true);
+		const l1Cand = l1Solved.unknownSolution!.solutions[0];
+		expect(l1Cand.value.re).toBeCloseTo(1, 8);
+		expect(l1Cand.valueString).toBe('j1');
+		expect(l1Cand.termValues?.[0].unit).toBe('Ω');
+		expect(l1Cand.verified).toBe(true);
+		expect(l1Cand.discrepancy).toBeLessThan(1e-8);
+		expect(l1Solved.allVerified).toBe(true);
+
+		// 19c: Solve for unknown impedance-mode capacitor C2 -> exact -j1 Ω
+		const c2Solved = solveCircuit({
+			...supernodeBase,
+			unknownProblem: {
+				componentId: 'C2',
+				symbol: 'X_C',
+				constraint: { kind: 'node_voltage', targetId: 'N2', value: vN2Str }
+			}
+		});
+		expect(c2Solved.unknownSolution?.valid).toBe(true);
+		const c2Cand = c2Solved.unknownSolution!.solutions[0];
+		expect(c2Cand.value.re).toBeCloseTo(1, 8);
+		expect(c2Cand.valueString).toBe('-j1');
+		expect(c2Cand.termValues?.[0].unit).toBe('Ω');
+		expect(c2Cand.verified).toBe(true);
+		expect(c2Cand.discrepancy).toBeLessThan(1e-8);
+		expect(c2Solved.allVerified).toBe(true);
+	});
 });

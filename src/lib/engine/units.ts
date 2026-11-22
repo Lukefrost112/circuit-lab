@@ -182,21 +182,47 @@ export function parseEngineeringNumber(input: string | number): number | null {
 }
 
 /**
+ * Strips matching outer parentheses around a string if they wrap the entire expression.
+ */
+function unwrapOuterParens(raw: string): string {
+	let s = raw.trim();
+	while (s.startsWith('(') && s.endsWith(')')) {
+		let depth = 0;
+		let wrapsWhole = true;
+		for (let i = 0; i < s.length - 1; i++) {
+			if (s[i] === '(') depth++;
+			else if (s[i] === ')') {
+				depth--;
+				if (depth === 0) {
+					wrapsWhole = false;
+					break;
+				}
+			}
+		}
+		if (!wrapsWhole) break;
+		s = s.slice(1, -1).trim();
+	}
+	return s;
+}
+
+/**
  * Parses a real or complex engineering value.
  * Supports:
- * - Polar: "50∠30°", "50@-30", "10k∠-45 deg"
- * - Rectangular: "30+j40", "30-40j", "j100", "-j50", "1e-3+j2e-3", "j", "-j"
+ * - Polar: "50∠30°", "50@-30", "10k∠-45 deg", "100∠-90° Ω"
+ * - Rectangular: "30+j40", "30-40j", "j100", "-j50", "j1 Ω", "-j1 Ω", "2 + j 1", "1-j", "j", "-j"
  * - Pure real engineering numbers: "10k", "470 Ω"
  */
 export function parseComplexValue(input: string | number): Complex | null {
 	if (typeof input === 'number') {
 		return Number.isFinite(input) ? Complex.from(input, 0) : null;
 	}
-	const trimmed = input.trim();
+	// Strip optional trailing Ω / ohm / ohms (case-insensitive) and matching outer parentheses
+	const withoutOhm = input.trim().replace(/\s*(?:Ω|ohms?)\s*$/i, '').trim();
+	const trimmed = unwrapOuterParens(withoutOhm);
 	if (!trimmed) return null;
 
-	// Strip trailing common electrical units when attached after polar/complex forms like "(30+j40) V" or "50∠30° V"
-	const polarMatch = trimmed.match(/^(.+?)\s*(?:∠|@)\s*(.+?)(?:°|deg)?(?:\s*[VAWΩvaw]+)?$/i);
+	// Strip trailing common electrical units when attached after polar/complex forms like "50∠30° V"
+	const polarMatch = trimmed.match(/^(.+?)\s*(?:∠|@)\s*(.+?)(?:°|deg)?(?:\s*(?:Ω|ohms?|va|var|[vaw]))?$/i);
 	if (polarMatch) {
 		const mag = parseEngineeringNumber(polarMatch[1]);
 		// Angle should be a plain number (possibly with ° or deg stripped)

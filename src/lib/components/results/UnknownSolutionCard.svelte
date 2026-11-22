@@ -3,6 +3,7 @@
 	import { Accordion, AccordionItem, Button } from '$lib/components/ui';
 	import {
 		formatUnknownTermExpr,
+		isImpedanceSpecified,
 		parseComplexValue,
 		parseEngineeringNumber,
 		type AnalysisMode,
@@ -62,7 +63,17 @@
 			unknownSolution.componentKind === 'current_source'
 	);
 
-	const answerUnit = $derived(UNIT_BY_KIND[unknownSolution.componentKind] ?? '');
+	const primaryUnknownComp = $derived(
+		document.components.find((c) => c.id === unknownSolution.componentId) ?? null
+	);
+
+	const isImpedancePassive = $derived(
+		mode === 'ac' && primaryUnknownComp !== null && isImpedanceSpecified(primaryUnknownComp)
+	);
+
+	const answerUnit = $derived(
+		isImpedancePassive ? 'Ω' : (UNIT_BY_KIND[unknownSolution.componentKind] ?? '')
+	);
 
 	const isMultiTerm = $derived((unknownSolution.terms?.length ?? 0) >= 2);
 

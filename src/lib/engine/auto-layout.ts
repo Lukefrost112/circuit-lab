@@ -22,6 +22,7 @@ import type {
 	ComponentKind,
 	DependentControlRef,
 	GridPoint,
+	PassiveValueMode,
 	Rotation,
 	UnitSystemId,
 	UnknownProblemSpec
@@ -38,6 +39,8 @@ export interface LayoutNetlistElement {
 	phaseDeg?: number;
 	frequencyHz?: number;
 	sourceMode?: AnalysisMode;
+	unit?: string;
+	valueMode?: PassiveValueMode;
 	terminalName?: string;
 	/** Coarse integer schematic grid position [col, row] of the `from` (pin 0 / + / tail) terminal in the source image (col: left->right 0,1,2...; row: top->bottom 0,1,2...) */
 	fromPos?: [number, number];
@@ -95,6 +98,8 @@ interface NormalizedElement {
 	rawTo: string;
 	value: string;
 	phaseDeg?: number;
+	unit?: string;
+	valueMode?: PassiveValueMode;
 	terminalName?: string;
 	fromPos?: [number, number];
 	toPos?: [number, number];
@@ -160,7 +165,9 @@ function inferMode(netlist: LayoutNetlistDocument): AnalysisMode {
 		return netlist.mode;
 	}
 	for (const el of netlist.elements) {
-		if (el.sourceMode === 'ac' || el.phaseDeg !== undefined) return 'ac';
+		if (el.sourceMode === 'ac' || el.phaseDeg !== undefined || el.valueMode === 'impedance') {
+			return 'ac';
+		}
 		if (typeof el.value === 'string' && /[∠@j]/i.test(el.value)) return 'ac';
 	}
 	return 'dc';
@@ -233,6 +240,8 @@ function toComponent(
 		value: el.value
 	};
 	if (el.phaseDeg !== undefined) comp.phaseDeg = el.phaseDeg;
+	if (el.unit !== undefined) comp.unit = el.unit;
+	if (el.valueMode !== undefined) comp.valueMode = el.valueMode;
 	if (el.terminalName !== undefined) comp.terminalName = el.terminalName;
 	if (el.controlRef !== undefined) comp.controlRef = el.controlRef;
 	return comp;
@@ -346,6 +355,8 @@ function normalizeNetlistContext(netlist: LayoutNetlistDocument): NormalizedNetl
 			rawTo: to,
 			value: typeof el.value === 'string' ? el.value.trim() : String(el.value ?? '').trim(),
 			phaseDeg: el.phaseDeg,
+			unit: el.unit,
+			valueMode: el.valueMode,
 			terminalName: el.terminalName,
 			fromPos: isValidGridPos(el.fromPos)
 				? [Math.round(el.fromPos[0]), Math.round(el.fromPos[1])]

@@ -5,7 +5,9 @@ import {
 	formatRational,
 	getFixedUnitPrefix,
 	getPinPositions,
+	isImpedanceSpecified,
 	parseComplexValue,
+	parseDirectImpedance,
 	parseEngineeringNumber,
 	type AnalysisMode,
 	type CircuitComponent,
@@ -376,6 +378,60 @@ function formatScaledScalar(n: number, prec: number): string {
 	return rounded.toExponential().replace(/e\+?/, 'e');
 }
 
+const IMPEDANCE_AUTO_PREFIXES: ReadonlyArray<{ symbol: string; factor: number }> = [
+	{ symbol: 'M', factor: 1e6 },
+	{ symbol: 'k', factor: 1e3 },
+	{ symbol: '', factor: 1 },
+	{ symbol: 'm', factor: 1e-3 }
+];
+
+/**
+ * Formats a complex impedance Z (in Ω) cleanly for schematic labels and inspector previews,
+ * respecting the active unit system and avoiding `0 + j...` on pure reactances.
+ */
+export function formatImpedanceDisplay(
+	z: Complex,
+	unitSystem: UnitSystemId = 'auto',
+	prec = 3
+): string {
+	const reZero = Math.abs(z.re) < 1e-12;
+	const imZero = Math.abs(z.im) < 1e-12;
+
+	if (reZero && imZero) {
+		return formatEngineeringWithSystem(0, 'Ω', prec, unitSystem);
+	}
+	if (imZero) {
+		return formatEngineeringWithSystem(z.re, 'Ω', prec, unitSystem);
+	}
+	if (reZero) {
+		const sign = z.im < 0 ? '-' : '';
+		const magFormatted = formatEngineeringWithSystem(Math.abs(z.im), 'Ω', prec, unitSystem);
+		return `${sign}j${magFormatted}`;
+	}
+
+	const fixed = getFixedUnitPrefix('Ω', unitSystem);
+	let factor = 1;
+	let prefixSymbol = '';
+	if (fixed) {
+		factor = fixed.factor;
+		prefixSymbol = fixed.symbol;
+	} else {
+		const dominant = Math.max(Math.abs(z.re), Math.abs(z.im));
+		for (const tier of IMPEDANCE_AUTO_PREFIXES) {
+			if (dominant >= tier.factor * (1 - 1e-12)) {
+				factor = tier.factor;
+				prefixSymbol = tier.symbol;
+				break;
+			}
+		}
+	}
+
+	const reStr = formatScaledScalar(z.re / factor, prec);
+	const imStr = formatScaledScalar(Math.abs(z.im) / factor, prec);
+	const op = z.im < 0 ? ' - ' : ' + ';
+	return `${reStr}${op}j${imStr} ${prefixSymbol}Ω`;
+}
+
 export function formatComponentDisplayValue(
 	comp: CircuitComponent,
 	mode: AnalysisMode,
@@ -392,6 +448,18 @@ export function formatComponentDisplayValue(
 		current_source: 'A'
 	};
 	const unit = comp.unit ?? unitMap[comp.kind] ?? '';
+
+	if ((comp.kind === 'capacitor' || comp.kind === 'inductor') && isImpedanceSpecified(comp)) {
+		if (mode === 'dc') {
+			return comp.kind === 'capacitor' ? 'Open (DC)' : 'Short (DC)';
+		}
+		const z = parseDirectImpedance(comp);
+		if (z) {
+			return formatImpedanceDisplay(z, unitSystem, 3);
+		}
+		const rawVal = comp.value.trim();
+		return rawVal ? `${rawVal} Ω` : 'Ω';
+	}
 
 	if (comp.kind === 'resistor' || comp.kind === 'capacitor' || comp.kind === 'inductor') {
 		const num = parseEngineeringNumber(comp.value);

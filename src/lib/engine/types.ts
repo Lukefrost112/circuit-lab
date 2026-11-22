@@ -9,6 +9,7 @@ export type SchematicStandard = 'ieee' | 'iec';
 export type AnalysisMode = 'dc' | 'ac';
 export type AcMagnitudeMode = 'rms' | 'peak';
 export type UnitSystemId = 'auto' | 'ohm-v-a' | 'kohm-v-ma' | 'mohm-v-ua';
+export type PassiveValueMode = 'physical' | 'impedance';
 
 export type ComponentKind =
 	| 'resistor'
@@ -63,6 +64,8 @@ export interface CircuitComponent {
 	frequencyHz?: number;
 	/** Optional unit label (e.g. "Ω", "F", "H", "V", "A") */
 	unit?: string;
+	/** Passive value interpretation: physical H/F (default) or direct AC impedance in Ω */
+	valueMode?: PassiveValueMode;
 	/** Optional port name for 'terminal' components (e.g. "A", "B") */
 	terminalName?: string;
 	/** Reserved for v2 dependent sources (VCVS, VCCS, CCVS, CCCS) */
@@ -167,6 +170,8 @@ export interface NetlistElement {
 	nodes: string[];
 	value: string;
 	phaseDeg?: number;
+	unit?: string;
+	valueMode?: PassiveValueMode;
 	terminalName?: string;
 	/** Coarse integer schematic grid position [col, row] of the `from` (pin 0 / + / tail) terminal in the source image */
 	fromPos?: [number, number];

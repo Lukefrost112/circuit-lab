@@ -568,4 +568,61 @@ describe('solveMNA — 15+ classic DC & AC circuits + error diagnostics', () => 
 		expect(sol.valid).toBe(false);
 		expect(sol.diagnostics.some((d) => d.code === 'SINGULAR_MATRIX')).toBe(true);
 	});
+
+	// 18. Direct AC Impedance Specification (pure reactive, lossy complex, plain reactance, and DC fallback)
+	it('18. Solves direct AC impedance inductors/capacitors with exact power balance and DC fallback', () => {
+		// 18a: Series circuit: V1 = 10∠0° V, R1 = 1 Ω, L1 = 2+j1 Ω (lossy), C1 = -j5 Ω (plain "5" in impedance mode)
+		// Z_total = 1 + (2 + j1) + (-j5) = 3 - j4 Ω => |Z| = 5 Ω => I = 10 / (3 - j4) = 1.2 + j1.6 A
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'ac',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', 0, 2, 90, '10∠0°'),
+				comp('R1', 'resistor', 2, 0, 0, '1'),
+				comp('L1', 'inductor', 6, 0, 0, '2+j1', { valueMode: 'impedance', unit: 'Ω' }),
+				comp('C1', 'capacitor', 8, 2, 90, '5', { valueMode: 'impedance', unit: 'Ω' }),
+				comp('G1', 'ground', 0, 4, 0, '0')
+			],
+			wires: [wire('w_gnd', [0, 4], [8, 4])]
+		};
+
+		const sol = solveMNA(doc);
+		expect(sol.valid).toBe(true);
+		expect(sol.powerBalance.balanced).toBe(true);
+		expect(Math.abs(sol.powerBalance.totalRealPower)).toBeLessThan(1e-10);
+		expect(Math.abs(sol.powerBalance.totalReactivePower)).toBeLessThan(1e-10);
+		expect(sol.branches['L1'].impedance?.equals(Complex.from(2, 1), 1e-12)).toBe(true);
+		expect(sol.branches['C1'].impedance?.equals(Complex.j(-5), 1e-12)).toBe(true);
+		expect(sol.branches['R1'].current.equals(Complex.from(1.2, 1.6), 1e-9)).toBe(true);
+		// P_R1 = |I|^2 * 1 = 4 W, P_L1 = |I|^2 * 2 = 8 W, P_V1 = -12 W
+		expect(sol.branches['R1'].realPower).toBeCloseTo(4, 9);
+		expect(sol.branches['L1'].realPower).toBeCloseTo(8, 9);
+		expect(sol.branches['L1'].reactivePower).toBeCloseTo(4, 9);
+		expect(sol.branches['C1'].reactivePower).toBeCloseTo(-20, 9);
+		expect(sol.branches['V1'].realPower).toBeCloseTo(-12, 9);
+
+		// 18b: Same circuit in DC mode -> C1 is open (I = 0), L1 is short (V = 0)
+		const dcSol = solveMNA({ ...doc, mode: 'dc', components: doc.components.map((c) => (c.id === 'V1' ? { ...c, value: '10' } : c)) });
+		expect(dcSol.valid).toBe(true);
+		expect(dcSol.branches['C1'].current.abs()).toBeCloseTo(0, 12);
+		expect(dcSol.branches['C1'].voltage.re).toBeCloseTo(10, 12);
+		expect(dcSol.branches['L1'].voltage.abs()).toBeCloseTo(0, 12);
+		expect(dcSol.branches['L1'].current.abs()).toBeCloseTo(0, 12);
+
+		// 18c: Rejects zero impedance and negative real resistance
+		const zeroZ = solveMNA({
+			...doc,
+			components: doc.components.map((c) => (c.id === 'L1' ? { ...c, value: '0' } : c))
+		});
+		expect(zeroZ.valid).toBe(false);
+		expect(zeroZ.diagnostics.some((d) => d.code === 'INVALID_VALUE')).toBe(true);
+
+		const negRealZ = solveMNA({
+			...doc,
+			components: doc.components.map((c) => (c.id === 'L1' ? { ...c, value: '-2+j1' } : c))
+		});
+		expect(negRealZ.valid).toBe(false);
+		expect(negRealZ.diagnostics.some((d) => d.code === 'INVALID_VALUE')).toBe(true);
+	});
 });

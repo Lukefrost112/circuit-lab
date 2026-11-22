@@ -407,6 +407,121 @@ export function parsePassiveValue(comp: CircuitComponent): number | null {
 	return val;
 }
 
+export type PassiveImpedanceResult =
+	| { kind: 'impedance'; z: Complex }
+	| { kind: 'open' }
+	| { kind: 'short' };
+
+/**
+ * Returns `true` iff an inductor or capacitor specifies its AC value directly as an impedance in Ω
+ * (either via `valueMode === 'impedance'`, `unit === 'Ω'`, or complex/phasor notation in `value`).
+ */
+export function isImpedanceSpecified(
+	comp: Pick<CircuitComponent, 'kind' | 'value' | 'unit' | 'valueMode'>
+): boolean {
+	if (comp.kind !== 'inductor' && comp.kind !== 'capacitor') {
+		return false;
+	}
+	return (
+		comp.valueMode === 'impedance' ||
+		comp.unit === 'Ω' ||
+		/[j∠@]/i.test(comp.value ?? '')
+	);
+}
+
+/**
+ * Parses a direct AC impedance (in Ω) for an impedance-specified inductor or capacitor.
+ * Supports pure reactive impedances (`j1`, `-j1`, `j50`, `-j20`), lossy complex impedances
+ * (`2+j1`, `1-j2`), polar impedances (`100∠90°`, `100∠-90°`), and plain positive reactance
+ * magnitudes when `valueMode === 'impedance'` (interpreted as `+jX` for inductors and `-j|X|` for capacitors).
+ * Rejects zero impedance, non-finite values, or negative real resistance (`re < 0`).
+ */
+export function parseDirectImpedance(
+	comp: Pick<CircuitComponent, 'kind' | 'value' | 'unit' | 'valueMode'>
+): Complex | null {
+	if (comp.kind !== 'inductor' && comp.kind !== 'capacitor') {
+		return null;
+	}
+	if (!isImpedanceSpecified(comp)) {
+		return null;
+	}
+	const raw = comp.value?.trim() ?? '';
+	if (!raw) return null;
+
+	const parsed = parseComplexValue(raw);
+	if (!parsed || !parsed.isFinite()) return null;
+
+	let z = parsed;
+	if (Math.abs(parsed.im) < 1e-12 && comp.valueMode === 'impedance') {
+		if (comp.kind === 'inductor') {
+			if (parsed.re <= 1e-12) return null;
+			z = Complex.j(parsed.re);
+		} else {
+			if (Math.abs(parsed.re) <= 1e-12) return null;
+			z = Complex.j(-Math.abs(parsed.re));
+		}
+	}
+
+	const cleanRe = Math.abs(z.re) < 1e-12 ? 0 : z.re;
+	const cleanIm = Math.abs(z.im) < 1e-12 ? 0 : z.im;
+	z = Complex.from(cleanRe, cleanIm);
+
+	if (!z.isFinite() || z.abs() < 1e-12 || z.re < -1e-12) {
+		return null;
+	}
+
+	return z;
+}
+
+/**
+ * Unified passive element impedance resolver for DC and AC steady-state analysis.
+ * - Resistor: `{ kind: 'impedance', z: R }`
+ * - Capacitor: `{ kind: 'open' }` in DC; direct `Z` when impedance-specified in AC; `-j / (2πfC)` otherwise
+ * - Inductor: `{ kind: 'short' }` in DC; direct `Z` when impedance-specified in AC; `+j (2πfL)` otherwise
+ */
+export function getPassiveImpedance(
+	comp: CircuitComponent,
+	mode: AnalysisMode,
+	frequencyHz: number
+): PassiveImpedanceResult | null {
+	switch (comp.kind) {
+		case 'resistor': {
+			const r = parsePassiveValue(comp);
+			return r !== null ? { kind: 'impedance', z: Complex.from(r, 0) } : null;
+		}
+		case 'capacitor': {
+			if (mode === 'dc') {
+				return { kind: 'open' };
+			}
+			if (isImpedanceSpecified(comp)) {
+				const z = parseDirectImpedance(comp);
+				return z ? { kind: 'impedance', z } : null;
+			}
+			const c = parsePassiveValue(comp);
+			if (c === null || !Number.isFinite(frequencyHz) || frequencyHz <= 0) {
+				return null;
+			}
+			return { kind: 'impedance', z: Complex.j(-1 / (2 * Math.PI * frequencyHz * c)) };
+		}
+		case 'inductor': {
+			if (mode === 'dc') {
+				return { kind: 'short' };
+			}
+			if (isImpedanceSpecified(comp)) {
+				const z = parseDirectImpedance(comp);
+				return z ? { kind: 'impedance', z } : null;
+			}
+			const l = parsePassiveValue(comp);
+			if (l === null || !Number.isFinite(frequencyHz) || frequencyHz <= 0) {
+				return null;
+			}
+			return { kind: 'impedance', z: Complex.j(2 * Math.PI * frequencyHz * l) };
+		}
+		default:
+			return null;
+	}
+}
+
 /**
  * Validates electrical topology, component values, voltage-source loops,
  * current-source cutsets, and disconnected floating subcircuits.
@@ -450,14 +565,26 @@ export function validateCircuitTopology(
 			if (comp.kind === 'capacitor') hasCapacitor = true;
 			if (comp.kind === 'inductor') hasInductor = true;
 
-			const val = parsePassiveValue(comp);
-			if (val === null) {
-				diagnostics.push({
-					severity: 'error',
-					code: 'INVALID_VALUE',
-					message: `${comp.label} (${comp.kind}) must have a positive finite value (got "${comp.value}").`,
-					componentIds: [comp.id]
-				});
+			if ((comp.kind === 'inductor' || comp.kind === 'capacitor') && isImpedanceSpecified(comp)) {
+				const z = parseDirectImpedance(comp);
+				if (z === null) {
+					diagnostics.push({
+						severity: 'error',
+						code: 'INVALID_VALUE',
+						message: `${comp.label} (${comp.kind}) must have a valid non-zero impedance with non-negative resistance (got "${comp.value}").`,
+						componentIds: [comp.id]
+					});
+				}
+			} else {
+				const val = parsePassiveValue(comp);
+				if (val === null) {
+					diagnostics.push({
+						severity: 'error',
+						code: 'INVALID_VALUE',
+						message: `${comp.label} (${comp.kind}) must have a positive finite value (got "${comp.value}").`,
+						componentIds: [comp.id]
+					});
+				}
 			}
 
 			if (cNodes.length === 2 && cNodes[0] === cNodes[1]) {

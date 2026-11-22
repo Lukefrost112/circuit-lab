@@ -23,6 +23,7 @@ import {
 	type FullSolveResult,
 	type GridPoint,
 	type MethodId,
+	type PassiveValueMode,
 	type Rotation,
 	type TheveninTarget,
 	type UnknownProblemSpec
@@ -42,6 +43,7 @@ export interface AddComponentOptions {
 	phaseDeg?: number;
 	frequencyHz?: number;
 	unit?: string;
+	valueMode?: PassiveValueMode;
 	terminalName?: string;
 }
 
@@ -445,7 +447,10 @@ class CircuitStore {
 		}
 
 		const value = opts?.value ?? getDefaultValue(kind, sourceMode);
-		const parsedNumeric = parseEngineeringNumber(value);
+		const valueMode = opts?.valueMode;
+		const parsedNumeric = valueMode === 'impedance' ? null : parseEngineeringNumber(value);
+		const resolvedUnit =
+			opts?.unit ?? (valueMode === 'impedance' ? 'Ω' : DEFAULT_UNITS[kind]);
 
 		const component: CircuitComponent = {
 			id,
@@ -458,7 +463,8 @@ class CircuitStore {
 			numericValue: parsedNumeric ?? undefined,
 			phaseDeg: AC_ENABLED ? opts?.phaseDeg : undefined,
 			frequencyHz: AC_ENABLED ? opts?.frequencyHz : undefined,
-			unit: opts?.unit ?? DEFAULT_UNITS[kind],
+			unit: resolvedUnit,
+			...(valueMode !== undefined ? { valueMode } : {}),
 			terminalName:
 				kind === 'terminal' ? (opts?.terminalName ?? generated.terminalName ?? 'A') : undefined
 		};
@@ -533,12 +539,15 @@ class CircuitStore {
 		this.recordSnapshot();
 
 		const nextValue = patch.value !== undefined ? patch.value : target.value;
+		const nextValueMode = patch.valueMode !== undefined ? patch.valueMode : target.valueMode;
 		const nextNumeric =
-			patch.value !== undefined
-				? (parseEngineeringNumber(nextValue) ?? undefined)
-				: patch.numericValue !== undefined
-					? patch.numericValue
-					: target.numericValue;
+			nextValueMode === 'impedance'
+				? undefined
+				: patch.value !== undefined
+					? (parseEngineeringNumber(nextValue) ?? undefined)
+					: patch.numericValue !== undefined
+						? patch.numericValue
+						: target.numericValue;
 
 		this._document = {
 			...this._document,

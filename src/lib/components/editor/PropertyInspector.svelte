@@ -8,15 +8,19 @@
 		formatUnknownTermExpr,
 		getDefaultUnknownSymbol,
 		getUnknownTerms,
+		isImpedanceSpecified,
 		parseComplexValue,
+		parseDirectImpedance,
+		parseEngineeringNumber,
 		type ComponentKind,
-		type ConstraintKind
+		type ConstraintKind,
+		type PassiveValueMode
 	} from '$lib/engine';
 	import { AC_ENABLED } from '$lib/env';
 	import { circuit } from '$lib/stores/circuit.svelte';
 	import { settings } from '$lib/stores/settings.svelte';
 	import EngineeringInput from './EngineeringInput.svelte';
-	import { computeWireCrossings } from './helpers';
+	import { computeWireCrossings, formatImpedanceDisplay } from './helpers';
 
 	interface Props {
 		onAutoWire?: () => void;
@@ -47,6 +51,9 @@
 
 	let labelDraft = $state('');
 	let terminalNameDraft = $state('');
+	let impedanceDraft = $state('');
+	let impedanceFocused = $state(false);
+	let impedanceInitialOnFocus = $state('');
 	let phaseDraft = $state('0');
 	let sourceFreqDraft = $state('');
 	let globalFreqDraft = $state(String(circuit.document.frequencyHz));
@@ -58,6 +65,9 @@
 		if (selectedComp) {
 			labelDraft = selectedComp.label;
 			terminalNameDraft = selectedComp.terminalName ?? '';
+			if (!impedanceFocused) {
+				impedanceDraft = selectedComp.value;
+			}
 
 			const parsed = parseComplexValue(selectedComp.value);
 			if (selectedComp.phaseDeg !== undefined && Number.isFinite(selectedComp.phaseDeg)) {
@@ -86,12 +96,46 @@
 			selectedComp?.kind === 'capacitor' ||
 			selectedComp?.kind === 'inductor'
 	);
+	const isReactive = $derived(
+		selectedComp?.kind === 'capacitor' || selectedComp?.kind === 'inductor'
+	);
+	const isImpedanceMode = $derived(
+		Boolean(selectedComp && isReactive && isImpedanceSpecified(selectedComp))
+	);
 	const isTwoTerminal = $derived(
 		selectedComp !== null &&
 			selectedComp.kind !== 'ground' &&
 			selectedComp.kind !== 'terminal'
 	);
 	const isAcMode = $derived(AC_ENABLED && circuit.document.mode === 'ac');
+	const impedanceEvaluation = $derived.by(() => {
+		if (!selectedComp || !isReactive || !isImpedanceMode) {
+			return { valid: true as const, formatted: '' };
+		}
+		const trimmed = impedanceDraft.trim();
+		if (!trimmed) {
+			return { valid: false as const, error: 'Impedance value is required' };
+		}
+		const parsed = parseDirectImpedance({
+			kind: selectedComp.kind,
+			value: trimmed,
+			unit: 'Ω',
+			valueMode: 'impedance'
+		});
+		if (!parsed) {
+			return {
+				valid: false as const,
+				error:
+					selectedComp.kind === 'inductor'
+						? 'Enter non-zero impedance (e.g. j1, j50, 2+j1, or 50) with R ≥ 0'
+						: 'Enter non-zero impedance (e.g. -j1, -j20, 1-j2, or 20) with R ≥ 0'
+			};
+		}
+		return {
+			valid: true as const,
+			formatted: formatImpedanceDisplay(parsed, settings.unitSystem, settings.precision)
+		};
+	});
 	const isTheveninTarget = $derived(
 		selectedComp !== null &&
 			circuit.theveninTarget?.kind === 'component' &&
@@ -391,6 +435,120 @@
 		}
 	}
 
+	function handlePassiveModeChange(nextMode: PassiveValueMode) {
+		if (!selectedComp || (selectedComp.kind !== 'inductor' && selectedComp.kind !== 'capacitor')) {
+			return;
+		}
+		const currentlyImpedance = isImpedanceSpecified(selectedComp);
+		if ((nextMode === 'impedance') === currentlyImpedance) {
+			return;
+		}
+		const omega = 2 * Math.PI * circuit.document.frequencyHz;
+
+		if (nextMode === 'impedance') {
+			const physVal = parseEngineeringNumber(selectedComp.value);
+			let converted: string;
+			if (selectedComp.kind === 'inductor') {
+				if (physVal !== null && physVal > 0 && Number.isFinite(omega) && omega > 0) {
+					const xl = omega * physVal;
+					converted = `j${formatEngineering(xl, '', 4).replace(/\s+/g, '')}`;
+				} else {
+					converted = 'j1';
+				}
+			} else {
+				if (physVal !== null && physVal > 0 && Number.isFinite(omega) && omega > 0) {
+					const xc = 1 / (omega * physVal);
+					converted = `-j${formatEngineering(xc, '', 4).replace(/\s+/g, '')}`;
+				} else {
+					converted = '-j1';
+				}
+			}
+			impedanceDraft = converted;
+			circuit.updateComponent(selectedComp.id, {
+				valueMode: 'impedance',
+				unit: 'Ω',
+				value: converted
+			});
+			return;
+		}
+
+		// Impedance -> Physical
+		const z = parseDirectImpedance(selectedComp);
+		let converted: string;
+		if (selectedComp.kind === 'inductor') {
+			if (z && Math.abs(z.re) < 1e-12 && z.im > 0 && Number.isFinite(omega) && omega > 0) {
+				const l = z.im / omega;
+				converted = formatEngineering(l, '', 4).replace(/\s+/g, '');
+			} else {
+				converted = '10m';
+			}
+			circuit.updateComponent(selectedComp.id, {
+				valueMode: 'physical',
+				unit: 'H',
+				value: converted
+			});
+		} else {
+			if (z && Math.abs(z.re) < 1e-12 && z.im < 0 && Number.isFinite(omega) && omega > 0) {
+				const c = 1 / (omega * Math.abs(z.im));
+				converted = formatEngineering(c, '', 4).replace(/\s+/g, '');
+			} else {
+				converted = '10u';
+			}
+			circuit.updateComponent(selectedComp.id, {
+				valueMode: 'physical',
+				unit: 'F',
+				value: converted
+			});
+		}
+	}
+
+	function handleImpedanceFocus() {
+		if (!selectedComp) return;
+		impedanceFocused = true;
+		impedanceInitialOnFocus = selectedComp.value;
+	}
+
+	function commitImpedanceDraft() {
+		if (!selectedComp || !isReactive) return;
+		const trimmed = impedanceDraft.trim();
+		if (impedanceEvaluation.valid) {
+			if (
+				trimmed !== impedanceInitialOnFocus.trim() ||
+				selectedComp.valueMode !== 'impedance' ||
+				selectedComp.unit !== 'Ω'
+			) {
+				circuit.updateComponent(selectedComp.id, {
+					valueMode: 'impedance',
+					unit: 'Ω',
+					value: trimmed
+				});
+				impedanceInitialOnFocus = trimmed;
+			}
+		} else {
+			impedanceDraft = selectedComp.value;
+		}
+	}
+
+	function handleImpedanceBlur() {
+		impedanceFocused = false;
+		commitImpedanceDraft();
+	}
+
+	function handleImpedanceKeyDown(e: KeyboardEvent) {
+		if (!selectedComp) return;
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			if (impedanceEvaluation.valid) {
+				commitImpedanceDraft();
+			}
+			(e.currentTarget as HTMLInputElement).blur();
+		} else if (e.key === 'Escape') {
+			e.preventDefault();
+			impedanceDraft = selectedComp.value;
+			(e.currentTarget as HTMLInputElement).blur();
+		}
+	}
+
 	function commitPhase() {
 		if (!AC_ENABLED || !selectedComp || !isSource) return;
 		const deg = Number(phaseDraft);
@@ -513,20 +671,109 @@
 					/>
 				</div>
 			{:else if selectedComp.kind !== 'ground'}
-				<div class="flex flex-col gap-1.5">
-					<Label for="comp-value">
-						{isSource ? (isAcMode ? 'Magnitude / Phasor' : 'DC Value') : 'Value'}
-					</Label>
-					<EngineeringInput
-						id="comp-value"
-						value={selectedComp.value}
-						unit={selectedComp.unit ?? UNIT_BY_KIND[selectedComp.kind] ?? ''}
-						allowComplex={isSource && isAcMode}
-						positiveOnly={isPassive}
-						allowZero={isSource}
-						onCommit={(val) => circuit.updateComponent(selectedComp.id, { value: val })}
-					/>
-				</div>
+				{#if isReactive && isAcMode}
+					<div class="flex flex-col gap-1.5">
+						<span class="text-[11px] font-medium text-muted-foreground">
+							Value Specification
+						</span>
+						<div
+							role="radiogroup"
+							aria-label={selectedComp.kind === 'inductor'
+								? 'Inductor value specification'
+								: 'Capacitor value specification'}
+							class="grid min-h-11 grid-cols-2 gap-0.5 rounded-[4px] border border-border bg-surface-rail p-0.5 lg:h-8 lg:min-h-0"
+						>
+							<button
+								type="button"
+								role="radio"
+								aria-checked={!isImpedanceMode}
+								onclick={() => handlePassiveModeChange('physical')}
+								class={`min-h-10 cursor-pointer rounded-[3px] border px-2 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:h-full lg:min-h-0 lg:text-[11px] ${
+									!isImpedanceMode
+										? 'border-border bg-card text-foreground'
+										: 'border-transparent text-muted-foreground hover:text-foreground'
+								}`}
+							>
+								{selectedComp.kind === 'inductor' ? 'Inductance (H)' : 'Capacitance (F)'}
+							</button>
+							<button
+								type="button"
+								role="radio"
+								aria-checked={isImpedanceMode}
+								onclick={() => handlePassiveModeChange('impedance')}
+								class={`min-h-10 cursor-pointer rounded-[3px] border px-2 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:h-full lg:min-h-0 lg:text-[11px] ${
+									isImpedanceMode
+										? 'border-border bg-card text-foreground'
+										: 'border-transparent text-muted-foreground hover:text-foreground'
+								}`}
+							>
+								Impedance (Ω)
+							</button>
+						</div>
+					</div>
+				{/if}
+
+				{#if isReactive && isImpedanceMode}
+					<div class="flex flex-col gap-1.5">
+						<Label for="comp-impedance">Impedance (Z)</Label>
+						<div class="flex flex-col gap-1">
+							<div class="relative flex items-center">
+								<input
+									id="comp-impedance"
+									type="text"
+									bind:value={impedanceDraft}
+									placeholder={selectedComp.kind === 'inductor'
+										? 'e.g. j1, j50, 2+j1'
+										: 'e.g. -j1, -j20, 1-j2'}
+									aria-invalid={!impedanceEvaluation.valid ? 'true' : undefined}
+									onfocus={handleImpedanceFocus}
+									onblur={handleImpedanceBlur}
+									onkeydown={handleImpedanceKeyDown}
+									class={`font-engineering flex h-11 min-h-11 w-full rounded-[4px] border bg-card px-2.5 py-1 pr-9 text-base text-foreground transition-colors duration-150 placeholder:text-muted-foreground/80 hover:border-muted-foreground/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-offset-background lg:h-8 lg:min-h-0 lg:pr-8 lg:text-xs ${
+										!impedanceEvaluation.valid
+											? 'border-destructive focus-visible:ring-destructive'
+											: 'border-input focus-visible:ring-ring'
+									}`}
+								/>
+								<span
+									class="pointer-events-none absolute right-3 font-engineering text-xs text-muted-foreground select-none lg:right-2.5 lg:text-[11px]"
+								>
+									Ω
+								</span>
+							</div>
+							{#if !impedanceEvaluation.valid && impedanceEvaluation.error}
+								<p class="text-[11px] leading-tight text-destructive" role="alert">
+									{impedanceEvaluation.error}
+								</p>
+							{:else if !isAcMode}
+								<p class="text-[11px] leading-tight text-muted-foreground">
+									DC steady state: {selectedComp.kind === 'capacitor'
+										? 'open circuit (I = 0 A)'
+										: 'short circuit (V = 0 V)'}
+								</p>
+							{:else if impedanceEvaluation.formatted}
+								<p class="font-engineering text-[11px] leading-tight text-muted-foreground">
+									= {impedanceEvaluation.formatted}
+								</p>
+							{/if}
+						</div>
+					</div>
+				{:else}
+					<div class="flex flex-col gap-1.5">
+						<Label for="comp-value">
+							{isSource ? (isAcMode ? 'Magnitude / Phasor' : 'DC Value') : 'Value'}
+						</Label>
+						<EngineeringInput
+							id="comp-value"
+							value={selectedComp.value}
+							unit={selectedComp.unit ?? UNIT_BY_KIND[selectedComp.kind] ?? ''}
+							allowComplex={isSource && isAcMode}
+							positiveOnly={isPassive}
+							allowZero={isSource}
+							onCommit={(val) => circuit.updateComponent(selectedComp.id, { value: val })}
+						/>
+					</div>
+				{/if}
 			{/if}
 
 			{#if isSource && isAcMode}

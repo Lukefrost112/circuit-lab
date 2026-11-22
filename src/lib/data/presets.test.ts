@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { Complex } from '../engine/complex';
 import { buildElectricalGraph } from '../engine/graph';
 import { solveMNA } from '../engine/mna';
 import { solveCircuit } from '../engine/solve';
@@ -12,20 +13,21 @@ const EXPECTED_NON_REF_NODES: Record<string, number> = {
 	'dc-superposition-source-transform': 3,
 	'dc-steady-state-rlc': 3,
 	'ac-rlc-phasor': 3,
-	'ac-multi-source-phasor': 4
+	'ac-multi-source-phasor': 4,
+	'ac-impedance-supernode': 4
 };
 
 describe('Curated Textbook DC & AC Presets', () => {
-	it('contains 8 unique presets spanning DC and AC modes with valid load references', () => {
-		expect(PRESETS.length).toBe(8);
+	it('contains 9 unique presets spanning DC and AC modes with valid load references', () => {
+		expect(PRESETS.length).toBe(9);
 
 		const ids = new Set(PRESETS.map((p) => p.id));
-		expect(ids.size).toBe(8);
+		expect(ids.size).toBe(9);
 
 		const dcCount = PRESETS.filter((p) => p.category === 'dc').length;
 		const acCount = PRESETS.filter((p) => p.category === 'ac').length;
 		expect(dcCount).toBe(6);
-		expect(acCount).toBe(2);
+		expect(acCount).toBe(3);
 
 		for (const preset of PRESETS) {
 			expect(getPresetById(preset.id)).toBe(preset);
@@ -107,5 +109,35 @@ describe('Curated Textbook DC & AC Presets', () => {
 		expect(rlcDcSol.branches['C1'].voltage.re).toBeCloseTo(12, 9);
 		expect(rlcDcSol.branches['L1'].voltage.re).toBeCloseTo(0, 9);
 		expect(rlcDcSol.branches['L1'].current.re).toBeCloseTo(3, 9);
+	});
+
+	it('matches exact analytical solution on ac-impedance-supernode preset', () => {
+		const preset = getPresetById('ac-impedance-supernode')!;
+		const full = solveCircuit(preset.document, {
+			theveninTarget: preset.theveninLoadId
+				? { kind: 'component', componentId: preset.theveninLoadId }
+				: undefined
+		});
+
+		expect(full.mna.valid).toBe(true);
+		expect(full.mna.powerBalance.balanced).toBe(true);
+		expect(Math.abs(full.mna.powerBalance.totalRealPower)).toBeLessThan(1e-10);
+		expect(Math.abs(full.mna.powerBalance.totalReactivePower)).toBeLessThan(1e-10);
+		expect(full.allVerified).toBe(true);
+		expect(full.maxDiscrepancy).toBeLessThan(1e-8);
+
+		// Analytical: V(N2) = -((0.4 + j0.8) / (1.4 + j1.3)) * 10
+		const expectedVN2 = Complex.from(0.4, 0.8)
+			.div(Complex.from(1.4, 1.3))
+			.scale(-10);
+		const expectedVN3 = expectedVN2.add(Complex.from(10, 0));
+
+		const vN2 = full.mna.nodeVoltages['N2'].voltage;
+		const vN3 = full.mna.nodeVoltages['N3'].voltage;
+		expect(vN2.sub(expectedVN2).abs()).toBeLessThan(1e-12);
+		expect(vN3.sub(expectedVN3).abs()).toBeLessThan(1e-12);
+		expect(full.mna.branches['C1'].impedance?.equals(Complex.j(-1), 1e-12)).toBe(true);
+		expect(full.mna.branches['C2'].impedance?.equals(Complex.j(-1), 1e-12)).toBe(true);
+		expect(full.mna.branches['L1'].impedance?.equals(Complex.j(1), 1e-12)).toBe(true);
 	});
 });

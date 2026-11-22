@@ -510,6 +510,50 @@ describe('editor geometry & formatting helpers', () => {
 			}
 		}
 	});
+
+	it('formats direct AC impedance inductors and capacitors cleanly across AC, DC, and unit systems', () => {
+		const cImp = {
+			id: 'C1',
+			kind: 'capacitor' as const,
+			label: 'C1',
+			x: 8,
+			y: 4,
+			rotation: 0 as const,
+			value: '-j1',
+			valueMode: 'impedance' as const,
+			unit: 'Ω'
+		};
+		const lImp = {
+			id: 'L1',
+			kind: 'inductor' as const,
+			label: 'L1',
+			x: 24,
+			y: 4,
+			rotation: 0 as const,
+			value: 'j2k',
+			valueMode: 'impedance' as const,
+			unit: 'Ω'
+		};
+		const lossyL = {
+			id: 'L2',
+			kind: 'inductor' as const,
+			label: 'L2',
+			x: 24,
+			y: 8,
+			rotation: 0 as const,
+			value: '2+j1',
+			valueMode: 'impedance' as const,
+			unit: 'Ω'
+		};
+
+		expect(formatComponentDisplayValue(cImp, 'ac', 'auto')).toBe('-j1 Ω');
+		expect(formatComponentDisplayValue(cImp, 'ac', 'ohm-v-a')).toBe('-j1 Ω');
+		expect(formatComponentDisplayValue(cImp, 'dc', 'auto')).toBe('Open (DC)');
+		expect(formatComponentDisplayValue(lImp, 'ac', 'auto')).toBe('j2 kΩ');
+		expect(formatComponentDisplayValue(lImp, 'ac', 'ohm-v-a')).toBe('j2000 Ω');
+		expect(formatComponentDisplayValue(lImp, 'dc', 'auto')).toBe('Short (DC)');
+		expect(formatComponentDisplayValue(lossyL, 'ac', 'auto')).toBe('2 + j1 Ω');
+	});
 });
 
 describe('editor Svelte components SSR rendering', () => {

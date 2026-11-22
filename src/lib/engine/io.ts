@@ -7,7 +7,13 @@ import {
 	type LayoutMode,
 	type LayoutNetlistElement
 } from './auto-layout';
-import { buildElectricalGraph, parsePassiveValue, parseSourceValue } from './graph';
+import {
+	buildElectricalGraph,
+	isImpedanceSpecified,
+	parseDirectImpedance,
+	parsePassiveValue,
+	parseSourceValue
+} from './graph';
 import type {
 	AcMagnitudeMode,
 	AnalysisMode,
@@ -17,6 +23,7 @@ import type {
 	CircuitWire,
 	ComponentKind,
 	ConstraintKind,
+	PassiveValueMode,
 	Rotation,
 	UnitSystemId,
 	UnknownProblemSpec,
@@ -46,6 +53,8 @@ Schema:
       "fromPos": [0, 0],
       "toPos": [1, 0],
       "value": "10k",
+      "unit": "Ω",
+      "valueMode": "physical" | "impedance",
       "phaseDeg": 0,
       "unknown": false,
       "unknownSymbol": "V",
@@ -91,8 +100,9 @@ Rules:
      - "auto" for mixed scales
 6. Values:
    - Use plain numbers or SI suffixes (f, p, n, u, m, k, M, G, T): e.g. "10k", "4.7u", "100m", "12".
-   - All known passive values (R, C, L) must be strictly positive.
-   - For AC circuits, set "mode": "ac", include positive "frequencyHz" (e.g. 60 or 1000), and write phasor sources as "120∠30°" (or numeric magnitude in "value" with "phaseDeg": 30).
+   - All known physical passive values (R, C, L) must be strictly positive.
+   - For AC circuits, set "mode": "ac", include positive "frequencyHz" (e.g. 60 or 1000 — use 60 if no frequency is stated), and write phasor sources as "120∠30°" (or numeric magnitude in "value" with "phaseDeg": 30).
+   - For AC circuits where inductors or capacitors are given directly as impedances in Ohms (e.g. j1 Ω, -j1 Ω, j50 Ω, -j20 Ω, 2+j1 Ω), set "valueMode": "impedance", "unit": "Ω", and "value": "j1" / "-j1" / "j50" / "-j20" / "2+j1" (and set "mode": "ac", "frequencyHz": 60 if no frequency is stated).
 7. Unknown-Value Problems (omit "unknownProblem" if all values are known):
    - Single unknown (e.g. "Find V_s given I_o = 2 mA" or "Find R_x given V_o = 6 V"):
      - On that element, set "unknown": true and "value": "?" (or placeholder "1").
@@ -258,6 +268,7 @@ export function exportCircuitJson(doc: CircuitDocument): string {
 		if (c.numericValue !== undefined) out.numericValue = c.numericValue;
 		if (c.phaseDeg !== undefined) out.phaseDeg = c.phaseDeg;
 		if (c.unit !== undefined) out.unit = c.unit;
+		if (c.valueMode !== undefined) out.valueMode = c.valueMode;
 		if (c.terminalName !== undefined) out.terminalName = c.terminalName;
 		if (c.controlRef !== undefined) out.controlRef = c.controlRef;
 		return out;
@@ -585,13 +596,28 @@ function parseCircuitDocumentFormat(obj: Record<string, unknown>): CircuitImport
 			candidate.phaseDeg = raw.phaseDeg;
 		}
 		if (typeof raw.unit === 'string') candidate.unit = raw.unit;
+		if (raw.valueMode !== undefined) {
+			if (raw.valueMode === 'physical' || raw.valueMode === 'impedance') {
+				candidate.valueMode = raw.valueMode;
+			} else {
+				errors.push(
+					`${prefix} (${candidate.label}): invalid "valueMode" (${JSON.stringify(raw.valueMode)}); expected "physical" or "impedance".`
+				);
+			}
+		}
 		if (typeof raw.terminalName === 'string') candidate.terminalName = raw.terminalName;
 		if (isPlainObject(raw.controlRef)) {
 			candidate.controlRef = raw.controlRef as CircuitComponent['controlRef'];
 		}
 
 		if (PASSIVE_KINDS.has(kind) && valueStr !== '') {
-			if (parsePassiveValue(candidate) === null) {
+			if ((kind === 'inductor' || kind === 'capacitor') && isImpedanceSpecified(candidate)) {
+				if (parseDirectImpedance(candidate) === null) {
+					errors.push(
+						`${prefix} (${candidate.label}): impedance value "${valueStr}" must be a non-zero complex impedance with non-negative resistance.`
+					);
+				}
+			} else if (parsePassiveValue(candidate) === null) {
 				errors.push(
 					`${prefix} (${candidate.label}): passive value "${valueStr}" must be a positive finite number.`
 				);
@@ -932,21 +958,61 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 			unknownSymbol = algebraicParsed.symbol;
 		}
 
+		// Parse optional passive valueMode & unit (auto-inferring direct AC impedance for L/C)
+		const rawUnit = typeof raw.unit === 'string' && raw.unit.trim() !== '' ? raw.unit.trim() : undefined;
+		let explicitValueMode: PassiveValueMode | undefined;
+		if (raw.valueMode !== undefined) {
+			if (raw.valueMode === 'physical' || raw.valueMode === 'impedance') {
+				explicitValueMode = raw.valueMode;
+			} else {
+				errors.push(
+					`${prefix} (${displayName}): invalid "valueMode" (${JSON.stringify(raw.valueMode)}); expected "physical" or "impedance".`
+				);
+			}
+		}
+
+		const isReactiveKind = kind === 'inductor' || kind === 'capacitor';
+		const inferredImpedanceMode =
+			isReactiveKind &&
+			(explicitValueMode === 'impedance' ||
+				rawUnit === 'Ω' ||
+				(!isMarkedUnknown && /[j∠@]/i.test(rawValTrimmed)));
+		const resolvedValueMode: PassiveValueMode | undefined = inferredImpedanceMode
+			? 'impedance'
+			: explicitValueMode;
+		const resolvedUnit: string | undefined = inferredImpedanceMode ? 'Ω' : rawUnit;
+
 		// Validate value (allowing "?" / "unknown" / algebraic expression when element is marked unknown)
 		let valueStr = '';
 		if (kind === 'ground' || kind === 'terminal') {
 			valueStr = typeof raw.value === 'string' ? raw.value.trim() : '0';
 		} else if (isMarkedUnknown) {
+			const defaultPlaceholder = inferredImpedanceMode
+				? kind === 'inductor'
+					? 'j1'
+					: '-j1'
+				: '1';
 			if (algebraicParsed !== null || isUnknownPlaceholder || rawValTrimmed === '') {
-				valueStr = '1';
+				valueStr = defaultPlaceholder;
 			} else if (typeof raw.value === 'number' && Number.isFinite(raw.value) && raw.value > 0) {
-				valueStr = String(raw.value);
+				valueStr = inferredImpedanceMode
+					? kind === 'inductor'
+						? `j${raw.value}`
+						: `-j${raw.value}`
+					: String(raw.value);
 			} else {
 				const validAsKnown = PASSIVE_KINDS.has(kind)
-					? (() => {
-							const n = parseEngineeringNumber(rawValTrimmed);
-							return n !== null && Number.isFinite(n) && n > 0;
-						})()
+					? inferredImpedanceMode
+						? parseDirectImpedance({
+								kind,
+								value: rawValTrimmed,
+								unit: 'Ω',
+								valueMode: 'impedance'
+							}) !== null
+						: (() => {
+								const n = parseEngineeringNumber(rawValTrimmed);
+								return n !== null && Number.isFinite(n) && n > 0;
+							})()
 					: (() => {
 							const c = parseComplexValue(rawValTrimmed);
 							return c !== null && c.isFinite() && (mode === 'ac' || c.isReal(1e-12));
@@ -955,7 +1021,7 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 					valueStr = rawValTrimmed;
 				} else {
 					if (!unknownSymbol) unknownSymbol = rawValTrimmed;
-					valueStr = '1';
+					valueStr = defaultPlaceholder;
 				}
 			}
 		} else {
@@ -982,11 +1048,25 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 
 		if (!isMarkedUnknown) {
 			if (PASSIVE_KINDS.has(kind) && valueStr !== '') {
-				const parsed = parseEngineeringNumber(valueStr);
-				if (parsed === null || !Number.isFinite(parsed) || parsed <= 0) {
-					errors.push(
-						`${prefix} (${displayName}): passive value "${valueStr}" must be a positive finite number.`
-					);
+				if (inferredImpedanceMode) {
+					const parsedZ = parseDirectImpedance({
+						kind,
+						value: valueStr,
+						unit: 'Ω',
+						valueMode: 'impedance'
+					});
+					if (parsedZ === null) {
+						errors.push(
+							`${prefix} (${displayName}): impedance value "${valueStr}" must be a non-zero complex impedance with non-negative resistance.`
+						);
+					}
+				} else {
+					const parsed = parseEngineeringNumber(valueStr);
+					if (parsed === null || !Number.isFinite(parsed) || parsed <= 0) {
+						errors.push(
+							`${prefix} (${displayName}): passive value "${valueStr}" must be a positive finite number.`
+						);
+					}
 				}
 			} else if (SOURCE_KINDS.has(kind) && valueStr !== '') {
 				const parsed = parseComplexValue(valueStr);
@@ -1011,6 +1091,8 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 		if (elId !== undefined) el.id = elId;
 		if (labelStr !== '') el.label = labelStr;
 		if (phaseDeg !== undefined) el.phaseDeg = phaseDeg;
+		if (resolvedUnit !== undefined) el.unit = resolvedUnit;
+		if (resolvedValueMode !== undefined) el.valueMode = resolvedValueMode;
 		if (typeof raw.frequencyHz === 'number' && Number.isFinite(raw.frequencyHz)) {
 			el.frequencyHz = raw.frequencyHz;
 		}

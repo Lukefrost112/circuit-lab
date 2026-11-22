@@ -15,7 +15,7 @@
 import { Complex } from './complex';
 import {
 	buildElectricalGraph,
-	parsePassiveValue,
+	getPassiveImpedance,
 	parseSourceValue,
 	validateCircuitTopology
 } from './graph';
@@ -203,7 +203,6 @@ export function solveMNA(doc: CircuitDocument, options?: SolveMnaOptions): MnaSo
 	const b: Complex[] = Array.from({ length: dim }, () => Complex.zero());
 	const ctx: MnaStampContext = { A, b, nodeIndex, numNodes };
 
-	const omega = 2 * Math.PI * frequencyHz;
 	const componentImpedance = new Map<string, Complex | null>();
 	const currentSourceValues = new Map<string, Complex>();
 
@@ -211,36 +210,22 @@ export function solveMNA(doc: CircuitDocument, options?: SolveMnaOptions): MnaSo
 		const [nodeA, nodeB] = graph.componentNodes[comp.id];
 
 		switch (comp.kind) {
-			case 'resistor': {
-				const r = parsePassiveValue(comp)!;
-				stampResistor(ctx, nodeA, nodeB, r);
-				componentImpedance.set(comp.id, Complex.from(r, 0));
-				break;
-			}
-			case 'capacitor': {
-				const c = parsePassiveValue(comp)!;
-				if (mode === 'dc') {
+			case 'resistor':
+			case 'capacitor':
+			case 'inductor': {
+				const passive = getPassiveImpedance(comp, mode, frequencyHz)!;
+				if (passive.kind === 'open') {
 					// Open circuit in DC steady state (Y = 0, I = 0)
 					componentImpedance.set(comp.id, null);
-				} else {
-					const y = Complex.j(omega * c);
-					stampAdmittance(ctx, nodeA, nodeB, y);
-					componentImpedance.set(comp.id, Complex.j(-1 / (omega * c)));
-				}
-				break;
-			}
-			case 'inductor': {
-				const l = parsePassiveValue(comp)!;
-				if (mode === 'dc') {
+				} else if (passive.kind === 'short') {
 					// Short circuit (0 V branch) in DC steady state
 					const auxIdx = voltageBranchAuxMap.get(comp.id)!;
 					stampVoltageSource(ctx, auxIdx, nodeA, nodeB, Complex.zero());
 					componentImpedance.set(comp.id, Complex.zero());
 				} else {
-					const z = Complex.j(omega * l);
-					const y = Complex.j(-1 / (omega * l));
+					const y = Complex.one().div(passive.z);
 					stampAdmittance(ctx, nodeA, nodeB, y);
-					componentImpedance.set(comp.id, z);
+					componentImpedance.set(comp.id, passive.z);
 				}
 				break;
 			}
@@ -318,23 +303,15 @@ export function solveMNA(doc: CircuitDocument, options?: SolveMnaOptions): MnaSo
 		const impedance = componentImpedance.get(comp.id) ?? null;
 
 		let current: Complex;
-		if (comp.kind === 'resistor') {
-			const r = parsePassiveValue(comp)!;
-			current = voltage.scale(1 / r);
-		} else if (comp.kind === 'capacitor') {
-			if (mode === 'dc') {
+		if (comp.kind === 'resistor' || comp.kind === 'capacitor' || comp.kind === 'inductor') {
+			const passive = getPassiveImpedance(comp, mode, frequencyHz)!;
+			if (passive.kind === 'open') {
 				current = Complex.zero();
-			} else {
-				const c = parsePassiveValue(comp)!;
-				current = voltage.mul(Complex.j(omega * c));
-			}
-		} else if (comp.kind === 'inductor') {
-			if (mode === 'dc') {
+			} else if (passive.kind === 'short') {
 				const auxIdx = voltageBranchAuxMap.get(comp.id)!;
 				current = x[numNodes + auxIdx];
 			} else {
-				const l = parsePassiveValue(comp)!;
-				current = voltage.mul(Complex.j(-1 / (omega * l)));
+				current = voltage.div(passive.z);
 			}
 		} else if (comp.kind === 'voltage_source') {
 			const auxIdx = voltageBranchAuxMap.get(comp.id)!;

@@ -902,5 +902,59 @@ Let me know if you want node voltages calculated!`;
 		expect(solved.unknownSolution?.solutions[0].termValues?.[1].value.re).toBeCloseTo(20, 9);
 		expect(solved.allVerified).toBe(true);
 	});
+
+	it('imports direct AC impedance passives from AI netlist (explicit and inferred) and round-trips CircuitDocument JSON', () => {
+		expect(AI_CIRCUIT_IMPORT_PROMPT).toContain('"valueMode": "impedance"');
+
+		const aiPayload = JSON.stringify({
+			schemaVersion: 1,
+			name: 'AC Impedance Supernode Import',
+			mode: 'ac',
+			frequencyHz: 60,
+			acMagnitudeMode: 'rms',
+			unitSystem: 'ohm-v-a',
+			elements: [
+				{ id: 'R1', kind: 'resistor', label: 'R1', from: 'N1', to: '0', fromPos: [0, 0], toPos: [0, 1], value: '1' },
+				{ id: 'C1', kind: 'capacitor', label: 'C1', from: 'N1', to: 'N2', fromPos: [0, 0], toPos: [1, 0], value: '-j1', valueMode: 'impedance', unit: 'Ω' },
+				{ id: 'R2', kind: 'resistor', label: 'R2', from: 'N2', to: '0', fromPos: [1, 0], toPos: [1, 1], value: '2' },
+				{ id: 'Vs', kind: 'voltage_source', label: 'Vs', from: 'N3', to: 'N2', fromPos: [2, 0], toPos: [1, 0], value: '10∠0°' },
+				// Auto-inferred impedance mode from "-j1" without explicit valueMode
+				{ id: 'C2', kind: 'capacitor', label: 'C2', from: 'N3', to: '0', fromPos: [2, 0], toPos: [2, 1], value: '-j1' },
+				{ id: 'L1', kind: 'inductor', label: 'L1', from: 'N3', to: 'N4', fromPos: [2, 0], toPos: [3, 0], value: 'j1', unit: 'Ω' },
+				{ id: 'R3', kind: 'resistor', label: 'R3', from: 'N4', to: '0', fromPos: [3, 0], toPos: [3, 1], value: '2' }
+			]
+		});
+
+		const imported = parseCircuitImport(aiPayload);
+		expect(imported.ok).toBe(true);
+		if (!imported.ok) return;
+
+		const c1 = imported.document.components.find((c) => c.id === 'C1')!;
+		const c2 = imported.document.components.find((c) => c.id === 'C2')!;
+		const l1 = imported.document.components.find((c) => c.id === 'L1')!;
+		expect(c1.valueMode).toBe('impedance');
+		expect(c1.unit).toBe('Ω');
+		expect(c2.valueMode).toBe('impedance');
+		expect(c2.unit).toBe('Ω');
+		expect(l1.valueMode).toBe('impedance');
+		expect(l1.unit).toBe('Ω');
+
+		const solved = solveCircuit(imported.document);
+		expect(solved.mna.valid).toBe(true);
+		expect(solved.mna.powerBalance.balanced).toBe(true);
+		expect(solved.allVerified).toBe(true);
+		expect(solved.maxDiscrepancy).toBeLessThan(1e-8);
+
+		// Export as CircuitDocument JSON and re-import
+		const exported = exportCircuitJson(imported.document);
+		expect(exported).toContain('"valueMode": "impedance"');
+		const reimported = parseCircuitImport(exported);
+		expect(reimported.ok).toBe(true);
+		if (!reimported.ok) return;
+		expect(reimported.document.components.find((c) => c.id === 'C1')?.valueMode).toBe('impedance');
+		expect(reimported.document.components.find((c) => c.id === 'L1')?.valueMode).toBe('impedance');
+		const solvedAgain = solveCircuit(reimported.document);
+		expect(solvedAgain.allVerified).toBe(true);
+	});
 });
 

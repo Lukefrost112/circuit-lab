@@ -453,4 +453,41 @@ describe('Shareable Circuit URL Codec (share.ts)', () => {
 		expect(decodedSol.unknownSolution?.solutions[0].termValues?.[1].value.re).toBeCloseTo(20, 9);
 		expect(decodedSol.allVerified).toBe(true);
 	});
+
+	it('round-trips direct AC impedance components (valueMode & unit) losslessly through #c=v1.', async () => {
+		const acImpPreset = PRESETS.find((p) => p.id === 'ac-impedance-supernode')!;
+		expect(acImpPreset).toBeDefined();
+
+		const origSol = solveCircuit(acImpPreset.document);
+		expect(origSol.mna.valid).toBe(true);
+		expect(origSol.allVerified).toBe(true);
+
+		const hash = await encodeCircuitToHash({
+			document: acImpPreset.document,
+			unitSystem: 'ohm-v-a'
+		});
+		expect(hash.startsWith('#c=v1.')).toBe(true);
+
+		const decoded = await decodeCircuitFromHash(hash);
+		expect(decoded).not.toBeNull();
+		if (!decoded) return;
+
+		const c1 = decoded.document.components.find((c) => c.id === 'C1')!;
+		const l1 = decoded.document.components.find((c) => c.id === 'L1')!;
+		expect(c1.valueMode).toBe('impedance');
+		expect(c1.value).toBe('-j1');
+		expect(c1.unit).toBe('Ω');
+		expect(l1.valueMode).toBe('impedance');
+		expect(l1.value).toBe('j1');
+		expect(l1.unit).toBe('Ω');
+
+		const decodedSol = solveCircuit(decoded.document);
+		expect(decodedSol.mna.valid).toBe(true);
+		expect(decodedSol.allVerified).toBe(true);
+		expect(
+			decodedSol.mna.nodeVoltages['N2'].voltage
+				.sub(origSol.mna.nodeVoltages['N2'].voltage)
+				.abs()
+		).toBeLessThan(1e-12);
+	});
 });

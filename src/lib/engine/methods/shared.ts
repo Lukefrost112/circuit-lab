@@ -5,7 +5,7 @@
  */
 
 import { Complex, formatRational } from '../complex';
-import { parsePassiveValue } from '../graph';
+import { getPassiveImpedance as resolvePassiveImpedance } from '../graph';
 import type {
 	AnalysisMode,
 	CircuitComponent,
@@ -57,20 +57,11 @@ export function getPassiveImpedance(
 	mode: AnalysisMode,
 	frequencyHz: number
 ): Complex | null {
-	const val = parsePassiveValue(comp);
-	if (val === null) return null;
-	const omega = 2 * Math.PI * frequencyHz;
-
-	switch (comp.kind) {
-		case 'resistor':
-			return Complex.from(val, 0);
-		case 'capacitor':
-			return mode === 'dc' ? null : Complex.j(-1 / (omega * val));
-		case 'inductor':
-			return mode === 'dc' ? Complex.zero() : Complex.j(omega * val);
-		default:
-			return null;
-	}
+	const res = resolvePassiveImpedance(comp, mode, frequencyHz);
+	if (!res) return null;
+	if (res.kind === 'impedance') return res.z;
+	if (res.kind === 'short') return Complex.zero();
+	return null;
 }
 
 /**
@@ -82,20 +73,11 @@ export function getPassiveAdmittance(
 	mode: AnalysisMode,
 	frequencyHz: number
 ): Complex | null {
-	const val = parsePassiveValue(comp);
-	if (val === null) return null;
-	const omega = 2 * Math.PI * frequencyHz;
-
-	switch (comp.kind) {
-		case 'resistor':
-			return Complex.from(1 / val, 0);
-		case 'capacitor':
-			return mode === 'dc' ? Complex.zero() : Complex.j(omega * val);
-		case 'inductor':
-			return mode === 'dc' ? null : Complex.j(-1 / (omega * val));
-		default:
-			return null;
-	}
+	const res = resolvePassiveImpedance(comp, mode, frequencyHz);
+	if (!res) return null;
+	if (res.kind === 'impedance') return Complex.one().div(res.z);
+	if (res.kind === 'open') return Complex.zero();
+	return null;
 }
 
 /**
