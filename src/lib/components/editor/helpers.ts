@@ -110,6 +110,242 @@ export function computeJunctionPoints(
 	return junctions;
 }
 
+export interface WireCrossing {
+	/** Grid coordinate of the orthogonal intersection */
+	x: number;
+	y: number;
+	/** true = electrically connected 4-way crossing (solder dot); false = insulated pass-over (bridge hop) */
+	connected: boolean;
+	/** Wire IDs involved at this crossing */
+	wireIds: string[];
+}
+
+interface HorizontalSegment {
+	wireId: string;
+	y: number;
+	minX: number;
+	maxX: number;
+}
+
+interface VerticalSegment {
+	wireId: string;
+	x: number;
+	minY: number;
+	maxY: number;
+}
+
+/**
+ * Detects orthogonal wire crossings across the schematic:
+ * - `connected: false` when a horizontal segment and vertical segment cross strictly interior to
+ *   both segments with no wire vertex or component pin at the intersection (insulated pass-over).
+ * - `connected: true` when a wire vertex (not on a component pin) has incident orthogonal segments
+ *   extending in all 4 cardinal directions (left, right, up, down).
+ */
+export function computeWireCrossings(
+	components: CircuitComponent[],
+	wires: CircuitWire[]
+): WireCrossing[] {
+	const pinSet = new Set<string>();
+	for (const comp of components) {
+		for (const pin of getPinPositions(comp)) {
+			pinSet.add(`${pin.x},${pin.y}`);
+		}
+	}
+
+	const vertexMap = new Map<string, GridPoint>();
+	const hSegments: HorizontalSegment[] = [];
+	const vSegments: VerticalSegment[] = [];
+
+	for (const wire of wires) {
+		for (const pt of wire.points) {
+			const key = `${pt.x},${pt.y}`;
+			if (!vertexMap.has(key)) {
+				vertexMap.set(key, { x: pt.x, y: pt.y });
+			}
+		}
+		for (let i = 0; i + 1 < wire.points.length; i++) {
+			const a = wire.points[i];
+			const b = wire.points[i + 1];
+			if (a.x === b.x && a.y === b.y) continue;
+			if (a.y === b.y) {
+				hSegments.push({
+					wireId: wire.id,
+					y: a.y,
+					minX: Math.min(a.x, b.x),
+					maxX: Math.max(a.x, b.x)
+				});
+			} else if (a.x === b.x) {
+				vSegments.push({
+					wireId: wire.id,
+					x: a.x,
+					minY: Math.min(a.y, b.y),
+					maxY: Math.max(a.y, b.y)
+				});
+			}
+		}
+	}
+
+	const crossings = new Map<string, { x: number; y: number; connected: boolean; wireIdSet: Set<string> }>();
+
+	// 1. Unconnected orthogonal pass-over crossings
+	for (const h of hSegments) {
+		for (const v of vSegments) {
+			if (v.x > h.minX && v.x < h.maxX && h.y > v.minY && h.y < v.maxY) {
+				const key = `${v.x},${h.y}`;
+				if (pinSet.has(key) || vertexMap.has(key)) continue;
+				let entry = crossings.get(key);
+				if (!entry) {
+					entry = { x: v.x, y: h.y, connected: false, wireIdSet: new Set<string>() };
+					crossings.set(key, entry);
+				}
+				entry.wireIdSet.add(h.wireId);
+				entry.wireIdSet.add(v.wireId);
+			}
+		}
+	}
+
+	// 2. Connected 4-way crossings (preferring connected: true if both somehow matched)
+	for (const [key, pt] of vertexMap.entries()) {
+		if (pinSet.has(key)) continue;
+
+		let hasLeft = false;
+		let hasRight = false;
+		let hasUp = false;
+		let hasDown = false;
+		const incidentWireIds = new Set<string>();
+
+		for (const h of hSegments) {
+			if (h.y !== pt.y) continue;
+			if (pt.x > h.minX && pt.x < h.maxX) {
+				hasLeft = true;
+				hasRight = true;
+				incidentWireIds.add(h.wireId);
+			} else if (h.maxX === pt.x && h.minX < pt.x) {
+				hasLeft = true;
+				incidentWireIds.add(h.wireId);
+			} else if (h.minX === pt.x && h.maxX > pt.x) {
+				hasRight = true;
+				incidentWireIds.add(h.wireId);
+			}
+		}
+
+		for (const v of vSegments) {
+			if (v.x !== pt.x) continue;
+			if (pt.y > v.minY && pt.y < v.maxY) {
+				hasUp = true;
+				hasDown = true;
+				incidentWireIds.add(v.wireId);
+			} else if (v.maxY === pt.y && v.minY < pt.y) {
+				hasUp = true;
+				incidentWireIds.add(v.wireId);
+			} else if (v.minY === pt.y && v.maxY > pt.y) {
+				hasDown = true;
+				incidentWireIds.add(v.wireId);
+			}
+		}
+
+		if (hasLeft && hasRight && hasUp && hasDown) {
+			const existing = crossings.get(key);
+			if (existing) {
+				existing.connected = true;
+				for (const wid of incidentWireIds) {
+					existing.wireIdSet.add(wid);
+				}
+			} else {
+				crossings.set(key, {
+					x: pt.x,
+					y: pt.y,
+					connected: true,
+					wireIdSet: incidentWireIds
+				});
+			}
+		}
+	}
+
+	return Array.from(crossings.values())
+		.sort((a, b) => (a.y !== b.y ? a.y - b.y : a.x - b.x))
+		.map((c) => ({
+			x: c.x,
+			y: c.y,
+			connected: c.connected,
+			wireIds: Array.from(c.wireIdSet)
+		}));
+}
+
+/**
+ * Builds an SVG `<path d="...">` string for a wire polyline in pixel coordinates,
+ * inserting semicircular upward IEEE bridge-hop arcs along horizontal segments wherever
+ * they cross strictly over an unconnected crossing in `unconnectedCrossings`.
+ */
+export function buildWirePathWithBridges(
+	points: GridPoint[],
+	unconnectedCrossings: ReadonlySet<string>,
+	gridSize: number,
+	arcRadiusPx = 6.5
+): string {
+	if (points.length === 0) return '';
+	const parts: string[] = [`M ${points[0].x * gridSize} ${points[0].y * gridSize}`];
+	if (points.length === 1) return parts[0];
+
+	const r = Math.max(0.5, Math.min(arcRadiusPx, gridSize * 0.45));
+
+	for (let i = 0; i + 1 < points.length; i++) {
+		const a = points[i];
+		const b = points[i + 1];
+
+		if (unconnectedCrossings.size > 0 && a.y === b.y && a.x !== b.x) {
+			const goingRight = b.x > a.x;
+			const minX = Math.min(a.x, b.x);
+			const maxX = Math.max(a.x, b.x);
+			const yPx = a.y * gridSize;
+			const sweep = goingRight ? 1 : 0;
+
+			const crossingXs: number[] = [];
+			const startInt = Math.floor(minX) + 1;
+			const endInt = Math.ceil(maxX) - 1;
+			for (let cx = startInt; cx <= endInt; cx++) {
+				if (cx > minX && cx < maxX && unconnectedCrossings.has(`${cx},${a.y}`)) {
+					crossingXs.push(cx);
+				}
+			}
+
+			if (!goingRight) {
+				crossingXs.reverse();
+			}
+
+			for (const cx of crossingXs) {
+				const crossX = cx * gridSize;
+				const startX = goingRight ? crossX - r : crossX + r;
+				const endX = goingRight ? crossX + r : crossX - r;
+				parts.push(`L ${startX} ${yPx}`);
+				parts.push(`A ${r} ${r} 0 0 ${sweep} ${endX} ${yPx}`);
+			}
+
+			parts.push(`L ${b.x * gridSize} ${yPx}`);
+		} else {
+			parts.push(`L ${b.x * gridSize} ${b.y * gridSize}`);
+		}
+	}
+
+	return parts.join(' ');
+}
+
+/**
+ * Builds the standalone semicircular upward bridge-hop arc `<path d="...">` centered at grid `(x, y)`
+ * for rendering a crisp background halo mask and foreground pass-over arch regardless of wire z-order.
+ */
+export function buildBridgeArcPath(
+	x: number,
+	y: number,
+	gridSize: number,
+	arcRadiusPx = 6.5
+): string {
+	const cx = x * gridSize;
+	const cy = y * gridSize;
+	const r = Math.max(0.5, Math.min(arcRadiusPx, gridSize * 0.45));
+	return `M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`;
+}
+
 export function isPointNearSegment(
 	px: number,
 	py: number,

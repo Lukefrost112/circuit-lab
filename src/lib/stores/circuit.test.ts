@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { PRESETS } from '$lib/data/presets';
+import { buildElectricalGraph } from '$lib/engine';
+import { computeWireCrossings } from '$lib/components/editor/helpers';
 import { circuit } from './circuit.svelte';
 
 beforeEach(() => {
@@ -341,5 +343,136 @@ describe('circuit reactive store', () => {
 		expect(circuit.undo()).toBe(true);
 		expect(circuit.document.wires).toHaveLength(0);
 		expect(circuit.solution.mna.valid).toBe(false);
+	});
+
+	it('toggles orthogonal wire crossings between insulated bridge and connected junction with 1-step undo', () => {
+		circuit.loadDocument({
+			schemaVersion: 1,
+			name: 'Crossing Toggle Test',
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				// Horizontal branch pins at (2,6) and (10,6) via terminals
+				{ id: 'TA', kind: 'terminal', label: 'TA', terminalName: 'A', x: 2, y: 6, rotation: 0, value: '0' },
+				{ id: 'TB', kind: 'terminal', label: 'TB', terminalName: 'B', x: 10, y: 6, rotation: 0, value: '0' },
+				// Vertical branch pins at (6,2) and (6,10)
+				{ id: 'TC', kind: 'terminal', label: 'TC', terminalName: 'C', x: 6, y: 2, rotation: 0, value: '0' },
+				{ id: 'TD', kind: 'terminal', label: 'TD', terminalName: 'D', x: 6, y: 10, rotation: 0, value: '0' }
+			],
+			wires: [
+				{ id: 'wH', points: [{ x: 2, y: 6 }, { x: 10, y: 6 }] },
+				{ id: 'wV', points: [{ x: 6, y: 2 }, { x: 6, y: 10 }] }
+			]
+		});
+
+		// Initially insulated: TA/TB and TC/TD belong to two distinct electrical nodes
+		let graph = buildElectricalGraph(circuit.document);
+		expect(graph.componentNodes['TA'][0]).toBe(graph.componentNodes['TB'][0]);
+		expect(graph.componentNodes['TC'][0]).toBe(graph.componentNodes['TD'][0]);
+		expect(graph.componentNodes['TA'][0]).not.toBe(graph.componentNodes['TC'][0]);
+		expect(computeWireCrossings(circuit.document.components, circuit.document.wires)).toEqual([
+			{ x: 6, y: 6, connected: false, wireIds: ['wH', 'wV'] }
+		]);
+
+		// Reject toggling on a component pin or non-crossing point
+		expect(circuit.toggleWireCrossing(2, 6)).toBeNull();
+		expect(circuit.toggleWireCrossing(3, 3)).toBeNull();
+
+		// 1st toggle -> connect into a single electrical node
+		expect(circuit.toggleWireCrossing(6, 6)).toBe('connected');
+		graph = buildElectricalGraph(circuit.document);
+		expect(graph.componentNodes['TA'][0]).toBe(graph.componentNodes['TC'][0]);
+		expect(graph.componentNodes['TB'][0]).toBe(graph.componentNodes['TD'][0]);
+		const connectedCrossings = computeWireCrossings(
+			circuit.document.components,
+			circuit.document.wires
+		);
+		expect(connectedCrossings).toHaveLength(1);
+		expect(connectedCrossings[0].connected).toBe(true);
+
+		// 2nd toggle -> disconnect back into two insulated crossing nets
+		expect(circuit.toggleWireCrossing(6, 6)).toBe('disconnected');
+		graph = buildElectricalGraph(circuit.document);
+		expect(graph.componentNodes['TA'][0]).toBe(graph.componentNodes['TB'][0]);
+		expect(graph.componentNodes['TC'][0]).toBe(graph.componentNodes['TD'][0]);
+		expect(graph.componentNodes['TA'][0]).not.toBe(graph.componentNodes['TC'][0]);
+		const disconnectedCrossings = computeWireCrossings(
+			circuit.document.components,
+			circuit.document.wires
+		);
+		expect(disconnectedCrossings).toHaveLength(1);
+		expect(disconnectedCrossings[0].connected).toBe(false);
+		expect(
+			circuit.document.wires.some((w) => w.points.some((pt) => pt.x === 6 && pt.y === 6))
+		).toBe(false);
+
+		// 1-step undo reverses disconnect back to connected
+		expect(circuit.undo()).toBe(true);
+		expect(
+			computeWireCrossings(circuit.document.components, circuit.document.wires)[0].connected
+		).toBe(true);
+		expect(buildElectricalGraph(circuit.document).componentNodes['TA'][0]).toBe(
+			buildElectricalGraph(circuit.document).componentNodes['TC'][0]
+		);
+
+		// 1 more undo reverses connect back to original insulated crossing
+		expect(circuit.undo()).toBe(true);
+		expect(
+			computeWireCrossings(circuit.document.components, circuit.document.wires)[0].connected
+		).toBe(false);
+		expect(buildElectricalGraph(circuit.document).componentNodes['TA'][0]).not.toBe(
+			buildElectricalGraph(circuit.document).componentNodes['TC'][0]
+		);
+	});
+
+	it('disconnects two L-bends touching corner-to-corner at a 4-way crossing into two insulated crossing wires', () => {
+		circuit.loadDocument({
+			schemaVersion: 1,
+			name: 'L-Bend 4-Way Crossing Test',
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				{ id: 'TA', kind: 'terminal', label: 'TA', terminalName: 'A', x: 2, y: 6, rotation: 0, value: '0' },
+				{ id: 'TB', kind: 'terminal', label: 'TB', terminalName: 'B', x: 10, y: 6, rotation: 0, value: '0' },
+				{ id: 'TC', kind: 'terminal', label: 'TC', terminalName: 'C', x: 6, y: 2, rotation: 0, value: '0' },
+				{ id: 'TD', kind: 'terminal', label: 'TD', terminalName: 'D', x: 6, y: 10, rotation: 0, value: '0' }
+			],
+			wires: [
+				// L-bend from left -> corner (6,6) -> up
+				{ id: 'w1', points: [{ x: 2, y: 6 }, { x: 6, y: 6 }, { x: 6, y: 2 }] },
+				// L-bend from right -> corner (6,6) -> down
+				{ id: 'w2', points: [{ x: 10, y: 6 }, { x: 6, y: 6 }, { x: 6, y: 10 }] }
+			]
+		});
+
+		// Initially all 4 terminals share 1 node at the 4-way corner (6,6)
+		let graph = buildElectricalGraph(circuit.document);
+		expect(graph.componentNodes['TA'][0]).toBe(graph.componentNodes['TC'][0]);
+		expect(graph.componentNodes['TB'][0]).toBe(graph.componentNodes['TD'][0]);
+		expect(computeWireCrossings(circuit.document.components, circuit.document.wires)).toEqual([
+			{ x: 6, y: 6, connected: true, wireIds: ['w1', 'w2'] }
+		]);
+
+		// Toggle disconnects them into straight horizontal (TA-TB) and straight vertical (TC-TD)
+		expect(circuit.toggleWireCrossing(6, 6)).toBe('disconnected');
+		graph = buildElectricalGraph(circuit.document);
+		expect(graph.componentNodes['TA'][0]).toBe(graph.componentNodes['TB'][0]);
+		expect(graph.componentNodes['TC'][0]).toBe(graph.componentNodes['TD'][0]);
+		expect(graph.componentNodes['TA'][0]).not.toBe(graph.componentNodes['TC'][0]);
+		expect(
+			computeWireCrossings(circuit.document.components, circuit.document.wires)[0].connected
+		).toBe(false);
+		expect(
+			circuit.document.wires.some((w) => w.points.some((pt) => pt.x === 6 && pt.y === 6))
+		).toBe(false);
+
+		// 1-step undo restores the original connected L-bends cleanly
+		expect(circuit.undo()).toBe(true);
+		expect(buildElectricalGraph(circuit.document).componentNodes['TA'][0]).toBe(
+			buildElectricalGraph(circuit.document).componentNodes['TC'][0]
+		);
+		expect(
+			computeWireCrossings(circuit.document.components, circuit.document.wires)[0].connected
+		).toBe(true);
 	});
 });

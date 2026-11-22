@@ -5,6 +5,7 @@
 		CornerDownRight,
 		Eraser,
 		FileCode2,
+		Link2,
 		Minus,
 		Plus,
 		Redo2,
@@ -15,6 +16,7 @@
 		Target,
 		Trash2,
 		Undo2,
+		Unlink,
 		Waypoints,
 		X
 	} from 'lucide-svelte';
@@ -37,17 +39,21 @@
 	import { cn } from '$lib/utils';
 	import {
 		TOUCH_WIRE_DRAG_THRESHOLD_PX,
+		buildBridgeArcPath,
+		buildWirePathWithBridges,
 		computeJunctionPoints,
 		computeManhattanPoints,
 		computePinchTransform,
 		computeTouchPinHitRadiusWorld,
+		computeWireCrossings,
 		formatComplexOverlay,
 		formatComponentDisplayValue,
 		getDragThresholdPx,
 		hasExceededDragThreshold,
 		isPointInComponentBodyHitbox,
 		isTouchLikePointer,
-		type WireBendMode
+		type WireBendMode,
+		type WireCrossing
 	} from './helpers';
 	import {
 		buildSchematicObstacles,
@@ -82,7 +88,30 @@
 
 	let localAutoWireFeedback = $state<string | null>(null);
 	let localAutoWireTimer: ReturnType<typeof setTimeout> | undefined;
-	const effectiveAutoWireFeedback = $derived(autoWireFeedback ?? localAutoWireFeedback);
+	let localCrossingFeedback = $state<string | null>(null);
+	let localCrossingTimer: ReturnType<typeof setTimeout> | undefined;
+	const effectiveAutoWireFeedback = $derived(
+		localCrossingFeedback ?? autoWireFeedback ?? localAutoWireFeedback
+	);
+
+	function showCrossingFeedback(message: string): void {
+		localCrossingFeedback = message;
+		if (localCrossingTimer !== undefined) {
+			clearTimeout(localCrossingTimer);
+		}
+		localCrossingTimer = setTimeout(() => {
+			localCrossingFeedback = null;
+		}, 2500);
+	}
+
+	function handleCrossingToggle(x: number, y: number): void {
+		const res = circuit.toggleWireCrossing(x, y);
+		if (res === 'connected') {
+			showCrossingFeedback('Crossing connected (junction added)');
+		} else if (res === 'disconnected') {
+			showCrossingFeedback('Crossing disconnected (bridge over)');
+		}
+	}
 
 	function triggerAutoWire(): void {
 		if (onAutoWire) {
@@ -122,7 +151,9 @@
 	let hoverGrid = $state<GridPoint | null>(null);
 	let hoverSnappedPin = $state<GridPoint | null>(null);
 	let hoveredNodeId = $state<string | null>(null);
+	let hoveredCrossingKey = $state<string | null>(null);
 	let pinnedProbeNodeId = $state<string | null>(null);
+	let isTouchInteraction = $state(false);
 
 	let wireStart = $state<GridPoint | null>(null);
 	let wireBendMode = $state<WireBendMode>('hv');
@@ -210,6 +241,36 @@
 		computeJunctionPoints(circuit.document.components, circuit.document.wires)
 	);
 
+	const wireCrossings = $derived(
+		computeWireCrossings(circuit.document.components, circuit.document.wires)
+	);
+
+	const unconnectedCrossings = $derived(wireCrossings.filter((c) => !c.connected));
+
+	const unconnectedCrossingSet = $derived(
+		new Set(unconnectedCrossings.map((c) => `${c.x},${c.y}`))
+	);
+
+	const connectedCrossingSet = $derived(
+		new Set(wireCrossings.filter((c) => c.connected).map((c) => `${c.x},${c.y}`))
+	);
+
+	function isHorizontalWireAtCrossing(
+		wire: CircuitWire | null,
+		cx: number,
+		cy: number
+	): boolean {
+		if (!wire) return false;
+		for (let i = 0; i + 1 < wire.points.length; i++) {
+			const a = wire.points[i];
+			const b = wire.points[i + 1];
+			if (a.y === cy && b.y === cy && cx > Math.min(a.x, b.x) && cx < Math.max(a.x, b.x)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	const allPins = $derived.by(() => {
 		const list: Array<{ componentId: string; x: number; y: number; name: string; index: number }> =
 			[];
@@ -270,12 +331,22 @@
 		}
 	});
 
+	// Detect coarse touch pointers on mount so crossing hit targets are touch-sized immediately
+	$effect(() => {
+		if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+			isTouchInteraction = window.matchMedia('(pointer: coarse)').matches;
+		}
+	});
+
 	// Cancel any pending rAF callback or feedback timer on unmount
 	$effect(() => {
 		return () => {
 			cancelPendingViewportUpdate();
 			if (localAutoWireTimer !== undefined) {
 				clearTimeout(localAutoWireTimer);
+			}
+			if (localCrossingTimer !== undefined) {
+				clearTimeout(localCrossingTimer);
 			}
 		};
 	});
@@ -653,6 +724,7 @@
 
 	function handleBackgroundPointerDown(e: PointerEvent): void {
 		lastPointerType = e.pointerType;
+		isTouchInteraction = isTouchLikePointer(e.pointerType);
 		refreshSvgRect();
 
 		if (e.pointerType === 'mouse' && e.button === 2) {
@@ -880,6 +952,7 @@
 
 	function handleWirePointerDown(e: PointerEvent, wire: CircuitWire): void {
 		lastPointerType = e.pointerType;
+		isTouchInteraction = isTouchLikePointer(e.pointerType);
 		refreshSvgRect();
 
 		if (!isPrimaryPointerDown(e) || spaceHeld) return;
@@ -944,6 +1017,25 @@
 			return;
 		}
 		circuit.selectWire(wire.id);
+	}
+
+	function handleCrossingPointerDown(e: PointerEvent, crossing: WireCrossing): void {
+		lastPointerType = e.pointerType;
+		isTouchInteraction = isTouchLikePointer(e.pointerType);
+		refreshSvgRect();
+
+		if (!isPrimaryPointerDown(e) || spaceHeld) return;
+
+		if (trackPointerDown(e)) {
+			e.stopPropagation();
+			e.preventDefault();
+			return;
+		}
+
+		if (circuit.activeTool !== 'select' || wireStart) return;
+
+		e.stopPropagation();
+		handleCrossingToggle(crossing.x, crossing.y);
 	}
 
 	function handlePointerMove(e: PointerEvent): void {
@@ -1694,13 +1786,19 @@
 	<!-- Mobile & Tablet Flush Top Telemetry Strip (< lg) -->
 	<div class="flex h-7 shrink-0 items-center justify-between gap-2 border-b border-border bg-surface-rail px-3 text-[11px] lg:hidden">
 		<div class="flex min-w-0 items-center gap-1.5 font-engineering">
-			<span class="text-muted-foreground">
-				Snap: <span class="text-foreground">{settings.snapToGrid ? 'ON' : 'OFF'}</span>
-			</span>
-			<span class="text-muted-foreground/60" aria-hidden="true">·</span>
-			<span class="text-voltage">
-				{nodeCount} {nodeCount === 1 ? 'Node' : 'Nodes'}
-			</span>
+			{#if localCrossingFeedback}
+				<span role="status" aria-live="polite" class="truncate text-foreground">
+					{localCrossingFeedback}
+				</span>
+			{:else}
+				<span class="text-muted-foreground">
+					Snap: <span class="text-foreground">{settings.snapToGrid ? 'ON' : 'OFF'}</span>
+				</span>
+				<span class="text-muted-foreground/60" aria-hidden="true">·</span>
+				<span class="text-voltage">
+					{nodeCount} {nodeCount === 1 ? 'Node' : 'Nodes'}
+				</span>
+			{/if}
 		</div>
 
 		<div class="flex shrink-0 items-center gap-1.5 font-engineering sm:hidden">
@@ -1959,10 +2057,14 @@
 				/>
 			{/if}
 
-			<!-- Wires -->
+			<!-- Wires (with IEEE bridge-hop arcs over unconnected orthogonal crossings) -->
 			{#each circuit.document.wires as wire (wire.id)}
 				{@const isSelected = circuit.selectedWireId === wire.id}
-				{@const pts = pointsToSvgString(wire.points)}
+				{@const wirePath = buildWirePathWithBridges(
+					wire.points,
+					unconnectedCrossingSet,
+					GRID_SIZE
+				)}
 				<g
 					role="button"
 					tabindex="-1"
@@ -1971,8 +2073,8 @@
 					onpointerdown={(e) => handleWirePointerDown(e, wire)}
 				>
 					{#if isSelected}
-						<polyline
-							points={pts}
+						<path
+							d={wirePath}
 							fill="none"
 							stroke="var(--warning)"
 							stroke-width="6"
@@ -1981,8 +2083,8 @@
 							stroke-linejoin="round"
 						/>
 					{/if}
-					<polyline
-						points={pts}
+					<path
+						d={wirePath}
 						fill="none"
 						stroke={isSelected ? 'var(--warning)' : 'currentColor'}
 						stroke-width={isSelected ? '2.5' : '2'}
@@ -1991,8 +2093,8 @@
 						class="text-foreground transition-colors duration-100"
 					/>
 					<!-- Wide transparent hit area (scales for >=28px screen touch target) -->
-					<polyline
-						points={pts}
+					<path
+						d={wirePath}
 						fill="none"
 						stroke="transparent"
 						stroke-width={wireHitStrokeWidth}
@@ -2001,6 +2103,44 @@
 					/>
 				</g>
 			{/each}
+
+			<!-- Crisp IEEE Bridge-Hop Background Halos & Overpass Arcs -->
+			{#if unconnectedCrossings.length > 0}
+				<g pointer-events="none" class="text-foreground">
+					{#each unconnectedCrossings as crossing (`bridge-${crossing.x},${crossing.y}`)}
+						{@const arcD = buildBridgeArcPath(crossing.x, crossing.y, GRID_SIZE)}
+						{@const isHorizSelected = isHorizontalWireAtCrossing(
+							circuit.selectedWire,
+							crossing.x,
+							crossing.y
+						)}
+						{#if isHorizSelected}
+							<path
+								d={arcD}
+								fill="none"
+								stroke="var(--warning)"
+								stroke-width="6"
+								stroke-opacity="0.3"
+								stroke-linecap="round"
+							/>
+						{/if}
+						<path
+							d={arcD}
+							fill="none"
+							stroke="var(--background)"
+							stroke-width="5.5"
+							stroke-linecap="butt"
+						/>
+						<path
+							d={arcD}
+							fill="none"
+							stroke={isHorizSelected ? 'var(--warning)' : 'currentColor'}
+							stroke-width={isHorizSelected ? '2.5' : '2'}
+							stroke-linecap="round"
+						/>
+					{/each}
+				</g>
+			{/if}
 
 			<!-- Live Orthogonal Wire Preview -->
 			{#if wireStart && wirePreviewPoints.length >= 1}
@@ -2047,17 +2187,70 @@
 				</g>
 			{/if}
 
-			<!-- Automatic Junction Dots (3+ segments/pins meeting) -->
+			<!-- Automatic Junction Dots (3+ segments/pins meeting; 3.8px on connected 4-way crossings) -->
 			<g pointer-events="none" class="text-foreground">
 				{#each junctions as jpt (`${jpt.x},${jpt.y}`)}
 					<circle
 						cx={jpt.x * GRID_SIZE}
 						cy={jpt.y * GRID_SIZE}
-						r="3.5"
+						r={connectedCrossingSet.has(`${jpt.x},${jpt.y}`) ? 3.8 : 3.5}
 						fill="currentColor"
 					/>
 				{/each}
 			</g>
+
+			<!-- Interactive Orthogonal Wire Crossing Toggle Hit Targets (Select Mode) -->
+			{#if circuit.activeTool === 'select' && !wireStart && wireCrossings.length > 0}
+				<g>
+					{#each wireCrossings as crossing (`crossing-${crossing.x},${crossing.y}`)}
+						{@const key = `${crossing.x},${crossing.y}`}
+						{@const isHovered = hoveredCrossingKey === key}
+						<g
+							role="button"
+							tabindex="-1"
+							class="cursor-pointer outline-none"
+							data-wire-crossing={key}
+							data-crossing-connected={crossing.connected ? 'true' : 'false'}
+							aria-label={crossing.connected
+								? `Connected junction at (${crossing.x}, ${crossing.y}) — click to disconnect (bridge over)`
+								: `Unconnected crossing at (${crossing.x}, ${crossing.y}) — click to connect (add junction)`}
+							transform="translate({crossing.x * GRID_SIZE}, {crossing.y * GRID_SIZE})"
+							onpointerdown={(e) => handleCrossingPointerDown(e, crossing)}
+							onpointerenter={() => {
+								hoveredCrossingKey = key;
+							}}
+							onpointerleave={() => {
+								if (hoveredCrossingKey === key) hoveredCrossingKey = null;
+							}}
+						>
+							<title>
+								{crossing.connected
+									? 'Connected junction — click to disconnect (bridge over)'
+									: 'Unconnected crossing — click to connect (add junction)'}
+							</title>
+							{#if isHovered}
+								<circle
+									cx="0"
+									cy="0"
+									r="10"
+									fill="var(--primary)"
+									fill-opacity="0.08"
+									stroke="var(--primary)"
+									stroke-width="1.5"
+									stroke-dasharray="3 2"
+									pointer-events="none"
+								/>
+							{/if}
+							<circle
+								cx="0"
+								cy="0"
+								r={isTouchInteraction ? 18 : 12}
+								fill="transparent"
+							/>
+						</g>
+					{/each}
+				</g>
+			{/if}
 
 			<!-- Components -->
 			{#each circuit.document.components as comp (comp.id)}
@@ -2505,6 +2698,8 @@
 				</div>
 			{:else if circuit.selectedWire}
 				{@const selectedWire = circuit.selectedWire}
+				{@const primaryCrossing =
+					wireCrossings.find((c) => c.wireIds.includes(selectedWire.id)) ?? null}
 				<div class="flex min-w-0 items-center gap-1.5">
 					<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true"></span>
 					<span class="font-engineering truncate text-xs font-semibold text-foreground">
@@ -2512,6 +2707,25 @@
 					</span>
 				</div>
 				<div class="flex shrink-0 items-center gap-0.5">
+					{#if primaryCrossing}
+						<Button
+							variant="ghost"
+							size="sm"
+							class="min-h-11 shrink-0 gap-1 px-2 text-xs"
+							aria-label={primaryCrossing.connected
+								? 'Disconnect wire crossing into bridge'
+								: 'Connect wire crossing into junction'}
+							onclick={() => handleCrossingToggle(primaryCrossing.x, primaryCrossing.y)}
+						>
+							{#if primaryCrossing.connected}
+								<Unlink class="size-3.5" aria-hidden="true" />
+								<span>Bridge</span>
+							{:else}
+								<Link2 class="size-3.5" aria-hidden="true" />
+								<span>Connect</span>
+							{/if}
+						</Button>
+					{/if}
 					<Button
 						variant="ghost"
 						size="sm"

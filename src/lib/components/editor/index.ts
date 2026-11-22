@@ -7,10 +7,13 @@ export {
 	MOUSE_DRAG_THRESHOLD_PX,
 	TOUCH_DRAG_THRESHOLD_PX,
 	TOUCH_WIRE_DRAG_THRESHOLD_PX,
+	buildBridgeArcPath,
+	buildWirePathWithBridges,
 	computeJunctionPoints,
 	computeManhattanPoints,
 	computePinchTransform,
 	computeTouchPinHitRadiusWorld,
+	computeWireCrossings,
 	formatComplexOverlay,
 	formatComponentDisplayValue,
 	getDragThresholdPx,
@@ -20,6 +23,7 @@ export {
 	type FrequencyPreset,
 	type PinchTransformInput,
 	type PinchTransformResult,
-	type WireBendMode
+	type WireBendMode,
+	type WireCrossing
 } from './helpers';
 

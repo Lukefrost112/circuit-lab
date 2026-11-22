@@ -9,6 +9,7 @@ import {
 	areUnknownKindsCompatible,
 	autoWireDocument,
 	buildElectricalGraph,
+	getPinPositions,
 	getUnknownTerms,
 	parseEngineeringNumber,
 	solveCircuit,
@@ -26,6 +27,7 @@ import {
 	type TheveninTarget,
 	type UnknownProblemSpec
 } from '$lib/engine';
+import { computeWireCrossings } from '$lib/components/editor/helpers';
 import type { SourceMode } from '$lib/components/symbols';
 import { AC_ENABLED } from '$lib/env';
 import { settings } from './settings.svelte';
@@ -644,6 +646,274 @@ class CircuitStore {
 		if (this._selectedWireId === id) {
 			this._selectedWireId = null;
 		}
+	}
+
+	/**
+	 * Toggles an orthogonal wire crossing at grid `(x, y)` between:
+	 * - `'connected'`: splits a passing wire at `(x, y)` so `buildElectricalGraph` merges both nets
+	 *   into one node and a solid solder junction dot renders.
+	 * - `'disconnected'`: removes `(x, y)` as a shared vertex by merging opposite cardinal branches
+	 *   into continuous straight-through horizontal and vertical wires so `buildElectricalGraph`
+	 *   separates the nets and the canvas renders an IEEE bridge hop.
+	 *
+	 * Undoable in a single snapshot. Returns `null` if `(x, y)` is a component pin or not a crossing.
+	 */
+	toggleWireCrossing(x: number, y: number): 'connected' | 'disconnected' | null {
+		const cx = Math.round(x);
+		const cy = Math.round(y);
+
+		for (const comp of this._document.components) {
+			for (const pin of getPinPositions(comp)) {
+				if (pin.x === cx && pin.y === cy) {
+					return null;
+				}
+			}
+		}
+
+		const crossing = computeWireCrossings(this._document.components, this._document.wires).find(
+			(c) => c.x === cx && c.y === cy
+		);
+		if (!crossing) return null;
+
+		if (!crossing.connected) {
+			// Case A — Unconnected pass-over -> split a passing wire at (cx, cy) to create a junction
+			let targetWireIdx = -1;
+			let targetSegIdx = -1;
+
+			// Prefer splitting a horizontal crossing wire
+			for (let wi = 0; wi < this._document.wires.length && targetWireIdx === -1; wi++) {
+				const pts = this._document.wires[wi].points;
+				for (let si = 0; si + 1 < pts.length; si++) {
+					const a = pts[si];
+					const b = pts[si + 1];
+					if (a.y === cy && b.y === cy && cx > Math.min(a.x, b.x) && cx < Math.max(a.x, b.x)) {
+						targetWireIdx = wi;
+						targetSegIdx = si;
+						break;
+					}
+				}
+			}
+
+			// Fallback: split a vertical crossing wire
+			if (targetWireIdx === -1) {
+				for (let wi = 0; wi < this._document.wires.length && targetWireIdx === -1; wi++) {
+					const pts = this._document.wires[wi].points;
+					for (let si = 0; si + 1 < pts.length; si++) {
+						const a = pts[si];
+						const b = pts[si + 1];
+						if (a.x === cx && b.x === cx && cy > Math.min(a.y, b.y) && cy < Math.max(a.y, b.y)) {
+							targetWireIdx = wi;
+							targetSegIdx = si;
+							break;
+						}
+					}
+				}
+			}
+
+			if (targetWireIdx === -1) return null;
+
+			this.recordSnapshot();
+			const targetWire = this._document.wires[targetWireIdx];
+			const splitPt: GridPoint = { x: cx, y: cy };
+			const points1 = normalizeWirePoints([...targetWire.points.slice(0, targetSegIdx + 1), splitPt]);
+			const points2 = normalizeWirePoints([splitPt, ...targetWire.points.slice(targetSegIdx + 1)]);
+			const secondWireId = nextUniqueWireId(this._document.wires);
+
+			const nextWires: CircuitWire[] = [];
+			for (let wi = 0; wi < this._document.wires.length; wi++) {
+				if (wi === targetWireIdx) {
+					if (points1.length >= 2) {
+						nextWires.push({ id: targetWire.id, points: points1 });
+					}
+					if (points2.length >= 2) {
+						nextWires.push({ id: secondWireId, points: points2 });
+					}
+				} else {
+					nextWires.push(this._document.wires[wi]);
+				}
+			}
+
+			this._document = {
+				...this._document,
+				wires: nextWires
+			};
+			this.reconcileSelection();
+			return 'connected';
+		}
+
+		// Case B — Connected 4-way crossing -> disconnect into continuous insulated crossing wires
+		type CardinalDir = 'left' | 'right' | 'up' | 'down';
+		interface SubWire {
+			points: GridPoint[];
+			originIds: string[];
+			preferredId?: string;
+		}
+
+		const untouchedWires: CircuitWire[] = [];
+		const buckets: Record<CardinalDir, SubWire[]> = {
+			left: [],
+			right: [],
+			up: [],
+			down: []
+		};
+		const leftoverSubWires: SubWire[] = [];
+
+		for (const wire of this._document.wires) {
+			const matchIndices: number[] = [];
+			for (let i = 0; i < wire.points.length; i++) {
+				if (wire.points[i].x === cx && wire.points[i].y === cy) {
+					matchIndices.push(i);
+				}
+			}
+
+			if (matchIndices.length === 0) {
+				untouchedWires.push(wire);
+				continue;
+			}
+
+			// Split at every interior vertex coinciding with (cx, cy)
+			const interiorSplits = matchIndices.filter((i) => i > 0 && i < wire.points.length - 1);
+			const slices: GridPoint[][] = [];
+			let startIdx = 0;
+			for (const splitIdx of interiorSplits) {
+				slices.push(wire.points.slice(startIdx, splitIdx + 1));
+				startIdx = splitIdx;
+			}
+			slices.push(wire.points.slice(startIdx));
+
+			let usedPreferredId = false;
+			for (const rawSlice of slices) {
+				const norm = normalizeWirePoints(rawSlice);
+				if (norm.length < 2) continue;
+
+				const startsAtCrossing = norm[0].x === cx && norm[0].y === cy;
+				const endsAtCrossing =
+					norm[norm.length - 1].x === cx && norm[norm.length - 1].y === cy;
+
+				const preferredId = !usedPreferredId ? wire.id : undefined;
+				if (preferredId) usedPreferredId = true;
+
+				if (!startsAtCrossing && !endsAtCrossing) {
+					leftoverSubWires.push({ points: norm, originIds: [wire.id], preferredId });
+					continue;
+				}
+
+				if (startsAtCrossing && endsAtCrossing) {
+					leftoverSubWires.push({ points: norm, originIds: [wire.id], preferredId });
+					continue;
+				}
+
+				// Orient sub-polyline so (cx, cy) is always its final point
+				const oriented = endsAtCrossing ? norm : [...norm].reverse();
+				const prev = oriented[oriented.length - 2];
+
+				let dir: CardinalDir | null = null;
+				if (prev.y === cy && prev.x < cx) dir = 'left';
+				else if (prev.y === cy && prev.x > cx) dir = 'right';
+				else if (prev.x === cx && prev.y < cy) dir = 'up';
+				else if (prev.x === cx && prev.y > cy) dir = 'down';
+
+				if (dir) {
+					buckets[dir].push({ points: oriented, originIds: [wire.id], preferredId });
+				} else {
+					leftoverSubWires.push({ points: oriented, originIds: [wire.id], preferredId });
+				}
+			}
+		}
+
+		const mergedSubWires: SubWire[] = [];
+		const mergePair = (a: SubWire, b: SubWire): SubWire => {
+			// Both a.points and b.points terminate at (cx, cy)
+			const combined = normalizeWirePoints([
+				...a.points,
+				...b.points.slice(0, -1).reverse()
+			]);
+			return {
+				points: combined,
+				originIds: [...a.originIds, ...b.originIds],
+				preferredId: a.preferredId ?? b.preferredId
+			};
+		};
+
+		while (buckets.left.length > 0 && buckets.right.length > 0) {
+			mergedSubWires.push(mergePair(buckets.left.shift()!, buckets.right.shift()!));
+		}
+		while (buckets.up.length > 0 && buckets.down.length > 0) {
+			mergedSubWires.push(mergePair(buckets.up.shift()!, buckets.down.shift()!));
+		}
+
+		// Filter out redundant 2-point stubs completely overlapped by an untouched straight wire
+		const isPointCoveredByUntouched = (a: GridPoint, b: GridPoint): boolean => {
+			for (const w of untouchedWires) {
+				for (let i = 0; i + 1 < w.points.length; i++) {
+					const p1 = w.points[i];
+					const p2 = w.points[i + 1];
+					if (a.y === b.y && p1.y === a.y && p2.y === a.y) {
+						const minSeg = Math.min(p1.x, p2.x);
+						const maxSeg = Math.max(p1.x, p2.x);
+						if (Math.min(a.x, b.x) >= minSeg && Math.max(a.x, b.x) <= maxSeg) {
+							return true;
+						}
+					} else if (a.x === b.x && p1.x === a.x && p2.x === a.x) {
+						const minSeg = Math.min(p1.y, p2.y);
+						const maxSeg = Math.max(p1.y, p2.y);
+						if (Math.min(a.y, b.y) >= minSeg && Math.max(a.y, b.y) <= maxSeg) {
+							return true;
+						}
+					}
+				}
+			}
+			return false;
+		};
+
+		const remainingSubs = [
+			...buckets.left,
+			...buckets.right,
+			...buckets.up,
+			...buckets.down
+		].filter((sub) => !(sub.points.length === 2 && isPointCoveredByUntouched(sub.points[0], sub.points[1])));
+
+		this.recordSnapshot();
+
+		const nextWires: CircuitWire[] = [...untouchedWires];
+		const usedIds = new Set<string>(nextWires.map((w) => w.id));
+		let nextWireIdx = 1;
+		const allocateWireId = (preferred?: string): string => {
+			if (preferred && !usedIds.has(preferred)) {
+				usedIds.add(preferred);
+				return preferred;
+			}
+			while (usedIds.has(`w${nextWireIdx}`)) {
+				nextWireIdx++;
+			}
+			const fresh = `w${nextWireIdx}`;
+			usedIds.add(fresh);
+			return fresh;
+		};
+
+		let selectedReplacement: string | null = null;
+		for (const sub of [...mergedSubWires, ...remainingSubs, ...leftoverSubWires]) {
+			if (sub.points.length < 2) continue;
+			const id = allocateWireId(sub.preferredId);
+			if (
+				this._selectedWireId &&
+				!selectedReplacement &&
+				sub.originIds.includes(this._selectedWireId)
+			) {
+				selectedReplacement = id;
+			}
+			nextWires.push({ id, points: sub.points });
+		}
+
+		this._document = {
+			...this._document,
+			wires: nextWires
+		};
+		if (selectedReplacement) {
+			this._selectedWireId = selectedReplacement;
+		}
+		this.reconcileSelection();
+		return 'disconnected';
 	}
 
 	/**

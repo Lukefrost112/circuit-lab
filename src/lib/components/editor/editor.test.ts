@@ -13,10 +13,13 @@ import {
 	SchematicCanvas,
 	TOUCH_DRAG_THRESHOLD_PX,
 	TOUCH_WIRE_DRAG_THRESHOLD_PX,
+	buildBridgeArcPath,
+	buildWirePathWithBridges,
 	computeJunctionPoints,
 	computeManhattanPoints,
 	computePinchTransform,
 	computeTouchPinHitRadiusWorld,
+	computeWireCrossings,
 	formatComplexOverlay,
 	formatComponentDisplayValue,
 	getDragThresholdPx,
@@ -73,6 +76,94 @@ describe('editor geometry & formatting helpers', () => {
 		expect(keys.has('4,4')).toBe(false);
 		expect(keys.has('4,6')).toBe(false);
 		expect(keys.has('18,4')).toBe(false);
+	});
+
+	it('detects unconnected pass-overs and 4-way connected crossings while ignoring T-junctions and pin intersections', () => {
+		const components = [
+			// Ground pin sits directly at (10, 4) where two wires cross -> must NOT be reported as crossing
+			{ id: 'G1', kind: 'ground' as const, label: 'GND', x: 10, y: 4, rotation: 0 as const, value: '0' }
+		];
+		const wires = [
+			// Unconnected crossing at (4, 4)
+			{ id: 'w1', points: [{ x: 2, y: 4 }, { x: 6, y: 4 }] },
+			{ id: 'w2', points: [{ x: 4, y: 2 }, { x: 4, y: 6 }] },
+			// Connected 4-way crossing at (14, 4) (split horizontal + straight vertical)
+			{ id: 'w3', points: [{ x: 12, y: 4 }, { x: 14, y: 4 }] },
+			{ id: 'w4', points: [{ x: 14, y: 4 }, { x: 16, y: 4 }] },
+			{ id: 'w5', points: [{ x: 14, y: 2 }, { x: 14, y: 6 }] },
+			// 3-way T-junction at (20, 4) -> must NOT be reported as a crossing
+			{ id: 'w6', points: [{ x: 18, y: 4 }, { x: 22, y: 4 }] },
+			{ id: 'w7', points: [{ x: 20, y: 4 }, { x: 20, y: 6 }] },
+			// Wires crossing on top of component pin (10, 4) -> must be excluded
+			{ id: 'w8', points: [{ x: 8, y: 4 }, { x: 12, y: 4 }] },
+			{ id: 'w9', points: [{ x: 10, y: 2 }, { x: 10, y: 6 }] }
+		];
+
+		const crossings = computeWireCrossings(components, wires);
+		expect(crossings).toHaveLength(2);
+
+		const unconnected = crossings.find((c) => c.x === 4 && c.y === 4);
+		expect(unconnected).toBeDefined();
+		expect(unconnected?.connected).toBe(false);
+		expect(unconnected?.wireIds.sort()).toEqual(['w1', 'w2']);
+
+		const connected = crossings.find((c) => c.x === 14 && c.y === 4);
+		expect(connected).toBeDefined();
+		expect(connected?.connected).toBe(true);
+		expect(connected?.wireIds.sort()).toEqual(['w3', 'w4', 'w5']);
+
+		// Unconnected crossing must NOT produce a junction dot; connected 4-way crossing MUST
+		const junctionKeys = new Set(
+			computeJunctionPoints(components, wires).map((pt) => `${pt.x},${pt.y}`)
+		);
+		expect(junctionKeys.has('4,4')).toBe(false);
+		expect(junctionKeys.has('14,4')).toBe(true);
+		expect(junctionKeys.has('20,4')).toBe(true);
+	});
+
+	it('builds SVG wire paths with upward semicircular IEEE bridge hops on horizontal segments only', () => {
+		const crossings = new Set(['4,4', '5,4']);
+
+		// Left-to-right horizontal segment hops over adjacent crossings (4,4) and (5,4) cleanly with sweep=1
+		const ltr = buildWirePathWithBridges(
+			[
+				{ x: 2, y: 4 },
+				{ x: 7, y: 4 }
+			],
+			crossings,
+			20
+		);
+		expect(ltr).toBe(
+			'M 40 80 L 73.5 80 A 6.5 6.5 0 0 1 86.5 80 L 93.5 80 A 6.5 6.5 0 0 1 106.5 80 L 140 80'
+		);
+
+		// Right-to-left horizontal segment hops upward with sweep=0 in reverse travel order
+		const rtl = buildWirePathWithBridges(
+			[
+				{ x: 7, y: 4 },
+				{ x: 2, y: 4 }
+			],
+			crossings,
+			20
+		);
+		expect(rtl).toBe(
+			'M 140 80 L 106.5 80 A 6.5 6.5 0 0 0 93.5 80 L 86.5 80 A 6.5 6.5 0 0 0 73.5 80 L 40 80'
+		);
+
+		// Vertical segment passing through the same crossing stays completely straight
+		const vert = buildWirePathWithBridges(
+			[
+				{ x: 4, y: 2 },
+				{ x: 4, y: 6 }
+			],
+			crossings,
+			20
+		);
+		expect(vert).toBe('M 80 40 L 80 120');
+		expect(vert).not.toContain('A ');
+
+		// Standalone bridge halo/overpass arc helper
+		expect(buildBridgeArcPath(4, 4, 20)).toBe('M 73.5 80 A 6.5 6.5 0 0 1 86.5 80');
 	});
 
 	it('formats component values and live V/I overlays cleanly', () => {
@@ -544,5 +635,42 @@ describe('editor Svelte components SSR rendering', () => {
 		expect(feedbackOut.body).toContain('All methods verified');
 		expect(feedbackOut.body).toContain('Auto-wired (+5 wires)');
 		expect(feedbackOut.body).not.toContain('Grid 20px');
+	});
+
+	it('renders bridge hops, interactive crossing hit targets, and inspector/mobile crossing toggles', () => {
+		circuit.clearCircuit();
+		const wH = circuit.addWire([
+			{ x: 2, y: 4 },
+			{ x: 8, y: 4 }
+		])!;
+		circuit.addWire([
+			{ x: 5, y: 2 },
+			{ x: 5, y: 6 }
+		]);
+		circuit.selectWire(wH.id);
+
+		const bridgeCanvas = render(SchematicCanvas);
+		expect(bridgeCanvas.body).toContain('A 6.5 6.5 0 0 1');
+		expect(bridgeCanvas.body).toContain('data-wire-crossing="5,4"');
+		expect(bridgeCanvas.body).toContain('data-crossing-connected="false"');
+		expect(bridgeCanvas.body).toContain('Connect wire crossing into junction');
+
+		const bridgeInspector = render(PropertyInspector);
+		expect(bridgeInspector.body).toContain('Wire Crossings');
+		expect(bridgeInspector.body).toContain('Unconnected (Bridge)');
+		expect(bridgeInspector.body).toContain('Connect (Junction)');
+
+		expect(circuit.toggleWireCrossing(5, 4)).toBe('connected');
+
+		const connectedCanvas = render(SchematicCanvas);
+		expect(connectedCanvas.body).toContain('data-wire-crossing="5,4"');
+		expect(connectedCanvas.body).toContain('data-crossing-connected="true"');
+		expect(connectedCanvas.body).toContain('r="3.8"');
+		expect(connectedCanvas.body).toContain('Disconnect wire crossing into bridge');
+		expect(connectedCanvas.body).not.toContain('A 6.5 6.5');
+
+		const connectedInspector = render(PropertyInspector);
+		expect(connectedInspector.body).toContain('Connected (Junction)');
+		expect(connectedInspector.body).toContain('Disconnect (Bridge)');
 	});
 });

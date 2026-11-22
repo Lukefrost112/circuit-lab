@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Cable, Eraser, RotateCw, Target, Trash2, X } from 'lucide-svelte';
+	import { Cable, Eraser, Link2, RotateCw, Target, Trash2, Unlink, X } from 'lucide-svelte';
 	import { CircuitSymbol } from '$lib/components/symbols';
 	import { Button, Input, Label, Select, Switch } from '$lib/components/ui';
 	import {
@@ -16,6 +16,7 @@
 	import { circuit } from '$lib/stores/circuit.svelte';
 	import { settings } from '$lib/stores/settings.svelte';
 	import EngineeringInput from './EngineeringInput.svelte';
+	import { computeWireCrossings } from './helpers';
 
 	interface Props {
 		onAutoWire?: () => void;
@@ -361,6 +362,13 @@
 			}
 		}
 		return null;
+	});
+
+	const selectedWireCrossings = $derived.by(() => {
+		if (!selectedWire) return [];
+		return computeWireCrossings(circuit.document.components, circuit.document.wires).filter((c) =>
+			c.wireIds.includes(selectedWire.id)
+		);
 	});
 
 	function commitLabel() {
@@ -832,6 +840,52 @@
 				{selectedWire.points.map((p) => `(${p.x},${p.y})`).join(' → ')}
 			</div>
 		</div>
+
+		{#if selectedWireCrossings.length > 0}
+			<!-- Wire Crossings -->
+			<div class="flex flex-col gap-2.5 px-4 py-3.5">
+				<div class="flex items-center justify-between gap-2">
+					<h3 class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+						Wire Crossings
+					</h3>
+					<span class="font-engineering text-[11px] text-muted-foreground">
+						{selectedWireCrossings.length}
+					</span>
+				</div>
+				<div class="flex flex-col divide-y divide-border rounded-[4px] border border-border bg-surface-rail/40">
+					{#each selectedWireCrossings as crossing (`${crossing.x},${crossing.y}`)}
+						<div class="flex flex-col gap-2 px-2.5 py-2">
+							<div class="flex items-center justify-between gap-2 text-xs">
+								<span class="font-engineering font-medium text-foreground">
+									({crossing.x}, {crossing.y})
+								</span>
+								<span
+									class={crossing.connected
+										? 'font-engineering text-[11px] font-medium text-voltage'
+										: 'font-engineering text-[11px] text-muted-foreground'}
+								>
+									{crossing.connected ? 'Connected (Junction)' : 'Unconnected (Bridge)'}
+								</span>
+							</div>
+							<Button
+								variant="outline"
+								size="sm"
+								class="min-h-11 w-full lg:h-7 lg:min-h-0"
+								onclick={() => circuit.toggleWireCrossing(crossing.x, crossing.y)}
+							>
+								{#if crossing.connected}
+									<Unlink class="size-3.5" aria-hidden="true" />
+									<span>Disconnect (Bridge)</span>
+								{:else}
+									<Link2 class="size-3.5" aria-hidden="true" />
+									<span>Connect (Junction)</span>
+								{/if}
+							</Button>
+						</div>
+					{/each}
+				</div>
+			</div>
+		{/if}
 
 		<!-- Wire Actions -->
 		<div class="px-4 py-3.5">
