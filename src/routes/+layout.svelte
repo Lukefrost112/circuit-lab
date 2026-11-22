@@ -5,9 +5,16 @@
 	import 'katex/dist/katex.min.css';
 	import { ModeWatcher } from 'mode-watcher';
 	import type { Snippet } from 'svelte';
+	import { IS_STAGING } from '$lib/env';
 
 	let { children }: { children: Snippet } = $props();
 </script>
+
+<svelte:head>
+	{#if IS_STAGING}
+		<meta name="robots" content="noindex, nofollow" />
+	{/if}
+</svelte:head>
 
 <ModeWatcher defaultMode="light" />
 {@render children()}

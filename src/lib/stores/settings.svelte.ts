@@ -1,4 +1,5 @@
 import type { UnitSystemId } from '$lib/engine/types';
+import { DEPLOY_ENV, getSettingsStorageKey } from '$lib/env';
 
 export type SchematicStandard = 'ieee' | 'iec';
 export type AngleDisplay = 'polar' | 'rectangular' | 'both';
@@ -18,7 +19,7 @@ export interface CircuitLabSettings {
 	showLiveOverlays: boolean;
 }
 
-export const SETTINGS_STORAGE_KEY = 'circuit-lab:settings:v1';
+export const SETTINGS_STORAGE_KEY = getSettingsStorageKey(DEPLOY_ENV);
 
 export const DEFAULT_SETTINGS: Readonly<CircuitLabSettings> = Object.freeze({
 	schematicStandard: 'ieee',

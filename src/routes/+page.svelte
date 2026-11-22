@@ -53,6 +53,7 @@
 		encodeCircuitToHash,
 		type CircuitDocument
 	} from '$lib/engine';
+	import { DEPLOY_COMMIT_SHA, IS_STAGING } from '$lib/env';
 	import { circuit } from '$lib/stores/circuit.svelte';
 	import { settings } from '$lib/stores/settings.svelte';
 	import { cn } from '$lib/utils';
@@ -254,7 +255,7 @@
 <svelte:window onkeydown={handleWindowKeydown} />
 
 <svelte:head>
-	<title>{circuit.document.name ? `${circuit.document.name} — Circuit Lab` : 'Circuit Lab'}</title>
+	<title>{`${IS_STAGING ? '[Staging] ' : ''}${circuit.document.name ? `${circuit.document.name} — Circuit Lab` : 'Circuit Lab'}`}</title>
 </svelte:head>
 
 <div class="flex h-dvh w-full flex-col overflow-hidden bg-background text-foreground">
@@ -282,7 +283,7 @@
 				</Button>
 			</Tooltip>
 
-			<div class="flex shrink-0 items-center gap-1.5 sm:gap-2 xl:min-w-0">
+			<div class="flex shrink-0 items-center gap-1 sm:gap-2 xl:min-w-0">
 				<svg
 					width="18"
 					height="18"
@@ -302,6 +303,14 @@
 				<span class="shrink-0 whitespace-nowrap text-[13px] font-semibold tracking-tight text-foreground">
 					Circuit Lab
 				</span>
+				{#if IS_STAGING}
+					<span
+						title={DEPLOY_COMMIT_SHA ? `Staging deployment (${DEPLOY_COMMIT_SHA})` : 'Staging deployment'}
+						class="shrink-0 rounded-[3px] border border-warning/45 bg-warning/10 px-1 py-0.5 font-engineering text-[9px] font-semibold uppercase tracking-wide text-warning sm:px-1.5 sm:text-[10px]"
+					>
+						<span class="sm:hidden">STG</span><span class="hidden sm:inline">STAGING</span>
+					</span>
+				{/if}
 				{#if circuit.document.name}
 					<span class="hidden max-w-[180px] truncate text-xs text-muted-foreground xl:inline">
 						/ {circuit.document.name}
@@ -309,13 +318,15 @@
 				{/if}
 			</div>
 
-			<!-- Compact Live Status Dot (< sm) -->
-			<span
-				role="status"
-				aria-label={statusInfo.label}
-				title={statusInfo.label}
-				class={cn('h-2 w-2 shrink-0 rounded-full sm:hidden', statusInfo.dotClass)}
-			></span>
+			<!-- Compact Live Status Dot (< sm, hidden in AC mode where mobile canvas telemetry strip shows status) -->
+			{#if circuit.document.mode !== 'ac'}
+				<span
+					role="status"
+					aria-label={statusInfo.label}
+					title={statusInfo.label}
+					class={cn('h-2 w-2 shrink-0 rounded-full sm:hidden', statusInfo.dotClass)}
+				></span>
+			{/if}
 
 			<Separator orientation="vertical" class="mx-1 hidden h-4 sm:block" />
 
@@ -331,7 +342,7 @@
 					aria-checked={circuit.document.mode === 'dc'}
 					onclick={() => circuit.setMode('dc')}
 					class={cn(
-						'relative inline-flex h-full cursor-pointer items-center justify-center rounded-[3px] border px-2.5 text-xs transition-colors duration-150 after:absolute after:-inset-y-3 after:inset-x-0 lg:after:hidden',
+						'relative inline-flex h-full cursor-pointer items-center justify-center rounded-[3px] border px-2 text-xs transition-colors duration-150 after:absolute after:-inset-y-3 after:inset-x-0 sm:px-2.5 lg:after:hidden',
 						'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
 						circuit.document.mode === 'dc'
 							? 'border-border/80 bg-card font-semibold text-foreground shadow-2xs'
@@ -346,7 +357,7 @@
 					aria-checked={circuit.document.mode === 'ac'}
 					onclick={() => circuit.setMode('ac')}
 					class={cn(
-						'relative inline-flex h-full cursor-pointer items-center justify-center rounded-[3px] border px-2.5 text-xs transition-colors duration-150 after:absolute after:-inset-y-3 after:inset-x-0 lg:after:hidden',
+						'relative inline-flex h-full cursor-pointer items-center justify-center rounded-[3px] border px-2 text-xs transition-colors duration-150 after:absolute after:-inset-y-3 after:inset-x-0 sm:px-2.5 lg:after:hidden',
 						'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
 						circuit.document.mode === 'ac'
 							? 'border-border/80 bg-card font-semibold text-foreground shadow-2xs'
@@ -358,7 +369,7 @@
 			</div>
 
 			{#if circuit.document.mode === 'ac'}
-				<!-- Compact Mobile AC Frequency Trigger (< md) -->
+				<!-- Compact Mobile & Tablet AC Frequency Trigger (< lg) -->
 				<button
 					type="button"
 					aria-label="Edit AC frequency"
@@ -368,15 +379,15 @@
 						mobileMenuOpen = false;
 						freqPopoverOpen = !freqPopoverOpen;
 					}}
-					class="relative inline-flex h-8 shrink-0 cursor-pointer items-center gap-1 rounded-[4px] border border-input bg-card px-2 font-engineering text-xs text-foreground transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring after:absolute after:-inset-y-2 after:inset-x-0 md:hidden"
+					class="relative inline-flex h-8 shrink-0 cursor-pointer items-center gap-0.5 rounded-[4px] border border-input bg-card px-1.5 font-engineering text-[11px] text-foreground transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring after:absolute after:-inset-y-2 after:inset-x-0 sm:gap-1 sm:px-2 sm:text-xs lg:hidden"
 				>
 					<span class="sm:hidden">{formatFrequency(circuit.document.frequencyHz).replace(/\s+/g, '')}</span>
 					<span class="hidden sm:inline">{formatFrequency(circuit.document.frequencyHz)}</span>
 					<ChevronDown class="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
 				</button>
 
-				<!-- Inline AC Frequency Input (md+) -->
-				<div class="relative hidden items-center md:flex">
+				<!-- Inline AC Frequency Input (lg+) -->
+				<div class="relative hidden items-center lg:flex">
 					<Input
 						type="number"
 						min="0.001"
@@ -396,9 +407,9 @@
 				</div>
 			{/if}
 
-			<Separator orientation="vertical" class="mx-0.5 hidden h-4 sm:block" />
+			<Separator orientation="vertical" class="mx-0.5 hidden h-4 sm:block md:hidden lg:block" />
 
-			<!-- Inline Hairline Telemetry Indicator (sm+) -->
+			<!-- Inline Hairline Telemetry Indicator (sm+; dot-only on md to preserve breathing room) -->
 			<span
 				role="status"
 				aria-label={statusInfo.label}
@@ -410,19 +421,19 @@
 					aria-hidden="true"
 				></span>
 				{#if isEmpty}
-					<span class="text-muted-foreground">Empty</span>
+					<span class="text-muted-foreground md:hidden lg:inline">Empty</span>
 				{:else if errorCount > 0 || !circuit.solution.mna.valid}
-					<span class="font-medium text-destructive">
+					<span class="font-medium text-destructive md:hidden lg:inline">
 						{errorCount > 0
 							? `${errorCount} ${errorCount === 1 ? 'Error' : 'Errors'}`
 							: 'Invalid'}
 					</span>
 				{:else if isVerified}
-					<span class="text-foreground">
+					<span class="text-foreground md:hidden lg:inline">
 						Verified<span class="hidden text-muted-foreground lg:inline">{' · ΣP = 0'}</span>
 					</span>
 				{:else}
-					<span class="text-foreground">Solved (MNA)</span>
+					<span class="text-foreground md:hidden lg:inline">Solved (MNA)</span>
 				{/if}
 			</span>
 		</div>
@@ -434,7 +445,7 @@
 					<Button
 						variant="ghost"
 						size="sm"
-						class="relative h-9 px-2.5 text-xs font-medium text-foreground/85 after:absolute after:-inset-y-1 after:inset-x-0 hover:bg-accent hover:text-foreground lg:h-7 lg:px-2 lg:after:hidden"
+						class="relative h-9 px-2 text-xs font-medium text-foreground/85 after:absolute after:-inset-y-1 after:inset-x-0 hover:bg-accent hover:text-foreground lg:h-7 lg:after:hidden"
 						onclick={() => (presetsOpen = true)}
 					>
 						<BookOpen />
@@ -445,7 +456,7 @@
 					<Button
 						variant="ghost"
 						size="sm"
-						class="relative h-9 px-2.5 text-xs font-medium text-foreground/85 after:absolute after:-inset-y-1 after:inset-x-0 hover:bg-accent hover:text-foreground lg:h-7 lg:px-2 lg:after:hidden"
+						class="relative h-9 px-2 text-xs font-medium text-foreground/85 after:absolute after:-inset-y-1 after:inset-x-0 hover:bg-accent hover:text-foreground lg:h-7 lg:after:hidden"
 						onclick={() => (jsonOpen = true)}
 					>
 						<FileCode2 />
@@ -456,7 +467,7 @@
 					<Button
 						variant="ghost"
 						size="sm"
-						class="relative h-9 px-2.5 text-xs font-medium text-foreground/85 after:absolute after:-inset-y-1 after:inset-x-0 hover:bg-accent hover:text-foreground lg:h-7 lg:px-2 lg:after:hidden"
+						class="relative h-9 px-2 text-xs font-medium text-foreground/85 after:absolute after:-inset-y-1 after:inset-x-0 hover:bg-accent hover:text-foreground lg:h-7 lg:after:hidden"
 						onclick={() => (aiOpen = true)}
 					>
 						<ScanLine />
@@ -471,7 +482,7 @@
 					<Button
 						variant="ghost"
 						size="sm"
-						class="relative h-9 px-2.5 text-xs font-medium text-foreground/85 after:absolute after:-inset-y-1 after:inset-x-0 hover:bg-accent hover:text-foreground lg:h-7 lg:px-2 lg:after:hidden"
+						class="relative h-9 px-2 text-xs font-medium text-foreground/85 after:absolute after:-inset-y-1 after:inset-x-0 hover:bg-accent hover:text-foreground lg:h-7 lg:after:hidden"
 						aria-label="Copy shareable circuit link"
 						onclick={handleCopyShareLink}
 					>
@@ -505,7 +516,7 @@
 				<Button
 					variant="ghost"
 					size="icon"
-					class="relative h-9 w-9 after:absolute after:-inset-1 sm:h-10 sm:w-10 lg:h-7 lg:w-7 lg:after:hidden"
+					class="relative h-9 w-9 after:absolute after:-inset-1 sm:h-10 sm:w-10 md:h-9 md:w-9 lg:h-7 lg:w-7 lg:after:hidden"
 					aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
 					onclick={toggleMode}
 				>
@@ -557,19 +568,19 @@
 		</div>
 	</header>
 
-	<!-- Mobile AC Frequency Popover (< md) -->
+	<!-- Mobile & Tablet AC Frequency Popover (< lg) -->
 	{#if freqPopoverOpen && circuit.document.mode === 'ac'}
 		<button
 			type="button"
 			tabindex="-1"
 			aria-label="Close frequency editor"
 			onclick={() => (freqPopoverOpen = false)}
-			class="fixed inset-0 z-40 cursor-default bg-transparent md:hidden"
+			class="fixed inset-0 z-40 cursor-default bg-transparent lg:hidden"
 		></button>
 		<div
 			role="dialog"
 			aria-label="AC frequency settings"
-			class="fixed top-[52px] right-2 left-2 z-50 rounded-[4px] border border-border bg-popover p-3 text-popover-foreground shadow-lg sm:right-auto sm:left-3 sm:w-80 md:hidden"
+			class="fixed top-[52px] right-2 left-2 z-50 rounded-[4px] border border-border bg-popover p-3 text-popover-foreground shadow-lg sm:right-auto sm:left-3 sm:w-80 lg:hidden"
 		>
 			<div class="mb-2.5 flex items-center justify-between gap-2">
 				<span class="text-xs font-semibold text-foreground">AC Drive Frequency</span>
