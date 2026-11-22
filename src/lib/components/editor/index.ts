@@ -4,6 +4,7 @@ export { default as PhasorInput } from './PhasorInput.svelte';
 export { default as SchematicCanvas } from './SchematicCanvas.svelte';
 export { default as ComponentPalette } from './ComponentPalette.svelte';
 export { default as PropertyInspector } from './PropertyInspector.svelte';
+export { default as EditableTitle } from './EditableTitle.svelte';
 export {
 	AC_FREQUENCY_PRESETS,
 	MOUSE_DRAG_THRESHOLD_PX,
@@ -12,10 +13,14 @@ export {
 	buildBridgeArcPath,
 	buildWirePathWithBridges,
 	computeJunctionPoints,
+	computeDanglingWireEndpoints,
+	computeJumpOverWirePoints,
 	computeManhattanPoints,
 	computePinchTransform,
 	computeTouchPinHitRadiusWorld,
 	computeWireCrossings,
+	countBridgedCrossingsForWire,
+	findNearestAnchor,
 	formatComplexOverlay,
 	formatComponentDisplayValue,
 	getDragThresholdPx,
@@ -23,6 +28,9 @@ export {
 	isPointInComponentBodyHitbox,
 	isTouchLikePointer,
 	type FrequencyPreset,
+	type DanglingWireEndpoint,
+	type SnapAnchor,
+	type SnapAnchorKind,
 	type PinchTransformInput,
 	type PinchTransformResult,
 	type WireBendMode,

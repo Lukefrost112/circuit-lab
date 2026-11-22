@@ -21,7 +21,7 @@ describe('settings store', () => {
 		expect(settings.schematicStandard).toBe('ieee');
 		expect(settings.angleDisplay).toBe('polar');
 		expect(settings.precision).toBe(3);
-		expect(settings.showDcFractions).toBe(true);
+		expect(settings.showDcFractions).toBe(false);
 		expect(settings.acMagnitudeMode).toBe('rms');
 		expect(settings.showGrid).toBe(true);
 		expect(settings.snapToGrid).toBe(true);
@@ -29,12 +29,16 @@ describe('settings store', () => {
 		expect(settings.snapshot()).toEqual(DEFAULT_SETTINGS);
 	});
 
-	it('toggles schematicStandard between ieee and iec and resets cleanly', () => {
+	it('toggles schematicStandard and showDcFractions and resets cleanly', () => {
 		expect(settings.schematicStandard).toBe('ieee');
 		settings.schematicStandard = 'iec';
 		expect(settings.schematicStandard).toBe('iec');
 		settings.schematicStandard = 'ieee';
 		expect(settings.schematicStandard).toBe('ieee');
+
+		expect(settings.showDcFractions).toBe(false);
+		settings.showDcFractions = true;
+		expect(settings.showDcFractions).toBe(true);
 
 		settings.update({ schematicStandard: 'iec', precision: 4, showGrid: false });
 		expect(settings.schematicStandard).toBe('iec');
@@ -43,6 +47,7 @@ describe('settings store', () => {
 
 		settings.reset();
 		expect(settings.schematicStandard).toBe('ieee');
+		expect(settings.showDcFractions).toBe(false);
 		expect(settings.precision).toBe(3);
 		expect(settings.showGrid).toBe(true);
 	});

@@ -42,10 +42,13 @@
 		buildBridgeArcPath,
 		buildWirePathWithBridges,
 		computeJunctionPoints,
-		computeManhattanPoints,
+		computeDanglingWireEndpoints,
+		computeJumpOverWirePoints,
 		computePinchTransform,
 		computeTouchPinHitRadiusWorld,
 		computeWireCrossings,
+		countBridgedCrossingsForWire,
+		findNearestAnchor,
 		formatComplexOverlay,
 		formatComponentDisplayValue,
 		getDragThresholdPx,
@@ -94,14 +97,14 @@
 		localCrossingFeedback ?? autoWireFeedback ?? localAutoWireFeedback
 	);
 
-	function showCrossingFeedback(message: string): void {
+	function showCrossingFeedback(message: string, durationMs = 2500): void {
 		localCrossingFeedback = message;
 		if (localCrossingTimer !== undefined) {
 			clearTimeout(localCrossingTimer);
 		}
 		localCrossingTimer = setTimeout(() => {
 			localCrossingFeedback = null;
-		}, 2500);
+		}, durationMs);
 	}
 
 	function handleCrossingToggle(x: number, y: number): void {
@@ -173,6 +176,8 @@
 		startClientX: number;
 		startClientY: number;
 		dragged: boolean;
+		/** Set when a Select-mode touch press started on a dangling wire endpoint (tap = select wire) */
+		tapWireId?: string;
 	} | null = null;
 
 	let spaceHeld = $state(false);
@@ -223,6 +228,8 @@
 		| null
 	>(null);
 
+	const PREVIEW_WIRE_ID = '__wire-preview__';
+
 	const PLACEMENT_KINDS = new Set<string>([
 		'resistor',
 		'capacitor',
@@ -272,28 +279,45 @@
 		return false;
 	}
 
-	const allPins = $derived.by(() => {
-		const list: Array<{ componentId: string; x: number; y: number; name: string; index: number }> =
-			[];
-		for (const comp of circuit.document.components) {
-			for (const pin of getPinPositions(comp)) {
-				list.push({
-					componentId: comp.id,
-					x: pin.x,
-					y: pin.y,
-					name: pin.name,
-					index: pin.index
-				});
-			}
-		}
-		return list;
-	});
+	const danglingEndpoints = $derived(
+		computeDanglingWireEndpoints(circuit.document.components, circuit.document.wires)
+	);
 
 	const wirePreviewPoints = $derived.by<GridPoint[]>(() => {
 		if (!wireStart || !hoverGrid) return [];
 		const target = hoverSnappedPin ?? hoverGrid;
-		return computeManhattanPoints(wireStart, target, wireBendMode);
+		return computeJumpOverWirePoints(
+			wireStart,
+			target,
+			wireBendMode,
+			circuit.document.components,
+			circuit.document.wires
+		);
 	});
+
+	/** Insulated pass-over crossings the in-progress wire would create (rendered as bridge hops). */
+	const wirePreviewCrossings = $derived.by<WireCrossing[]>(() => {
+		if (wirePreviewPoints.length < 2) return [];
+		return computeWireCrossings(circuit.document.components, [
+			...circuit.document.wires,
+			{ id: PREVIEW_WIRE_ID, points: wirePreviewPoints }
+		]).filter((c) => !c.connected && c.wireIds.includes(PREVIEW_WIRE_ID));
+	});
+
+	const wirePreviewPath = $derived(
+		buildWirePathWithBridges(
+			wirePreviewPoints,
+			new Set(wirePreviewCrossings.map((c) => `${c.x},${c.y}`)),
+			GRID_SIZE
+		)
+	);
+
+	/** Crossings where the preview runs vertically, so the existing horizontal wire hops over it. */
+	const wirePreviewVerticalCrossings = $derived(
+		wirePreviewCrossings.filter(
+			(c) => !isHorizontalWireAtCrossing({ id: PREVIEW_WIRE_ID, points: wirePreviewPoints }, c.x, c.y)
+		)
+	);
 
 	const nodeCount = $derived(Object.keys(circuit.graph.nodes).length);
 	const hasErrors = $derived(
@@ -604,17 +628,16 @@
 		return 0.65;
 	}
 
-	function findNearestPin(gx: number, gy: number, maxDist = 0.6): GridPoint | null {
-		let best: GridPoint | null = null;
-		let bestDist = maxDist;
-		for (const pin of allPins) {
-			const d = Math.hypot(pin.x - gx, pin.y - gy);
-			if (d <= bestDist) {
-				bestDist = d;
-				best = { x: pin.x, y: pin.y };
-			}
-		}
-		return best;
+	/** Nearest wiring snap anchor: component pins (preferred on ties) or any wire vertex. */
+	function findNearestSnapAnchor(gx: number, gy: number, maxDist = 0.6): GridPoint | null {
+		const hit = findNearestAnchor(
+			gx,
+			gy,
+			circuit.document.components,
+			circuit.document.wires,
+			maxDist
+		);
+		return hit ? { x: hit.x, y: hit.y } : null;
 	}
 
 	function findNodeNearGrid(gx: number, gy: number, maxDist = 0.65): string | null {
@@ -653,12 +676,32 @@
 
 	function finishWireAt(endPt: GridPoint): void {
 		if (!wireStart) return;
-		const pts = computeManhattanPoints(wireStart, endPt, wireBendMode);
-		circuit.addWire(pts);
+		const pts = computeJumpOverWirePoints(
+			wireStart,
+			endPt,
+			wireBendMode,
+			circuit.document.components,
+			circuit.document.wires
+		);
+		const added = circuit.addWire(pts);
 		wireStart = null;
 		wireDragOrigin = null;
 		if (wireStartedFromSelect) {
 			wireStartedFromSelect = false;
+		}
+		if (added) {
+			const bridged = countBridgedCrossingsForWire(
+				circuit.document.components,
+				circuit.document.wires,
+				added.id
+			);
+			if (bridged > 0) {
+				const action = isTouchLikePointer(lastPointerType) ? 'Tap' : 'Click';
+				showCrossingFeedback(
+					`Bridged ${bridged} ${bridged === 1 ? 'crossing' : 'crossings'} · ${action} crossing to connect`,
+					4000
+				);
+			}
 		}
 	}
 
@@ -763,7 +806,7 @@
 		if (!isPrimaryPointerDown(e)) return;
 
 		const { gx, gy } = clientToGrid(e.clientX, e.clientY);
-		const snappedPin = findNearestPin(gx, gy, getPinSnapDist(e.pointerType));
+		const snappedPin = findNearestSnapAnchor(gx, gy, getPinSnapDist(e.pointerType));
 		const targetPt: GridPoint = snappedPin ?? {
 			x: Math.round(gx),
 			y: Math.round(gy)
@@ -969,7 +1012,7 @@
 		if (circuit.activeTool === 'wire' || wireStart) {
 			e.stopPropagation();
 			const { gx, gy } = clientToGrid(e.clientX, e.clientY);
-			const snappedPin = findNearestPin(gx, gy, getPinSnapDist(e.pointerType));
+			const snappedPin = findNearestSnapAnchor(gx, gy, getPinSnapDist(e.pointerType));
 			const pt = snappedPin ?? {
 				x: Math.round(gx),
 				y: Math.round(gy)
@@ -1018,6 +1061,50 @@
 			return;
 		}
 		circuit.selectWire(wire.id);
+	}
+
+	/**
+	 * Press on an open (dangling) wire endpoint: starts a new wire from it in Select / Wire mode
+	 * (mouse click-click or touch press-drag-release), or completes the in-progress wire there.
+	 */
+	function handleWireEndpointPointerDown(e: PointerEvent, wireId: string, pt: GridPoint): void {
+		lastPointerType = e.pointerType;
+		isTouchInteraction = isTouchLikePointer(e.pointerType);
+		refreshSvgRect();
+
+		if (!isPrimaryPointerDown(e) || spaceHeld) return;
+
+		if (trackPointerDown(e)) {
+			e.stopPropagation();
+			e.preventDefault();
+			return;
+		}
+
+		// Placement / probe tools fall through to the background handler
+		if (isPlacementTool(circuit.activeTool) || circuit.activeTool === 'probe') return;
+
+		e.stopPropagation();
+		const anchor = { x: pt.x, y: pt.y };
+
+		if (wireStart) {
+			finishWireAt(anchor);
+			return;
+		}
+
+		const fromSelect = circuit.activeTool === 'select';
+		startWireAt(anchor, fromSelect);
+		if (isTouchLikePointer(e.pointerType)) {
+			wireDragOrigin = {
+				pointerId: e.pointerId,
+				startClientX: e.clientX,
+				startClientY: e.clientY,
+				dragged: false,
+				tapWireId: fromSelect ? wireId : undefined
+			};
+			capturePointer(e.pointerId);
+			setHoverGrid(anchor);
+			setHoverSnappedPin(anchor);
+		}
 	}
 
 	function handleCrossingPointerDown(e: PointerEvent, crossing: WireCrossing): void {
@@ -1159,7 +1246,7 @@
 			}
 			const { gx, gy } = clientToGrid(e.clientX, e.clientY);
 			setHoverGrid({ x: Math.round(gx), y: Math.round(gy) });
-			setHoverSnappedPin(findNearestPin(gx, gy, getPinSnapDist(e.pointerType)));
+			setHoverSnappedPin(findNearestSnapAnchor(gx, gy, getPinSnapDist(e.pointerType)));
 			return;
 		}
 
@@ -1170,7 +1257,7 @@
 		setHoverGrid({ x: Math.round(gx), y: Math.round(gy) });
 
 		if (isWiringMode || e.pointerType === 'mouse') {
-			setHoverSnappedPin(findNearestPin(gx, gy, getPinSnapDist(e.pointerType)));
+			setHoverSnappedPin(findNearestSnapAnchor(gx, gy, getPinSnapDist(e.pointerType)));
 		} else {
 			setHoverSnappedPin(null);
 		}
@@ -1210,11 +1297,16 @@
 			wireDragOrigin = null;
 			if (origin.dragged && wireStart) {
 				const { gx, gy } = clientToGrid(e.clientX, e.clientY);
-				const endPt = findNearestPin(gx, gy, getPinSnapDist(e.pointerType)) ?? {
+				const endPt = findNearestSnapAnchor(gx, gy, getPinSnapDist(e.pointerType)) ?? {
 					x: Math.round(gx),
 					y: Math.round(gy)
 				};
 				finishWireAt(endPt);
+			} else if (!origin.dragged && origin.tapWireId && wireStartedFromSelect) {
+				// Select-mode tap (no drag) on a dangling wire endpoint selects the wire instead
+				wireStart = null;
+				wireStartedFromSelect = false;
+				circuit.selectWire(origin.tapWireId);
 			}
 			if (isTouchLikePointer(e.pointerType)) {
 				setHoverGrid(null);
@@ -1413,10 +1505,6 @@
 		if (e.code === 'Space') {
 			spaceHeld = false;
 		}
-	}
-
-	function pointsToSvgString(pts: GridPoint[]): string {
-		return pts.map((p) => `${p.x * GRID_SIZE},${p.y * GRID_SIZE}`).join(' ');
 	}
 
 	function getSourceModeForComp(comp: CircuitComponent): 'dc' | 'ac' {
@@ -2170,12 +2258,56 @@
 				</g>
 			{/if}
 
+			<!-- Interactive Dangling (Open) Wire Endpoints (click/drag to continue wiring) -->
+			{#if danglingEndpoints.length > 0}
+				<g class="dangling-wire-endpoints text-foreground">
+					{#each danglingEndpoints as ep (`ep-${ep.x},${ep.y}`)}
+						{@const isSnapped = hoverSnappedPin?.x === ep.x && hoverSnappedPin?.y === ep.y}
+						{@const isWireSelected = circuit.selectedWireId === ep.wireId}
+						{@const isInteractive =
+							!isPlacementTool(circuit.activeTool) && circuit.activeTool !== 'probe'}
+						<g
+							role="button"
+							tabindex="-1"
+							aria-label="Open wire endpoint at ({ep.x}, {ep.y}) — click or drag to continue wiring"
+							data-wire-endpoint={`${ep.x},${ep.y}`}
+							class={cn(
+								'outline-none',
+								isInteractive ? 'cursor-crosshair' : 'pointer-events-none'
+							)}
+							onpointerdown={(e) => handleWireEndpointPointerDown(e, ep.wireId, ep)}
+						>
+							<title>Open wire endpoint — click or drag to continue wiring</title>
+							<circle
+								cx={ep.x * GRID_SIZE}
+								cy={ep.y * GRID_SIZE}
+								r={isTouchInteraction ? 18 : 12}
+								fill="transparent"
+							/>
+							<circle
+								cx={ep.x * GRID_SIZE}
+								cy={ep.y * GRID_SIZE}
+								r={isSnapped || isWiringMode ? 4.5 : 3.75}
+								fill={isSnapped ? 'var(--primary)' : 'var(--background)'}
+								stroke={isSnapped || isWiringMode
+									? 'var(--primary)'
+									: isWireSelected
+										? 'var(--warning)'
+										: 'currentColor'}
+								stroke-width={isSnapped ? 2 : 1.5}
+								pointer-events="none"
+							/>
+						</g>
+					{/each}
+				</g>
+			{/if}
+
 			<!-- Live Orthogonal Wire Preview -->
 			{#if wireStart && wirePreviewPoints.length >= 1}
 				<g pointer-events="none">
 					{#if wirePreviewPoints.length >= 2}
-						<polyline
-							points={pointsToSvgString(wirePreviewPoints)}
+						<path
+							d={wirePreviewPath}
 							fill="none"
 							stroke="var(--primary)"
 							stroke-width="2"
@@ -2184,6 +2316,23 @@
 							stroke-linejoin="round"
 						/>
 					{/if}
+					{#each wirePreviewVerticalCrossings as crossing (`preview-bridge-${crossing.x},${crossing.y}`)}
+						{@const arcD = buildBridgeArcPath(crossing.x, crossing.y, GRID_SIZE)}
+						<path
+							d={arcD}
+							fill="none"
+							stroke="var(--background)"
+							stroke-width="5.5"
+							stroke-linecap="butt"
+						/>
+						<path
+							d={arcD}
+							fill="none"
+							stroke="var(--primary)"
+							stroke-width="2"
+							stroke-linecap="round"
+						/>
+					{/each}
 					<circle
 						cx={wireStart.x * GRID_SIZE}
 						cy={wireStart.y * GRID_SIZE}

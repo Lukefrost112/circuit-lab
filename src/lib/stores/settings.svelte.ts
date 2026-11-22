@@ -26,7 +26,7 @@ export const DEFAULT_SETTINGS: Readonly<CircuitLabSettings> = Object.freeze({
 	unitSystem: 'auto',
 	angleDisplay: 'polar',
 	precision: 3,
-	showDcFractions: true,
+	showDcFractions: false,
 	acMagnitudeMode: 'rms',
 	showGrid: true,
 	snapToGrid: true,

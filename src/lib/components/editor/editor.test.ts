@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render } from 'svelte/server';
 import { PRESETS } from '$lib/data/presets';
 import { FinalAnswersCard } from '$lib/components/results';
-import { Complex } from '$lib/engine';
+import { Complex, type CircuitComponent, type CircuitDocument, type CircuitWire } from '$lib/engine';
+import { buildElectricalGraph } from '$lib/engine/graph';
 import { circuit } from '$lib/stores/circuit.svelte';
 import { settings } from '$lib/stores/settings.svelte';
 import {
@@ -18,11 +19,15 @@ import {
 	TOUCH_WIRE_DRAG_THRESHOLD_PX,
 	buildBridgeArcPath,
 	buildWirePathWithBridges,
+	computeDanglingWireEndpoints,
+	computeJumpOverWirePoints,
 	computeJunctionPoints,
 	computeManhattanPoints,
 	computePinchTransform,
 	computeTouchPinHitRadiusWorld,
 	computeWireCrossings,
+	countBridgedCrossingsForWire,
+	findNearestAnchor,
 	formatComplexOverlay,
 	formatComponentDisplayValue,
 	getDragThresholdPx,
@@ -169,6 +174,283 @@ describe('editor geometry & formatting helpers', () => {
 		expect(buildBridgeArcPath(4, 4, 20)).toBe('M 73.5 80 A 6.5 6.5 0 0 1 86.5 80');
 	});
 
+	it('findNearestAnchor snaps to wire endpoints and interior bends, prefers component pins on ties, and returns null outside maxDist', () => {
+		const components: CircuitComponent[] = [
+			// Horizontal resistor at (6, 4) -> pins at (4, 4) and (8, 4)
+			{ id: 'R1', kind: 'resistor', label: 'R1', x: 6, y: 4, rotation: 0, value: '1k' }
+		];
+		const wires: CircuitWire[] = [
+			// Wire touching pin (8, 4), bending at (12, 4), ending at (12, 8)
+			{
+				id: 'w1',
+				points: [
+					{ x: 8, y: 4 },
+					{ x: 12, y: 4 },
+					{ x: 12, y: 8 }
+				]
+			}
+		];
+
+		// Snaps to wire endpoint (12, 8)
+		expect(findNearestAnchor(12.2, 7.8, components, wires, 0.6)).toEqual({
+			x: 12,
+			y: 8,
+			kind: 'wire'
+		});
+
+		// Snaps to wire interior bend (12, 4)
+		expect(findNearestAnchor(11.7, 4.1, components, wires, 0.6)).toEqual({
+			x: 12,
+			y: 4,
+			kind: 'wire'
+		});
+
+		// Coincident pin and wire vertex at (8, 4): component pin wins tie
+		expect(findNearestAnchor(8, 4, components, wires, 0.6)).toEqual({
+			x: 8,
+			y: 4,
+			kind: 'pin'
+		});
+
+		// Equidistant between pin (8, 4) and wire bend (12, 4) at (10, 4) with large maxDist: pin wins tie
+		expect(findNearestAnchor(10, 4, components, wires, 2.5)).toEqual({
+			x: 8,
+			y: 4,
+			kind: 'pin'
+		});
+
+		// Outside maxDist returns null
+		expect(findNearestAnchor(12.8, 8.8, components, wires, 0.6)).toBeNull();
+		expect(findNearestAnchor(0, 0, components, wires, 0.6)).toBeNull();
+	});
+
+	it('computeDanglingWireEndpoints identifies open ends and excludes ends touching pins or other wires', () => {
+		const components: CircuitComponent[] = [
+			// Resistor at (4, 4) -> pins at (2, 4) and (6, 4)
+			{ id: 'R1', kind: 'resistor', label: 'R1', x: 4, y: 4, rotation: 0, value: '1k' }
+		];
+		const wires: CircuitWire[] = [
+			// w1: starts on R1 pin (6, 4), ends dangling at (10, 4)
+			{ id: 'w1', points: [{ x: 6, y: 4 }, { x: 10, y: 4 }] },
+			// w2: completely open on both ends (14, 2) and (14, 6)
+			{ id: 'w2', points: [{ x: 14, y: 2 }, { x: 14, y: 6 }] },
+			// w3: starts on w2 interior segment at (14, 4) [T-junction], ends dangling at (18, 4)
+			{ id: 'w3', points: [{ x: 14, y: 4 }, { x: 18, y: 4 }] },
+			// w4: starts at w1's dangling end? No, connects (14, 2) to (20, 2) -> (14, 2) is no longer dangling
+			{ id: 'w4', points: [{ x: 14, y: 2 }, { x: 20, y: 2 }] }
+		];
+
+		const dangling = computeDanglingWireEndpoints(components, wires);
+		const keys = new Set(dangling.map((d) => `${d.wireId}:${d.x},${d.y}`));
+
+		expect(keys).toEqual(new Set(['w1:10,4', 'w2:14,6', 'w3:18,4', 'w4:20,2']));
+		// Pin-connected end (6,4), T-junction end (14,4), and shared vertex (14,2) are excluded
+		expect(dangling.some((d) => d.x === 6 && d.y === 4)).toBe(false);
+		expect(dangling.some((d) => d.x === 14 && d.y === 4)).toBe(false);
+		expect(dangling.some((d) => d.x === 14 && d.y === 2)).toBe(false);
+	});
+
+	it('computeJumpOverWirePoints avoids L-bend shorts, collinear overlaps, uses Z-detours, preserves explicit endpoints, and keeps nets electrically separate', () => {
+		// 1. Avoids placing an L-bend corner on a foreign wire segment (chooses the other bend)
+		const vertObstacle: CircuitWire[] = [
+			{ id: 'w-obs', points: [{ x: 8, y: 2 }, { x: 8, y: 6 }] }
+		];
+		// Preferred 'hv' corner (8, 4) lies on w-obs -> must switch to 'vh' corner (4, 8)
+		const bendAvoided = computeJumpOverWirePoints(
+			{ x: 4, y: 4 },
+			{ x: 8, y: 8 },
+			'hv',
+			[],
+			vertObstacle
+		);
+		expect(bendAvoided).toEqual([
+			{ x: 4, y: 4 },
+			{ x: 4, y: 8 },
+			{ x: 8, y: 8 }
+		]);
+
+		// 2. Avoids collinear overlap with a foreign wire segment
+		const horizObstacle: CircuitWire[] = [
+			{ id: 'w-h', points: [{ x: 4, y: 4 }, { x: 10, y: 4 }] }
+		];
+		// Starting at (2, 4) to (8, 8): preferred 'hv' runs collinearly along y=4 over [4, 8]; 'vh' is clean
+		const overlapAvoided = computeJumpOverWirePoints(
+			{ x: 2, y: 4 },
+			{ x: 8, y: 8 },
+			'hv',
+			[],
+			horizObstacle
+		);
+		expect(overlapAvoided).toEqual([
+			{ x: 2, y: 4 },
+			{ x: 2, y: 8 },
+			{ x: 8, y: 8 }
+		]);
+
+		// 3. Uses a Z-path detour when both L-bends would short/overlap
+		const bothCornersBlocked: CircuitWire[] = [
+			// Blocks HV corner (10, 4)
+			{ id: 'w-block-hv', points: [{ x: 10, y: 2 }, { x: 10, y: 6 }] },
+			// Blocks VH corner (4, 10)
+			{ id: 'w-block-vh', points: [{ x: 2, y: 10 }, { x: 6, y: 10 }] }
+		];
+		const zPath = computeJumpOverWirePoints(
+			{ x: 4, y: 4 },
+			{ x: 10, y: 10 },
+			'hv',
+			[],
+			bothCornersBlocked
+		);
+		// Must produce a 4-vertex Z-path preserving start/end and avoiding both (10,4) and (4,10)
+		expect(zPath).toHaveLength(4);
+		expect(zPath[0]).toEqual({ x: 4, y: 4 });
+		expect(zPath[zPath.length - 1]).toEqual({ x: 10, y: 10 });
+		expect(zPath.some((p) => p.x === 10 && p.y === 4)).toBe(false);
+		expect(zPath.some((p) => p.x === 4 && p.y === 10)).toBe(false);
+
+		// 4. Preserves intentional start/end endpoints (e.g. starting on an open wire end, ending on a pin)
+		const pinComp: CircuitComponent = {
+			id: 'T1',
+			kind: 'terminal',
+			label: 'A',
+			x: 12,
+			y: 8,
+			rotation: 0,
+			value: ''
+		};
+		const existingWire: CircuitWire = {
+			id: 'w-existing',
+			points: [{ x: 2, y: 4 }, { x: 6, y: 4 }]
+		};
+		const intentional = computeJumpOverWirePoints(
+			{ x: 6, y: 4 },
+			{ x: 12, y: 8 },
+			'hv',
+			[pinComp],
+			[existingWire]
+		);
+		expect(intentional[0]).toEqual({ x: 6, y: 4 });
+		expect(intentional[intentional.length - 1]).toEqual({ x: 12, y: 8 });
+
+		// 5. Electrical graph verification:
+		//    - Routing across an existing wire using computeJumpOverWirePoints stays electrically separate
+		//    - Starting on an open wire endpoint connects to the same electrical node
+		const tExistingA: CircuitComponent = {
+			id: 'TA',
+			kind: 'terminal',
+			label: 'A',
+			x: 2,
+			y: 6,
+			rotation: 0,
+			value: ''
+		};
+		const tExistingB: CircuitComponent = {
+			id: 'TB',
+			kind: 'terminal',
+			label: 'B',
+			x: 10,
+			y: 6,
+			rotation: 0,
+			value: ''
+		};
+		const tCrossStart: CircuitComponent = {
+			id: 'TC',
+			kind: 'terminal',
+			label: 'C',
+			x: 6,
+			y: 2,
+			rotation: 0,
+			value: ''
+		};
+		const tCrossEnd: CircuitComponent = {
+			id: 'TD',
+			kind: 'terminal',
+			label: 'D',
+			x: 8,
+			y: 10,
+			rotation: 0,
+			value: ''
+		};
+		const baseWire: CircuitWire = {
+			id: 'w-base',
+			points: [{ x: 2, y: 6 }, { x: 10, y: 6 }]
+		};
+		const crossRoute = computeJumpOverWirePoints(
+			{ x: 6, y: 2 },
+			{ x: 8, y: 10 },
+			'vh',
+			[tExistingA, tExistingB, tCrossStart, tCrossEnd],
+			[baseWire]
+		);
+		const separateDoc: CircuitDocument = {
+			schemaVersion: 1,
+			name: 'Jump-Over Isolation',
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [tExistingA, tExistingB, tCrossStart, tCrossEnd],
+			wires: [baseWire, { id: 'w-cross', points: crossRoute }]
+		};
+		const separateGraph = buildElectricalGraph(separateDoc);
+		expect(separateGraph.componentNodes.TA[0]).toBe(separateGraph.componentNodes.TB[0]);
+		expect(separateGraph.componentNodes.TC[0]).toBe(separateGraph.componentNodes.TD[0]);
+		expect(separateGraph.componentNodes.TC[0]).not.toBe(separateGraph.componentNodes.TA[0]);
+
+		// Now start a wire explicitly on an open wire endpoint (10, 6) -> connects to the same electrical node
+		const tOpenTarget: CircuitComponent = {
+			id: 'TE',
+			kind: 'terminal',
+			label: 'E',
+			x: 14,
+			y: 10,
+			rotation: 0,
+			value: ''
+		};
+		const openWire: CircuitWire = {
+			id: 'w-open',
+			points: [{ x: 2, y: 6 }, { x: 10, y: 6 }]
+		};
+		const continueRoute = computeJumpOverWirePoints(
+			{ x: 10, y: 6 },
+			{ x: 14, y: 10 },
+			'hv',
+			[tExistingA, tOpenTarget],
+			[openWire]
+		);
+		const connectedDoc: CircuitDocument = {
+			schemaVersion: 1,
+			name: 'Open Endpoint Continuation',
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [tExistingA, tOpenTarget],
+			wires: [openWire, { id: 'w-cont', points: continueRoute }]
+		};
+		const connectedGraph = buildElectricalGraph(connectedDoc);
+		expect(connectedGraph.componentNodes.TA[0]).toBe(connectedGraph.componentNodes.TE[0]);
+	});
+
+	it('countBridgedCrossingsForWire counts insulated bridge crossings created by a wire', () => {
+		const wires: CircuitWire[] = [
+			{ id: 'v1', points: [{ x: 4, y: 2 }, { x: 4, y: 8 }] },
+			{ id: 'v2', points: [{ x: 8, y: 2 }, { x: 8, y: 8 }] },
+			// Horizontal wire crossing both v1 and v2 strictly interior -> 2 bridged crossings
+			{ id: 'h-bridge', points: [{ x: 2, y: 5 }, { x: 10, y: 5 }] },
+			// Horizontal wire not crossing anything -> 0 bridged crossings
+			{ id: 'h-clear', points: [{ x: 2, y: 10 }, { x: 10, y: 10 }] }
+		];
+
+		expect(countBridgedCrossingsForWire([], wires, 'h-bridge')).toBe(2);
+		expect(countBridgedCrossingsForWire([], wires, 'v1')).toBe(1);
+		expect(countBridgedCrossingsForWire([], wires, 'v2')).toBe(1);
+		expect(countBridgedCrossingsForWire([], wires, 'h-clear')).toBe(0);
+
+		// Connected 4-way crossing (explicit vertex at intersection) is NOT counted as a bridge
+		const connectedWires: CircuitWire[] = [
+			{ id: 'c1', points: [{ x: 2, y: 4 }, { x: 4, y: 4 }, { x: 6, y: 4 }] },
+			{ id: 'c2', points: [{ x: 4, y: 2 }, { x: 4, y: 6 }] }
+		];
+		expect(countBridgedCrossingsForWire([], connectedWires, 'c1')).toBe(0);
+	});
+
 	it('formats component values and live V/I overlays cleanly', () => {
 		const r1 = PRESETS[0].document.components.find((c) => c.id === 'R1')!;
 		expect(formatComponentDisplayValue(r1, 'dc')).toBe('2 kΩ');
@@ -188,6 +470,41 @@ describe('editor geometry & formatting helpers', () => {
 				showDcFractions: true
 			})
 		).toBe('4 mA');
+
+		// Auto SI scaled exact fractions (4/3 mA and 2/3 mA)
+		expect(
+			formatComplexOverlay(Complex.from(0.004 / 3, 0), 'A', 'dc', {
+				precision: 3,
+				angleDisplay: 'polar',
+				showDcFractions: true,
+				unitSystem: 'auto'
+			})
+		).toBe('4/3 mA');
+		expect(
+			formatComplexOverlay(Complex.from(0.004 / 3, 0), 'A', 'dc', {
+				precision: 3,
+				angleDisplay: 'polar',
+				showDcFractions: false,
+				unitSystem: 'auto'
+			})
+		).toBe('1.33 mA');
+
+		expect(
+			formatComplexOverlay(Complex.from(0.002 / 3, 0), 'A', 'dc', {
+				precision: 3,
+				angleDisplay: 'polar',
+				showDcFractions: true,
+				unitSystem: 'auto'
+			})
+		).toBe('2/3 mA');
+		expect(
+			formatComplexOverlay(Complex.from(0.002 / 3, 0), 'A', 'dc', {
+				precision: 3,
+				angleDisplay: 'polar',
+				showDcFractions: false,
+				unitSystem: 'auto'
+			})
+		).toBe('667 µA');
 
 		expect(
 			formatComplexOverlay(Complex.fromPolar(120, -30), 'V', 'ac', {

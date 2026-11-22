@@ -32,6 +32,7 @@
 	import {
 		AC_FREQUENCY_PRESETS,
 		ComponentPalette,
+		EditableTitle,
 		PropertyInspector,
 		SchematicCanvas
 	} from '$lib/components/editor';
@@ -304,7 +305,7 @@
 <svelte:window onkeydown={handleWindowKeydown} />
 
 <svelte:head>
-	<title>{`${IS_STAGING ? '[Staging] ' : ''}${circuit.document.name ? `${circuit.document.name} — Circuit Lab` : 'Circuit Lab'}`}</title>
+	<title>{`${IS_STAGING ? '[Staging] ' : ''}${circuit.document.name?.trim() ? `${circuit.document.name.trim()} — Circuit Lab` : 'Circuit Lab'}`}</title>
 </svelte:head>
 
 <div class="flex h-dvh w-full flex-col overflow-hidden bg-background text-foreground">
@@ -360,11 +361,13 @@
 						<span class="sm:hidden">STG</span><span class="hidden sm:inline">STAGING</span>
 					</span>
 				{/if}
-				{#if circuit.document.name}
-					<span class="hidden max-w-[180px] truncate text-xs text-muted-foreground xl:inline">
-						/ {circuit.document.name}
-					</span>
-				{/if}
+				<div class="hidden min-w-0 items-center gap-0.5 xl:flex">
+					<span aria-hidden="true" class="text-xs text-muted-foreground/70">/</span>
+					<EditableTitle
+						value={circuit.document.name ?? ''}
+						onCommit={(next) => circuit.setDocumentName(next)}
+					/>
+				</div>
 			</div>
 
 			<!-- Compact Live Status Dot (< sm, hidden in AC mode where mobile canvas telemetry strip shows status) -->

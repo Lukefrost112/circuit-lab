@@ -30,6 +30,37 @@ describe('results formatters', () => {
 		expect(
 			formatDcQuantity(0.004, 'A', { precision: 3, showDcFractions: true })
 		).toBe('4 mA');
+
+		// Auto SI scaled exact fractions (4/3 mA and 2/3 mA)
+		expect(
+			formatDcQuantity(0.004 / 3, 'A', {
+				precision: 3,
+				showDcFractions: true,
+				unitSystem: 'auto'
+			})
+		).toBe('4/3 mA = 1.33 mA');
+		expect(
+			formatDcQuantity(0.004 / 3, 'A', {
+				precision: 3,
+				showDcFractions: false,
+				unitSystem: 'auto'
+			})
+		).toBe('1.33 mA');
+
+		expect(
+			formatDcQuantity(0.002 / 3, 'A', {
+				precision: 3,
+				showDcFractions: true,
+				unitSystem: 'auto'
+			})
+		).toBe('2/3 mA = 667 µA');
+		expect(
+			formatDcQuantity(0.002 / 3, 'A', {
+				precision: 3,
+				showDcFractions: false,
+				unitSystem: 'auto'
+			})
+		).toBe('667 µA');
 	});
 
 	it('formats AC polar and rectangular quantities with SI prefixes', () => {

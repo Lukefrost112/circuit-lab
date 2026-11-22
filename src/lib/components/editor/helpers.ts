@@ -15,6 +15,10 @@ import {
 	type GridPoint,
 	type UnitSystemId
 } from '$lib/engine';
+import {
+	findAutoSiRational,
+	hasNonTerminatingDenominator
+} from '$lib/components/results/formatters';
 import type { AngleDisplay, DisplayPrecision } from '$lib/stores/settings.svelte';
 
 export type WireBendMode = 'hv' | 'vh';
@@ -36,6 +40,324 @@ export function computeManhattanPoints(
 	const corner: GridPoint =
 		bend === 'hv' ? { x: end.x, y: start.y } : { x: start.x, y: end.y };
 	return [{ x: start.x, y: start.y }, corner, { x: end.x, y: end.y }];
+}
+
+const GEOM_EPS = 1e-9;
+
+function samePoint(a: GridPoint, b: GridPoint): boolean {
+	return Math.abs(a.x - b.x) < GEOM_EPS && Math.abs(a.y - b.y) < GEOM_EPS;
+}
+
+/** Inclusive point-on-segment test (mirrors the electrical graph T-junction rule). */
+function isPointOnSegmentInclusive(p: GridPoint, a: GridPoint, b: GridPoint): boolean {
+	if (
+		p.x < Math.min(a.x, b.x) - GEOM_EPS ||
+		p.x > Math.max(a.x, b.x) + GEOM_EPS ||
+		p.y < Math.min(a.y, b.y) - GEOM_EPS ||
+		p.y > Math.max(a.y, b.y) + GEOM_EPS
+	) {
+		return false;
+	}
+	const segLen = Math.hypot(b.x - a.x, b.y - a.y);
+	if (segLen <= GEOM_EPS) return samePoint(p, a);
+	const cross = (p.x - a.x) * (b.y - a.y) - (p.y - a.y) * (b.x - a.x);
+	return Math.abs(cross) <= GEOM_EPS * Math.max(1, segLen);
+}
+
+/** Positive-length overlap between two collinear segments (0 when not collinear). */
+function collinearOverlapLength(a1: GridPoint, a2: GridPoint, b1: GridPoint, b2: GridPoint): number {
+	const dx = a2.x - a1.x;
+	const dy = a2.y - a1.y;
+	const len = Math.hypot(dx, dy);
+	if (len <= GEOM_EPS) return 0;
+	const crossB1 = dx * (b1.y - a1.y) - dy * (b1.x - a1.x);
+	const crossB2 = dx * (b2.y - a1.y) - dy * (b2.x - a1.x);
+	if (Math.abs(crossB1) > GEOM_EPS * len || Math.abs(crossB2) > GEOM_EPS * len) return 0;
+	const ux = dx / len;
+	const uy = dy / len;
+	const t1 = (b1.x - a1.x) * ux + (b1.y - a1.y) * uy;
+	const t2 = (b2.x - a1.x) * ux + (b2.y - a1.y) * uy;
+	const lo = Math.max(0, Math.min(t1, t2));
+	const hi = Math.min(len, Math.max(t1, t2));
+	return Math.max(0, hi - lo);
+}
+
+export type SnapAnchorKind = 'pin' | 'wire';
+
+export interface SnapAnchor extends GridPoint {
+	/** `'pin'` = component pin, `'wire'` = wire endpoint or interior bend vertex */
+	kind: SnapAnchorKind;
+}
+
+/**
+ * Finds the nearest wiring snap anchor within `maxDist` grid units of `(gx, gy)`.
+ * Anchors are component pins plus every wire vertex (endpoints and interior bends).
+ * Component pins win ties against coincident / equidistant wire vertices.
+ */
+export function findNearestAnchor(
+	gx: number,
+	gy: number,
+	components: readonly CircuitComponent[],
+	wires: readonly CircuitWire[],
+	maxDist = 0.6
+): SnapAnchor | null {
+	let bestPin: GridPoint | null = null;
+	let bestPinDist = Infinity;
+	for (const comp of components) {
+		for (const pin of getPinPositions(comp)) {
+			const d = Math.hypot(pin.x - gx, pin.y - gy);
+			if (d <= maxDist && d < bestPinDist) {
+				bestPinDist = d;
+				bestPin = { x: pin.x, y: pin.y };
+			}
+		}
+	}
+
+	let bestWire: GridPoint | null = null;
+	let bestWireDist = Infinity;
+	for (const wire of wires) {
+		for (const pt of wire.points) {
+			const d = Math.hypot(pt.x - gx, pt.y - gy);
+			if (d <= maxDist && d < bestWireDist) {
+				bestWireDist = d;
+				bestWire = { x: pt.x, y: pt.y };
+			}
+		}
+	}
+
+	if (bestPin && bestPinDist <= bestWireDist + GEOM_EPS) {
+		return { ...bestPin, kind: 'pin' };
+	}
+	if (bestWire) {
+		return { ...bestWire, kind: 'wire' };
+	}
+	return null;
+}
+
+export interface DanglingWireEndpoint extends GridPoint {
+	wireId: string;
+}
+
+/**
+ * Returns wire endpoints (first/last vertex) that touch no component pin and no other wire —
+ * i.e. open ends that the user can continue wiring from.
+ */
+export function computeDanglingWireEndpoints(
+	components: readonly CircuitComponent[],
+	wires: readonly CircuitWire[]
+): DanglingWireEndpoint[] {
+	const pinKeys = new Set<string>();
+	for (const comp of components) {
+		for (const pin of getPinPositions(comp)) {
+			pinKeys.add(`${pin.x},${pin.y}`);
+		}
+	}
+
+	const result: DanglingWireEndpoint[] = [];
+	const seen = new Set<string>();
+	for (const wire of wires) {
+		if (wire.points.length < 2) continue;
+		const ends = [wire.points[0], wire.points[wire.points.length - 1]];
+		for (const end of ends) {
+			const key = `${end.x},${end.y}`;
+			if (seen.has(key) || pinKeys.has(key)) continue;
+			const touchesOther = wires.some((other) => {
+				if (other.id === wire.id) return false;
+				if (other.points.some((p) => samePoint(p, end))) return true;
+				for (let i = 0; i + 1 < other.points.length; i++) {
+					if (isPointOnSegmentInclusive(end, other.points[i], other.points[i + 1])) return true;
+				}
+				return false;
+			});
+			if (touchesOther) continue;
+			seen.add(key);
+			result.push({ x: end.x, y: end.y, wireId: wire.id });
+		}
+	}
+	return result;
+}
+
+/** Drops duplicate / straight-through vertices; returns `null` if the path doubles back on itself. */
+function simplifyOrthogonalPath(points: GridPoint[]): GridPoint[] | null {
+	const dedup: GridPoint[] = [];
+	for (const p of points) {
+		if (dedup.length === 0 || !samePoint(dedup[dedup.length - 1], p)) {
+			dedup.push({ x: p.x, y: p.y });
+		}
+	}
+	if (dedup.length < 3) return dedup;
+	const out: GridPoint[] = [dedup[0]];
+	for (let i = 1; i + 1 < dedup.length; i++) {
+		const a = out[out.length - 1];
+		const b = dedup[i];
+		const c = dedup[i + 1];
+		const cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+		const sameDirection = (b.x - a.x) * (c.x - b.x) + (b.y - a.y) * (c.y - b.y) > 0;
+		if (Math.abs(cross) < GEOM_EPS) {
+			if (!sameDirection) return null;
+			continue;
+		}
+		out.push(b);
+	}
+	out.push(dedup[dedup.length - 1]);
+	return out;
+}
+
+function pathLength(points: GridPoint[]): number {
+	let total = 0;
+	for (let i = 0; i + 1 < points.length; i++) {
+		total += Math.abs(points[i + 1].x - points[i].x) + Math.abs(points[i + 1].y - points[i].y);
+	}
+	return total;
+}
+
+interface RoutingObstacles {
+	points: GridPoint[];
+	segments: Array<[GridPoint, GridPoint]>;
+}
+
+function buildRoutingObstacles(
+	components: readonly CircuitComponent[],
+	wires: readonly CircuitWire[]
+): RoutingObstacles {
+	const points: GridPoint[] = [];
+	const segments: Array<[GridPoint, GridPoint]> = [];
+	for (const comp of components) {
+		for (const pin of getPinPositions(comp)) {
+			points.push({ x: pin.x, y: pin.y });
+		}
+	}
+	for (const wire of wires) {
+		for (const pt of wire.points) points.push(pt);
+		for (let i = 0; i + 1 < wire.points.length; i++) {
+			const a = wire.points[i];
+			const b = wire.points[i + 1];
+			if (!samePoint(a, b)) segments.push([a, b]);
+		}
+	}
+	return { points, segments };
+}
+
+/**
+ * A candidate route is electrically "clean" when the only places it touches existing geometry
+ * are its explicitly chosen start / end points. Strict perpendicular pass-overs are allowed
+ * (they stay unconnected and render as IEEE bridge hops).
+ */
+function isRouteClean(
+	path: GridPoint[],
+	start: GridPoint,
+	end: GridPoint,
+	obstacles: RoutingObstacles
+): boolean {
+	for (let i = 0; i + 1 < path.length; i++) {
+		const a = path[i];
+		const b = path[i + 1];
+		// Foreign wire vertices / component pins lying on this segment would merge nets
+		for (const p of obstacles.points) {
+			if (samePoint(p, start) || samePoint(p, end)) continue;
+			if (isPointOnSegmentInclusive(p, a, b)) return false;
+		}
+		// Running collinearly along an existing wire would visually and electrically merge them
+		for (const [c, d] of obstacles.segments) {
+			if (collinearOverlapLength(a, b, c, d) > GEOM_EPS) return false;
+		}
+	}
+	// Interior bend vertices must not land on any existing wire segment
+	for (let i = 1; i + 1 < path.length; i++) {
+		const v = path[i];
+		for (const [c, d] of obstacles.segments) {
+			if (isPointOnSegmentInclusive(v, c, d)) return false;
+		}
+	}
+	return true;
+}
+
+/**
+ * Routes a new orthogonal wire from `start` to `end` so it jumps over (rather than accidentally
+ * shorts into) existing wires. Tries the preferred L bend, then the opposite L bend, then a
+ * bounded search of 2-bend Z / U detours (middle segment offset up to `maxDetour` grid units
+ * outside the start/end bounding box), picking the shortest clean route. Falls back to the
+ * preferred L when no clean route exists. `start` / `end` are always preserved verbatim so
+ * explicit T-junction snaps keep working.
+ */
+export function computeJumpOverWirePoints(
+	start: GridPoint,
+	end: GridPoint,
+	preferredBend: WireBendMode,
+	components: readonly CircuitComponent[],
+	wires: readonly CircuitWire[],
+	maxDetour = 8
+): GridPoint[] {
+	const preferred = computeManhattanPoints(start, end, preferredBend);
+	if (preferred.length < 2) return preferred;
+
+	const obstacles = buildRoutingObstacles(components, wires);
+	if (isRouteClean(preferred, start, end, obstacles)) return preferred;
+
+	const otherBend: WireBendMode = preferredBend === 'hv' ? 'vh' : 'hv';
+	const alternate = computeManhattanPoints(start, end, otherBend);
+	if (isRouteClean(alternate, start, end, obstacles)) return alternate;
+
+	let best: { path: GridPoint[]; length: number; rank: number; deviation: number } | null = null;
+	const consider = (raw: GridPoint[], orientation: WireBendMode, deviation: number) => {
+		const path = simplifyOrthogonalPath(raw);
+		if (!path || path.length < 2) return;
+		const length = pathLength(path);
+		const rank = orientation === preferredBend ? 0 : 1;
+		if (
+			best &&
+			(length > best.length ||
+				(length === best.length &&
+					(rank > best.rank || (rank === best.rank && deviation >= best.deviation))))
+		) {
+			return;
+		}
+		if (!isRouteClean(path, start, end, obstacles)) return;
+		best = { path, length, rank, deviation };
+	};
+
+	const minX = Math.floor(Math.min(start.x, end.x)) - maxDetour;
+	const maxX = Math.ceil(Math.max(start.x, end.x)) + maxDetour;
+	const minY = Math.floor(Math.min(start.y, end.y)) - maxDetour;
+	const maxY = Math.ceil(Math.max(start.y, end.y)) + maxDetour;
+	// Corner coordinates of the preferred L, used to favour detours closest to the user's intent
+	const hvRefX = preferredBend === 'hv' ? end.x : start.x;
+	const vhRefY = preferredBend === 'hv' ? start.y : end.y;
+
+	// H-V-H: horizontal, vertical middle segment at x = mx, horizontal
+	for (let mx = minX; mx <= maxX; mx++) {
+		if (Math.abs(mx - start.x) < GEOM_EPS || Math.abs(mx - end.x) < GEOM_EPS) continue;
+		consider(
+			[start, { x: mx, y: start.y }, { x: mx, y: end.y }, end],
+			'hv',
+			Math.abs(mx - hvRefX)
+		);
+	}
+	// V-H-V: vertical, horizontal middle segment at y = my, vertical
+	for (let my = minY; my <= maxY; my++) {
+		if (Math.abs(my - start.y) < GEOM_EPS || Math.abs(my - end.y) < GEOM_EPS) continue;
+		consider(
+			[start, { x: start.x, y: my }, { x: end.x, y: my }, end],
+			'vh',
+			Math.abs(my - vhRefY)
+		);
+	}
+
+	const chosen = best as { path: GridPoint[] } | null;
+	return chosen ? chosen.path : preferred;
+}
+
+/**
+ * Counts unconnected (bridged) crossings that involve wire `wireId`.
+ */
+export function countBridgedCrossingsForWire(
+	components: CircuitComponent[],
+	wires: CircuitWire[],
+	wireId: string
+): number {
+	return computeWireCrossings(components, wires).filter(
+		(c) => !c.connected && c.wireIds.includes(wireId)
+	).length;
 }
 
 function isStrictInteriorPoint(p: GridPoint, a: GridPoint, b: GridPoint): boolean {
@@ -527,11 +849,19 @@ export function formatComplexOverlay(
 		if (real === 0) return `0 ${unitWithPrefix}`;
 
 		if (opts.showDcFractions) {
-			const targetVal = fixed ? real / fixed.factor : real;
-			if (Math.abs(targetVal) >= 0.01 && Math.abs(targetVal) <= 1000) {
-				const rat = formatRational(targetVal, 100);
-				if (rat && rat.includes('/')) {
-					return `${rat} ${unitWithPrefix}`;
+			if (fixed) {
+				const targetVal = real / fixed.factor;
+				if (Math.abs(targetVal) >= 0.01 && Math.abs(targetVal) <= 1000) {
+					const rat = formatRational(targetVal, 100);
+					if (rat && hasNonTerminatingDenominator(rat)) {
+						return `${rat} ${unitWithPrefix}`;
+					}
+				}
+			} else {
+				const autoRat = findAutoSiRational(real, 100);
+				if (autoRat) {
+					const scaledUnit = `${autoRat.symbol}${unit}`;
+					return scaledUnit ? `${autoRat.rat} ${scaledUnit}` : autoRat.rat;
 				}
 			}
 		}

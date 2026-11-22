@@ -69,7 +69,7 @@ function pickSiPrefix(absValue: number): { symbol: string; factor: number } | nu
 	return DISPLAY_PREFIXES[DISPLAY_PREFIXES.length - 1];
 }
 
-function hasNonTerminatingDenominator(rat: string): boolean {
+export function hasNonTerminatingDenominator(rat: string): boolean {
 	const slashIdx = rat.indexOf('/');
 	if (slashIdx === -1) return false;
 	let den = Number(rat.slice(slashIdx + 1));
@@ -79,10 +79,70 @@ function hasNonTerminatingDenominator(rat: string): boolean {
 	return den > 1;
 }
 
+function rationalComplexity(rat: string): number {
+	const slashIdx = rat.indexOf('/');
+	if (slashIdx === -1) return Number.POSITIVE_INFINITY;
+	const num = Math.abs(Number(rat.slice(0, slashIdx)));
+	const den = Number(rat.slice(slashIdx + 1));
+	return num + den;
+}
+
+/**
+ * Finds the cleanest scaled exact repeating rational representation for a real
+ * quantity in Auto SI mode (e.g. `10/3` with `''`, `4/3` with `'m'`, `2/3` with `'m'`).
+ * Returns `null` if no clean non-terminating rational exists.
+ */
+export function findAutoSiRational(
+	value: number,
+	maxDenom = 250
+): { rat: string; symbol: string } | null {
+	const abs = Math.abs(value);
+	if (abs < ZERO_EPS) return null;
+
+	// 1. Check unscaled base unit first when magnitude is already in base SI range
+	if (abs >= 1e-3 && abs < 1e3) {
+		const baseRat = formatRational(value, maxDenom);
+		if (baseRat && hasNonTerminatingDenominator(baseRat)) {
+			return { rat: baseRat, symbol: '' };
+		}
+	}
+
+	// 2. Try natural engineering SI prefix and the next-larger prefix (e.g. 2/3 mA vs 2000/3 µA)
+	const natural = pickSiPrefix(abs);
+	if (!natural) return null;
+
+	const candidates: Array<{ symbol: string; factor: number }> = [];
+	const naturalIdx = DISPLAY_PREFIXES.indexOf(natural);
+	if (naturalIdx > 0) {
+		const larger = DISPLAY_PREFIXES[naturalIdx - 1];
+		if (larger.factor !== 1) {
+			candidates.push(larger);
+		}
+	}
+	if (natural.factor !== 1) {
+		candidates.push(natural);
+	}
+
+	let best: { rat: string; symbol: string; score: number } | null = null;
+	for (const tier of candidates) {
+		const scaled = value / tier.factor;
+		const absScaled = Math.abs(scaled);
+		if (absScaled < 1e-3 || absScaled > 1e4) continue;
+		const rat = formatRational(scaled, maxDenom);
+		if (!rat || !hasNonTerminatingDenominator(rat)) continue;
+		const score = rationalComplexity(rat);
+		if (!best || score < best.score) {
+			best = { rat, symbol: tier.symbol, score };
+		}
+	}
+
+	return best ? { rat: best.rat, symbol: best.symbol } : null;
+}
+
 /**
  * Formats a real DC quantity with SI engineering units, optionally prepending
- * an exact rational fraction (e.g. `10/3 V = 3.33 V`) when `showDcFractions`
- * is enabled and a clean repeating fraction exists.
+ * an exact rational fraction (e.g. `10/3 V = 3.33 V`, `4/3 mA = 1.33 mA`) when
+ * `showDcFractions` is enabled and a clean repeating fraction exists.
  */
 export function formatDcQuantity(value: number, unit: string, opts?: FormatOptions): string {
 	const { precision, showDcFractions, unitSystem } = resolveOptions(opts);
@@ -107,13 +167,10 @@ export function formatDcQuantity(value: number, unit: string, opts?: FormatOptio
 		return eng;
 	}
 
-	if (Math.abs(cleaned) < 1e-3 || Math.abs(cleaned) > 1e4) {
-		return eng;
-	}
-
-	const rat = formatRational(cleaned, 250);
-	if (rat && hasNonTerminatingDenominator(rat)) {
-		return unit ? `${rat} ${unit} = ${eng}` : `${rat} = ${eng}`;
+	const autoRat = findAutoSiRational(cleaned, 250);
+	if (autoRat) {
+		const unitWithPrefix = `${autoRat.symbol}${unit}`;
+		return unitWithPrefix ? `${autoRat.rat} ${unitWithPrefix} = ${eng}` : `${autoRat.rat} = ${eng}`;
 	}
 
 	return eng;

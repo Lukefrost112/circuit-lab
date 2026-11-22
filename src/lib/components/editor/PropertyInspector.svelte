@@ -29,6 +29,7 @@
 	import { AC_ENABLED } from '$lib/env';
 	import { circuit } from '$lib/stores/circuit.svelte';
 	import { settings } from '$lib/stores/settings.svelte';
+	import EditableTitle from './EditableTitle.svelte';
 	import EngineeringInput from './EngineeringInput.svelte';
 	import ImpedanceInput from './ImpedanceInput.svelte';
 	import PhasorInput from './PhasorInput.svelte';
@@ -569,6 +570,16 @@
 </script>
 
 <div class="flex flex-col divide-y divide-border">
+	<!-- Circuit name (header shows the inline rename control at xl+) -->
+	<div class="flex flex-col gap-1.5 px-4 py-3 xl:hidden">
+		<span class="text-[11px] font-medium text-muted-foreground">Circuit name</span>
+		<EditableTitle
+			variant="panel"
+			inputId="inspector-circuit-name"
+			value={circuit.document.name ?? ''}
+			onCommit={(next) => circuit.setDocumentName(next)}
+		/>
+	</div>
 	{#if selectedComp}
 		<!-- Component Identity Header -->
 		<div class="flex items-center justify-between gap-2 px-4 py-3.5">
