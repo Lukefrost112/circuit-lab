@@ -86,11 +86,29 @@ export interface CircuitConstraint {
 	label?: string;
 }
 
+export interface UnknownTerm {
+	/** Target component ID whose value is `multiplier * X` */
+	componentId: string;
+	/** Non-zero finite scalar multiplier (e.g., 1 for `V`, 2 for `2V`, -0.5 for `-0.5V`) */
+	multiplier: number;
+}
+
+export interface UnknownTermSolvedValue {
+	componentId: string;
+	componentLabel: string;
+	multiplier: number;
+	value: Complex;
+	valueString: string;
+	unit: string;
+}
+
 export interface UnknownProblemSpec {
-	/** ID of the component whose value is unknown (voltage_source, current_source, resistor, capacitor, inductor) */
+	/** ID of the primary component whose value is unknown (voltage_source, current_source, resistor, capacitor, inductor) */
 	componentId: string;
 	/** Optional symbol name shown on schematic/results (e.g. "V", "Vs", "Rx") */
 	symbol?: string;
+	/** Optional list of all linked components and their scalar multipliers (primary componentId is always included) */
+	terms?: UnknownTerm[];
 	/** Known measurement constraint that uniquely determines the unknown */
 	constraint: CircuitConstraint;
 }
@@ -100,6 +118,8 @@ export interface UnknownSolutionCandidate {
 	value: Complex;
 	/** Formatted canonical value string ready to substitute into CircuitComponent.value */
 	valueString: string;
+	/** Exact scaled values (`multiplier * X`) for every linked component */
+	termValues?: UnknownTermSolvedValue[];
 	/** Absolute discrepancy |y(solved) - y_target| verified via full MNA re-solve */
 	discrepancy: number;
 	verified: boolean;
@@ -111,6 +131,13 @@ export interface UnknownSolveResult {
 	componentLabel: string;
 	componentKind: ComponentKind;
 	symbol: string;
+	/** Metadata for all linked unknown elements */
+	terms?: Array<{
+		componentId: string;
+		componentLabel: string;
+		kind: ComponentKind;
+		multiplier: number;
+	}>;
 	constraint: CircuitConstraint;
 	methodName: string;
 	/** 1 solution for linear targets, up to 2 valid solutions for quadratic power targets */
@@ -148,6 +175,8 @@ export interface NetlistElement {
 	/** Optional explicit unknown flag (or value === "?" / "unknown") */
 	unknown?: boolean;
 	unknownSymbol?: string;
+	/** Optional scalar multiplier for scaled identical unknowns (e.g. 2 for `2V`) */
+	unknownMultiplier?: number;
 	/** Reserved for v2 dependent sources */
 	controlRef?: DependentControlRef;
 }

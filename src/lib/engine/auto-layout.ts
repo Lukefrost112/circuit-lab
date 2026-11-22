@@ -46,6 +46,7 @@ export interface LayoutNetlistElement {
 	/** Optional explicit unknown flag (or value === "?" / "unknown") */
 	unknown?: boolean;
 	unknownSymbol?: string;
+	unknownMultiplier?: number;
 	controlRef?: DependentControlRef;
 }
 
@@ -99,6 +100,7 @@ interface NormalizedElement {
 	toPos?: [number, number];
 	unknown?: boolean;
 	unknownSymbol?: string;
+	unknownMultiplier?: number;
 	controlRef?: DependentControlRef;
 }
 
@@ -353,6 +355,7 @@ function normalizeNetlistContext(netlist: LayoutNetlistDocument): NormalizedNetl
 				: undefined,
 			unknown: el.unknown,
 			unknownSymbol: el.unknownSymbol,
+			unknownMultiplier: el.unknownMultiplier,
 			controlRef: el.controlRef
 		};
 
@@ -1468,7 +1471,15 @@ function tryVisualGridLayout(
 	if (ctx.netlist.name) visualDoc.name = ctx.netlist.name;
 	if (ctx.acMagnitudeMode) visualDoc.acMagnitudeMode = ctx.acMagnitudeMode;
 	if (ctx.netlist.unitSystem) visualDoc.unitSystem = ctx.netlist.unitSystem;
-	if (ctx.netlist.unknownProblem) visualDoc.unknownProblem = ctx.netlist.unknownProblem;
+	if (ctx.netlist.unknownProblem) {
+		visualDoc.unknownProblem = {
+			...ctx.netlist.unknownProblem,
+			...(ctx.netlist.unknownProblem.terms
+				? { terms: ctx.netlist.unknownProblem.terms.map((t) => ({ ...t })) }
+				: {}),
+			constraint: { ...ctx.netlist.unknownProblem.constraint }
+		};
+	}
 
 	// CRITICAL SAFETY GATE: Verify 100% electrical isomorphism via buildElectricalGraph!
 	const isomorphism = verifyElectricalIsomorphism(
@@ -1868,7 +1879,15 @@ function layoutLadderFromContext(ctx: NormalizedNetlistContext): CircuitDocument
 	if (netlist.name) doc.name = netlist.name;
 	if (acMagnitudeMode) doc.acMagnitudeMode = acMagnitudeMode;
 	if (netlist.unitSystem) doc.unitSystem = netlist.unitSystem;
-	if (netlist.unknownProblem) doc.unknownProblem = netlist.unknownProblem;
+	if (netlist.unknownProblem) {
+		doc.unknownProblem = {
+			...netlist.unknownProblem,
+			...(netlist.unknownProblem.terms
+				? { terms: netlist.unknownProblem.terms.map((t) => ({ ...t })) }
+				: {}),
+			constraint: { ...netlist.unknownProblem.constraint }
+		};
+	}
 
 	return doc;
 }

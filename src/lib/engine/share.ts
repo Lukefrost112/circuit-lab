@@ -83,9 +83,25 @@ function compactDocument(doc: CircuitDocument): Record<string, unknown> {
 	}));
 	if (doc.unknownProblem !== undefined) {
 		const up = doc.unknownProblem;
+		const validTerms = Array.isArray(up.terms)
+			? up.terms
+					.filter(
+						(t) =>
+							typeof t.componentId === 'string' &&
+							t.componentId.trim() !== '' &&
+							typeof t.multiplier === 'number' &&
+							Number.isFinite(t.multiplier) &&
+							Math.abs(t.multiplier) > 1e-15
+					)
+					.map((t) => ({
+						componentId: t.componentId.trim(),
+						multiplier: t.multiplier
+					}))
+			: [];
 		out.unknownProblem = {
 			componentId: up.componentId,
 			...(up.symbol !== undefined && up.symbol !== '' ? { symbol: up.symbol } : {}),
+			...(validTerms.length > 0 ? { terms: validTerms } : {}),
 			constraint: {
 				kind: up.constraint.kind,
 				targetId: up.constraint.targetId,

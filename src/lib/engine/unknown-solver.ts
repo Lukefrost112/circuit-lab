@@ -35,7 +35,9 @@ import type {
 	SolutionStep,
 	UnknownProblemSpec,
 	UnknownSolutionCandidate,
-	UnknownSolveResult
+	UnknownSolveResult,
+	UnknownTerm,
+	UnknownTermSolvedValue
 } from './types';
 import { formatEngineering, parseComplexValue, parseEngineeringNumber } from './units';
 
@@ -72,6 +74,169 @@ export function getDefaultUnknownSymbol(kind: ComponentKind): string {
 }
 
 /**
+ * Returns true if two component kinds can be linked to the same unknown variable:
+ * - Independent sources (`voltage_source` and `current_source`) are compatible with each other.
+ * - Passive elements are compatible only with the same passive kind (`resistor` with `resistor`, etc.).
+ */
+export function areUnknownKindsCompatible(kindA: ComponentKind, kindB: ComponentKind): boolean {
+	if (!SOLVABLE_KINDS.has(kindA) || !SOLVABLE_KINDS.has(kindB)) return false;
+	if (SOURCE_KINDS.has(kindA) && SOURCE_KINDS.has(kindB)) return true;
+	return !SOURCE_KINDS.has(kindA) && !SOURCE_KINDS.has(kindB) && kindA === kindB;
+}
+
+/**
+ * Normalizes `spec.terms` by deduplicating on `componentId` and keeping finite non-zero multipliers,
+ * falling back to `[{ componentId: spec.componentId, multiplier: 1 }]`.
+ */
+export function getUnknownTerms(spec: UnknownProblemSpec | undefined): UnknownTerm[] {
+	if (!spec) return [];
+	const seen = new Set<string>();
+	const out: UnknownTerm[] = [];
+	if (Array.isArray(spec.terms) && spec.terms.length > 0) {
+		for (const t of spec.terms) {
+			const id = typeof t?.componentId === 'string' ? t.componentId.trim() : '';
+			const m = t?.multiplier;
+			if (!id || seen.has(id)) continue;
+			if (typeof m !== 'number' || !Number.isFinite(m) || Math.abs(m) <= 1e-15) continue;
+			seen.add(id);
+			out.push({ componentId: id, multiplier: m });
+		}
+	}
+	if (out.length === 0 && typeof spec.componentId === 'string' && spec.componentId.trim() !== '') {
+		out.push({ componentId: spec.componentId.trim(), multiplier: 1 });
+	}
+	return out;
+}
+
+function formatMultiplierClean(multiplier: number): string {
+	const rounded = Number(multiplier.toPrecision(6));
+	return rounded.toString();
+}
+
+/**
+ * Formats an algebraic unknown term expression cleanly (e.g. `V`, `2V`, `-V`, `0.5V`).
+ */
+export function formatUnknownTermExpr(multiplier: number, symbol: string): string {
+	const sym = symbol.trim() || 'X';
+	if (Math.abs(multiplier - 1) < 1e-12) return sym;
+	if (Math.abs(multiplier + 1) < 1e-12) return `-${sym}`;
+	return `${formatMultiplierClean(multiplier)}${sym}`;
+}
+
+/**
+ * Formats an algebraic unknown term in LaTeX (e.g. `V`, `2V`, `-V`, `0.5V`).
+ */
+export function formatUnknownTermLatex(multiplier: number, symbolLatex: string): string {
+	if (Math.abs(multiplier - 1) < 1e-12) return symbolLatex;
+	if (Math.abs(multiplier + 1) < 1e-12) return `-${symbolLatex}`;
+	return `${formatMultiplierClean(multiplier)}${symbolLatex}`;
+}
+
+const GENERIC_SINGLE_CHAR_UNKNOWN_SYMBOLS = new Set(['V', 'I', 'R', 'L', 'C', 'X', 'E', 'Z']);
+const SI_PREFIX_CHARS = new Set(['f', 'p', 'n', 'u', 'µ', 'μ', 'm', 'k', 'K', 'M', 'G', 'T']);
+const UNIT_SUFFIX_WORDS = new Set([
+	'ohm',
+	'ohms',
+	'hz',
+	'va',
+	'var',
+	'deg',
+	'meg',
+	'v',
+	'a',
+	'w',
+	'f',
+	'h',
+	's',
+	'ω'
+]);
+
+function escapeRegExp(str: string): string {
+	return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function parseAlgebraicCoeff(coeffRaw: string): number | null {
+	const c = coeffRaw.replace(/\s+/g, '');
+	if (c === '' || c === '+') return 1;
+	if (c === '-') return -1;
+	if (c.includes('/')) {
+		const parts = c.split('/');
+		if (parts.length !== 2) return null;
+		const num = Number(parts[0]);
+		const den = Number(parts[1]);
+		if (!Number.isFinite(num) || !Number.isFinite(den) || Math.abs(den) <= 1e-15) return null;
+		const val = num / den;
+		return Number.isFinite(val) && Math.abs(val) > 1e-15 ? val : null;
+	}
+	const num = Number(c);
+	return Number.isFinite(num) && Math.abs(num) > 1e-15 ? num : null;
+}
+
+/**
+ * Parses an algebraic scaled unknown expression like `"V"`, `"2V"`, `"2*V"`, `"2 V"`,
+ * `"-V"`, `"-0.5V"`, `"3.5R_x"`, `"1/2 V"`.
+ *
+ * When `knownSymbol` is supplied, matches strictly against that symbol.
+ * When omitted, rejects plain numbers, scientific notation, phasors/complex numbers,
+ * SI-prefixed engineering values (`"10k"`, `"2m"`, `"4.7u"`, `"2mA"`, `"10kΩ"`), and `"?"`.
+ */
+export function parseAlgebraicUnknownValue(
+	raw: string,
+	knownSymbol?: string
+): { multiplier: number; symbol: string } | null {
+	if (typeof raw !== 'string') return null;
+	const trimmed = raw.trim();
+	if (!trimmed || trimmed === '?' || trimmed.toLowerCase() === 'unknown') return null;
+	if (/[∠@]/.test(trimmed)) return null;
+
+	const trimmedKnown = knownSymbol?.trim();
+	if (trimmedKnown) {
+		const exactRe = new RegExp(
+			`^([+-]?(?:(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:\\s*\\/\\s*(?:\\d+(?:\\.\\d+)?|\\.\\d+))?)?)\\s*\\*?\\s*${escapeRegExp(trimmedKnown)}$`
+		);
+		const m = trimmed.match(exactRe);
+		if (!m) return null;
+		const coeff = parseAlgebraicCoeff(m[1] ?? '');
+		if (coeff === null) return null;
+		return { multiplier: coeff, symbol: trimmedKnown };
+	}
+
+	// Reject plain numbers or scientific notation (e.g. "100", "1e-3", "2.5E6")
+	if (/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(trimmed)) return null;
+
+	// Reject rectangular complex literals (e.g. "j", "-j", "j50", "3+j4")
+	if (/^[+-]?j$/i.test(trimmed)) return null;
+	const complexCheck = parseComplexValue(trimmed);
+	if (complexCheck && Math.abs(complexCheck.im) > 1e-15) return null;
+
+	const match = trimmed.match(
+		/^([+-]?(?:(?:\d+(?:\.\d+)?|\.\d+)(?:\s*\/\s*(?:\d+(?:\.\d+)?|\.\d+))?)?)\s*\*?\s*([A-Za-z](?:_?[A-Za-z0-9]+)?)$/
+	);
+	if (!match) return null;
+
+	const coeffStr = match[1] ?? '';
+	const sym = match[2];
+
+	if (sym.length === 1) {
+		if (!GENERIC_SINGLE_CHAR_UNKNOWN_SYMBOLS.has(sym)) return null;
+	} else {
+		const lower = sym.toLowerCase();
+		if (UNIT_SUFFIX_WORDS.has(lower)) return null;
+		// Reject SI prefix + unit combinations like "mA", "mV", "uF", "mH", "kV", "kHz", "MHz", "kohm"
+		if (SI_PREFIX_CHARS.has(sym[0]) && UNIT_SUFFIX_WORDS.has(sym.slice(1).toLowerCase())) {
+			return null;
+		}
+		if (lower.startsWith('meg') && UNIT_SUFFIX_WORDS.has(lower.slice(3))) {
+			return null;
+		}
+	}
+
+	const coeff = parseAlgebraicCoeff(coeffStr);
+	if (coeff === null) return null;
+	return { multiplier: coeff, symbol: sym };
+}
+
+/**
  * Extracts the constrained quantity from a solved MNA result.
  */
 export function measureConstraint(
@@ -95,6 +260,39 @@ export function measureConstraint(
 }
 
 /**
+ * Returns a cloned CircuitDocument with multiple components' values replaced
+ * (clearing any stale numericValue or phaseDeg) and `unknownProblem` cleared.
+ */
+export function substituteUnknownTerms(
+	doc: CircuitDocument,
+	substitutions: Array<{
+		componentId: string;
+		valueString: string;
+		overridePhaseDeg?: number;
+	}>
+): CircuitDocument {
+	const subMap = new Map<string, { valueString: string; overridePhaseDeg?: number }>();
+	for (const sub of substitutions) {
+		subMap.set(sub.componentId, sub);
+	}
+	return {
+		...doc,
+		unknownProblem: undefined,
+		components: doc.components.map((c) => {
+			const sub = subMap.get(c.id);
+			if (!sub) return c;
+			const parsedReal = parseEngineeringNumber(sub.valueString);
+			return {
+				...c,
+				value: sub.valueString,
+				numericValue: parsedReal ?? undefined,
+				phaseDeg: sub.overridePhaseDeg
+			};
+		})
+	};
+}
+
+/**
  * Returns a cloned CircuitDocument with the specified component's value replaced
  * (clearing any stale numericValue or phaseDeg so parsing is 100% deterministic)
  * and `unknownProblem` cleared so MNA solves the concrete circuit directly.
@@ -105,20 +303,7 @@ export function substituteUnknownValue(
 	valueString: string,
 	overridePhaseDeg?: number
 ): CircuitDocument {
-	const parsedReal = parseEngineeringNumber(valueString);
-	return {
-		...doc,
-		unknownProblem: undefined,
-		components: doc.components.map((c) => {
-			if (c.id !== componentId) return c;
-			return {
-				...c,
-				value: valueString,
-				numericValue: parsedReal ?? undefined,
-				phaseDeg: overridePhaseDeg
-			};
-		})
-	};
+	return substituteUnknownTerms(doc, [{ componentId, valueString, overridePhaseDeg }]);
 }
 
 function formatRealCanonical(x: number): string {
@@ -334,20 +519,50 @@ function mapOriginalNodeToSubGraph(
 	return null;
 }
 
+interface ResolvedUnknownTerm {
+	term: UnknownTerm;
+	comp: CircuitComponent;
+}
+
+type ResultTermsMeta = NonNullable<UnknownSolveResult['terms']>;
+
+function toResultTermsMeta(resolvedTerms: ResolvedUnknownTerm[]): ResultTermsMeta {
+	return resolvedTerms.map(({ term, comp }) => ({
+		componentId: comp.id,
+		componentLabel: comp.label,
+		kind: comp.kind,
+		multiplier: term.multiplier
+	}));
+}
+
+function formatCoupledTermsLatex(resolvedTerms: ResolvedUnknownTerm[], symTex: string): string {
+	return resolvedTerms
+		.map(({ term, comp }) => `${formatSymbolLatex(comp.label)} = ${formatUnknownTermLatex(term.multiplier, symTex)}`)
+		.join(', \\quad ');
+}
+
+function formatCoupledTermsProse(resolvedTerms: ResolvedUnknownTerm[], sym: string): string {
+	return resolvedTerms
+		.map(({ term, comp }) => `${comp.label} = ${formatUnknownTermExpr(term.multiplier, sym)}`)
+		.join(', ');
+}
+
 function makeFailure(
 	comp: CircuitComponent | undefined,
 	problem: UnknownProblemSpec,
 	methodName: string,
 	error: string,
-	steps: SolutionStep[] = []
+	steps: SolutionStep[] = [],
+	terms?: ResultTermsMeta
 ): UnknownSolveResult {
 	const kind: ComponentKind = comp?.kind ?? 'resistor';
 	return {
 		valid: false,
-		componentId: problem.componentId,
+		componentId: comp?.id ?? problem.componentId,
 		componentLabel: comp?.label ?? problem.componentId,
 		componentKind: kind,
 		symbol: problem.symbol?.trim() || getDefaultUnknownSymbol(kind),
+		terms,
 		constraint: problem.constraint,
 		methodName,
 		solutions: [],
@@ -356,17 +571,74 @@ function makeFailure(
 	};
 }
 
-function verifyCandidate(
+function buildTermSolvedValues(
+	resolvedTerms: ResolvedUnknownTerm[],
+	baseValue: Complex,
+	mode: AnalysisMode
+): UnknownTermSolvedValue[] {
+	return resolvedTerms.map(({ term, comp }) => {
+		const scaledRaw = baseValue.scale(term.multiplier);
+		const scaled =
+			mode === 'dc' || !SOURCE_KINDS.has(comp.kind)
+				? Complex.from(scaledRaw.re, 0)
+				: scaledRaw;
+		return {
+			componentId: comp.id,
+			componentLabel: comp.label,
+			multiplier: term.multiplier,
+			value: scaled,
+			valueString: formatCanonicalValueString(scaled, comp.kind, mode),
+			unit: UNIT_BY_KIND[comp.kind] ?? ''
+		};
+	});
+}
+
+function withSubstitutedTerms(
 	doc: CircuitDocument,
-	comp: CircuitComponent,
-	value: Complex,
+	resolvedTerms: ResolvedUnknownTerm[],
+	baseValue: Complex | number,
+	mode: AnalysisMode,
+	overridePhaseDeg?: number
+): CircuitDocument {
+	const base = typeof baseValue === 'number' ? Complex.from(baseValue, 0) : baseValue;
+	const subs = resolvedTerms.map(({ term, comp }) => {
+		const scaledRaw = base.scale(term.multiplier);
+		const scaled =
+			mode === 'dc' || !SOURCE_KINDS.has(comp.kind)
+				? Complex.from(scaledRaw.re, 0)
+				: scaledRaw;
+		return {
+			componentId: comp.id,
+			valueString: formatCanonicalValueString(scaled, comp.kind, mode),
+			overridePhaseDeg
+		};
+	});
+	return substituteUnknownTerms(doc, subs);
+}
+
+function verifyCandidateTerms(
+	doc: CircuitDocument,
+	primaryComp: CircuitComponent,
+	resolvedTerms: ResolvedUnknownTerm[],
+	baseValue: Complex,
 	constraint: CircuitConstraint,
 	yTarget: Complex,
 	mode: AnalysisMode,
 	solveOpts: SolveMnaOptions
 ): UnknownSolutionCandidate {
-	const valueString = formatCanonicalValueString(value, comp.kind, mode);
-	const docSolved = substituteUnknownValue(doc, comp.id, valueString);
+	const cleanBase =
+		mode === 'dc' || !SOURCE_KINDS.has(primaryComp.kind)
+			? Complex.from(baseValue.re, 0)
+			: baseValue;
+	const valueString = formatCanonicalValueString(cleanBase, primaryComp.kind, mode);
+	const termValues = buildTermSolvedValues(resolvedTerms, cleanBase, mode);
+	const docSolved = substituteUnknownTerms(
+		doc,
+		termValues.map((tv) => ({
+			componentId: tv.componentId,
+			valueString: tv.valueString
+		}))
+	);
 	const mnaSolved = solveMNA(docSolved, solveOpts);
 	const ySolved = measureConstraint(mnaSolved, constraint);
 	const discrepancy = ySolved ? ySolved.sub(yTarget).abs() : Infinity;
@@ -374,8 +646,9 @@ function verifyCandidate(
 		mnaSolved.valid && Number.isFinite(discrepancy) && discrepancy < MNA_VERIFICATION_TOL;
 
 	return {
-		value,
+		value: cleanBase,
 		valueString,
+		termValues,
 		discrepancy,
 		verified
 	};
@@ -413,11 +686,12 @@ function formatComplexAnswerLatex(val: Complex, unit: string, mode: AnalysisMode
 }
 
 /**
- * Case A: Unknown independent voltage or current source.
+ * Case A: Unknown independent voltage or current source (single or multiple scaled linked sources).
  */
 function solveUnknownSource(
 	doc: CircuitDocument,
 	comp: CircuitComponent,
+	resolvedTerms: ResolvedUnknownTerm[],
 	problem: UnknownProblemSpec,
 	yTarget: Complex,
 	solveOpts: SolveMnaOptions
@@ -429,6 +703,10 @@ function solveUnknownSource(
 	const xUnit = UNIT_BY_KIND[comp.kind] ?? '';
 	const ySymTex = getConstraintSymbolLatex(constraint, doc);
 	const yUnit = getConstraintUnit(constraint.kind);
+	const termsMeta = toResultTermsMeta(resolvedTerms);
+	const isMultiOrScaled =
+		resolvedTerms.length > 1 || Math.abs(resolvedTerms[0].term.multiplier - 1) >= 1e-12;
+	const linkedIds = resolvedTerms.map((t) => t.comp.id);
 	const methodName =
 		constraint.kind === 'branch_power'
 			? 'Linearity / Quadratic Power Inversion'
@@ -439,12 +717,14 @@ function solveUnknownSource(
 			comp,
 			problem,
 			methodName,
-			'Real power P alone is a single scalar constraint and cannot uniquely determine both magnitude and phase of an AC phasor source. Use a phasor voltage or current constraint, or switch to DC mode.'
+			'Real power P alone is a single scalar constraint and cannot uniquely determine both magnitude and phase of an AC phasor source. Use a phasor voltage or current constraint, or switch to DC mode.',
+			[],
+			termsMeta
 		);
 	}
 
-	const doc0 = substituteUnknownValue(doc, comp.id, '0', 0);
-	const doc1 = substituteUnknownValue(doc, comp.id, '1', 0);
+	const doc0 = withSubstitutedTerms(doc, resolvedTerms, 0, mode, 0);
+	const doc1 = withSubstitutedTerms(doc, resolvedTerms, 1, mode, 0);
 	const mna0 = solveMNA(doc0, solveOpts);
 	const mna1 = solveMNA(doc1, solveOpts);
 
@@ -453,7 +733,7 @@ function solveUnknownSource(
 			mna0.diagnostics.find((d) => d.severity === 'error')?.message ??
 			mna1.diagnostics.find((d) => d.severity === 'error')?.message ??
 			'Circuit topology is invalid and cannot be solved.';
-		return makeFailure(comp, problem, methodName, diag);
+		return makeFailure(comp, problem, methodName, diag, [], termsMeta);
 	}
 
 	// Subcase A2: DC branch power constraint -> exact quadratic in X
@@ -465,7 +745,9 @@ function solveUnknownSource(
 				comp,
 				problem,
 				methodName,
-				`Target branch "${constraint.targetId}" was not found in the circuit.`
+				`Target branch "${constraint.targetId}" was not found in the circuit.`,
+				[],
+				termsMeta
 			);
 		}
 
@@ -485,7 +767,9 @@ function solveUnknownSource(
 				comp,
 				problem,
 				methodName,
-				'The target branch power is independent of this source (sensitivity k = 0).'
+				'The target branch power is independent of this source (sensitivity k = 0).',
+				[],
+				termsMeta
 			);
 		}
 
@@ -497,25 +781,42 @@ function solveUnknownSource(
 				comp,
 				problem,
 				methodName,
-				`No real source value achieves P = ${formatEngineering(pTarget, 'W', 4)} (${boundWord} branch power is ${formatEngineering(extremum, 'W', 4)}).`
+				`No real source value achieves P = ${formatEngineering(pTarget, 'W', 4)} (${boundWord} branch power is ${formatEngineering(extremum, 'W', 4)}).`,
+				[],
+				termsMeta
 			);
 		}
 
 		const roots = dedupeAndSortRoots(rawRoots, true);
 		const candidates = roots.map((r) =>
-			verifyCandidate(doc, comp, Complex.from(r, 0), constraint, yTarget, mode, solveOpts)
+			verifyCandidateTerms(
+				doc,
+				comp,
+				resolvedTerms,
+				Complex.from(r, 0),
+				constraint,
+				yTarget,
+				mode,
+				solveOpts
+			)
 		);
 
 		const targetLabel = latexSub(b0.label);
+		const step1Latex = [
+			...(isMultiOrScaled ? [formatCoupledTermsLatex(resolvedTerms, symTex)] : []),
+			`V_{${targetLabel}}(${symTex}) = v_0 + k_v ${symTex} = ${formatLatexValue(Complex.from(v0, 0), 'dc')} + ${formatLatexTerm(Complex.from(kv, 0), 'dc')}${symTex}`,
+			`I_{${targetLabel}}(${symTex}) = i_0 + k_i ${symTex} = ${formatLatexValue(Complex.from(i0, 0), 'dc')} + ${formatLatexTerm(Complex.from(ki, 0), 'dc')}${symTex}`
+		];
+		const step1Desc = isMultiOrScaled
+			? `By linearity with respect to the coupled unknown sources (${formatCoupledTermsProse(resolvedTerms, sym)}), both the voltage and current of branch ${b0.label} are affine functions of ${sym}.`
+			: `By linearity of the circuit with respect to the ${formatUnknownTargetProse(comp, sym)}, both the voltage and current of branch ${b0.label} are affine functions of ${sym}.`;
+
 		const steps: SolutionStep[] = [
 			{
 				title: '1. Problem Statement & Affine Branch Model',
-				description: `By linearity of the circuit with respect to the ${formatUnknownTargetProse(comp, sym)}, both the voltage and current of branch ${b0.label} are affine functions of ${sym}.`,
-				latex: [
-					`V_{${targetLabel}}(${symTex}) = v_0 + k_v ${symTex} = ${formatLatexValue(Complex.from(v0, 0), 'dc')} + ${formatLatexTerm(Complex.from(kv, 0), 'dc')}${symTex}`,
-					`I_{${targetLabel}}(${symTex}) = i_0 + k_i ${symTex} = ${formatLatexValue(Complex.from(i0, 0), 'dc')} + ${formatLatexTerm(Complex.from(ki, 0), 'dc')}${symTex}`
-				],
-				highlightIds: [comp.id, constraint.targetId]
+				description: step1Desc,
+				latex: step1Latex,
+				highlightIds: [...linkedIds, constraint.targetId]
 			},
 			{
 				title: '2. Quadratic Power Equation',
@@ -541,6 +842,7 @@ function solveUnknownSource(
 			componentLabel: comp.label,
 			componentKind: comp.kind,
 			symbol: sym,
+			terms: termsMeta,
 			constraint,
 			methodName,
 			solutions: candidates,
@@ -556,40 +858,79 @@ function solveUnknownSource(
 			comp,
 			problem,
 			methodName,
-			`Target measurement "${constraint.targetId}" was not found in the circuit.`
+			`Target measurement "${constraint.targetId}" was not found in the circuit.`,
+			[],
+			termsMeta
 		);
 	}
 
 	const k = y1.sub(y0);
-	if (k.abs() < 1e-14) {
+	if (k.abs() < 1e-12) {
 		return makeFailure(
 			comp,
 			problem,
 			methodName,
-			'The measured quantity is independent of this source (sensitivity k = 0).'
+			`Measured quantity is independent of unknown ${sym} (sensitivity k = 0).`,
+			[],
+			termsMeta
 		);
 	}
 
 	const solvedRaw = yTarget.sub(y0).div(k);
 	const solved = mode === 'dc' ? Complex.from(solvedRaw.re, 0) : solvedRaw;
-	const candidate = verifyCandidate(doc, comp, solved, constraint, yTarget, mode, solveOpts);
+	const candidate = verifyCandidateTerms(
+		doc,
+		comp,
+		resolvedTerms,
+		solved,
+		constraint,
+		yTarget,
+		mode,
+		solveOpts
+	);
 	const kUnitTex = formatSensitivityUnit(yUnit, xUnit);
 	const yTargetTex = appendLatexSubscript(ySymTex, 'target');
+
+	const step1Desc = isMultiOrScaled
+		? `By superposition and linearity, the measured quantity ${formatConstraintQuantityProse(constraint, doc)} is strictly affine in the coupled unknown sources (${formatCoupledTermsProse(resolvedTerms, sym)}).`
+		: `By superposition and linearity, the measured quantity ${formatConstraintQuantityProse(constraint, doc)} is strictly affine in the ${formatUnknownTargetProse(comp, sym)}.`;
+
+	const step2Desc = isMultiOrScaled
+		? `Evaluated the circuit at ${sym} = 0 (all linked sources deactivated) and ${sym} = 1 (applying each source's scale factor) to compute exact transfer sensitivity k.`
+		: `Evaluated the circuit with ${comp.label} = 0 ${xUnit} (deactivated) and ${comp.label} = 1 ${xUnit} to compute exact transfer sensitivity k.`;
+
+	const step3Latex: string[] = [
+		`${symTex} = \\frac{${yTargetTex} - ${ySymTex}(0)}{k} = ${formatComplexAnswerLatex(candidate.value, xUnit, mode)}`
+	];
+	if (resolvedTerms.length > 1 && candidate.termValues) {
+		step3Latex.push(
+			candidate.termValues
+				.map(
+					(tv) =>
+						`${formatSymbolLatex(tv.componentLabel)} = ${formatUnknownTermLatex(tv.multiplier, symTex)} = ${formatComplexAnswerLatex(tv.value, tv.unit, mode)}`
+				)
+				.join(', \\quad ')
+		);
+	}
+	step3Latex.push(
+		`|${ySymTex}(${symTex}) - ${yTargetTex}| = ${formatLatexResidual(candidate.discrepancy, yUnit)}`
+	);
 
 	const steps: SolutionStep[] = [
 		{
 			title: '1. Problem Statement & Linearity Model',
-			description: `By superposition and linearity, the measured quantity ${formatConstraintQuantityProse(constraint, doc)} is strictly affine in the ${formatUnknownTargetProse(comp, sym)}.`,
+			description: step1Desc,
 			latex: [
+				...(isMultiOrScaled ? [formatCoupledTermsLatex(resolvedTerms, symTex)] : []),
 				`${ySymTex}(${symTex}) = ${ySymTex}(0) + k \\cdot ${symTex}`,
 				`${yTargetTex} = ${formatComplexAnswerLatex(yTarget, yUnit, mode)}`
 			],
 			highlightIds:
-				constraint.kind === 'node_voltage' ? [comp.id] : [comp.id, constraint.targetId]
+				constraint.kind === 'node_voltage' ? linkedIds : [...linkedIds, constraint.targetId]
 		},
 		{
 			title: '2. Zero-Source & Unit-Source Responses',
-			description: `Evaluated the circuit with ${comp.label} = 0 ${xUnit} (deactivated) and ${comp.label} = 1 ${xUnit} to compute exact transfer sensitivity k.`,
+			description: step2Desc,
 			latex: [
 				`${ySymTex}(0) = ${formatLatexValue(y0, mode)}\\text{ ${yUnit}}`,
 				`${ySymTex}(1) = ${formatLatexValue(y1, mode)}\\text{ ${yUnit}}`,
@@ -599,10 +940,7 @@ function solveUnknownSource(
 		{
 			title: '3. Exact Closed-Form Solution & MNA Verification',
 			description: `Inverted the affine relation directly and confirmed the solution by full MNA re-solve.`,
-			latex: [
-				`${symTex} = \\frac{${yTargetTex} - ${ySymTex}(0)}{k} = ${formatComplexAnswerLatex(candidate.value, xUnit, mode)}`,
-				`|${ySymTex}(${symTex}) - ${yTargetTex}| = ${formatLatexResidual(candidate.discrepancy, yUnit)}`
-			]
+			latex: step3Latex
 		}
 	];
 
@@ -612,6 +950,7 @@ function solveUnknownSource(
 		componentLabel: comp.label,
 		componentKind: comp.kind,
 		symbol: sym,
+		terms: termsMeta,
 		constraint,
 		methodName,
 		solutions: [candidate],
@@ -916,6 +1255,7 @@ function impedanceToPassiveValue(
 function solveUnknownPassive(
 	doc: CircuitDocument,
 	comp: CircuitComponent,
+	resolvedTerms: ResolvedUnknownTerm[],
 	problem: UnknownProblemSpec,
 	yTarget: Complex,
 	solveOpts: SolveMnaOptions
@@ -932,6 +1272,9 @@ function solveUnknownPassive(
 	const xUnit = UNIT_BY_KIND[comp.kind] ?? '';
 	const ySymTex = getConstraintSymbolLatex(constraint, doc);
 	const yUnit = getConstraintUnit(constraint.kind);
+	const termsMeta = toResultTermsMeta(resolvedTerms);
+	const mult = resolvedTerms[0].term.multiplier;
+	const isScaledSingle = Math.abs(mult - 1) >= 1e-12;
 	const methodName =
 		constraint.kind === 'branch_power'
 			? 'Thévenin / Quadratic Power Inversion'
@@ -1017,13 +1360,23 @@ function solveUnknownPassive(
 					);
 				}
 				const rx = (powerScale * vMagSq) / pTarget;
-				const cand = verifyCandidate(doc, comp, Complex.from(rx, 0), constraint, yTarget, mode, solveOpts);
+				const cand = verifyCandidateTerms(
+					doc,
+					comp,
+					resolvedTerms,
+					Complex.from(rx / mult, 0),
+					constraint,
+					yTarget,
+					mode,
+					solveOpts
+				);
 				return {
 					valid: true,
 					componentId: comp.id,
 					componentLabel: comp.label,
 					componentKind: comp.kind,
 					symbol: sym,
+					terms: termsMeta,
 					constraint,
 					methodName,
 					solutions: [cand],
@@ -1032,13 +1385,18 @@ function solveUnknownPassive(
 							title: '1. Port Voltage Across Unknown Resistor',
 							description: `${comp.label} is connected directly across a zero-impedance port (V_th = ${formatEngineering(port.vth!.abs(), 'V', 4)}).`,
 							latex: [
-								`P_{${latexSub(comp.label)}}(${symTex}) = ${powerScale === 0.5 ? '\\frac{1}{2}' : ''}\\frac{|V_{th}|^2}{${symTex}} = ${formatLatexValue(Complex.from(pTarget, 0), 'dc')}\\text{ W}`
+								`P_{${latexSub(comp.label)}}(${symTex}) = ${powerScale === 0.5 ? '\\frac{1}{2}' : ''}\\frac{|V_{th}|^2}{${formatUnknownTermLatex(mult, symTex)}} = ${formatLatexValue(Complex.from(pTarget, 0), 'dc')}\\text{ W}`
 							]
 						},
 						{
 							title: '2. Exact Solution & MNA Verification',
 							description: 'Solved directly for R and verified against full MNA.',
 							latex: [
+								...(isScaledSingle
+									? [
+											`${formatUnknownTermLatex(mult, symTex)} = ${formatComplexAnswerLatex(Complex.from(rx, 0), 'Ω', 'dc')} \\implies ${symTex} = ${formatComplexAnswerLatex(cand.value, 'Ω', 'dc')}`
+										]
+									: []),
 								`${symTex} = ${formatComplexAnswerLatex(cand.value, 'Ω', 'dc')} \\quad (|\\Delta P| = ${formatLatexResidual(cand.discrepancy, 'W')})`
 							]
 						}
@@ -1053,17 +1411,29 @@ function solveUnknownPassive(
 						comp,
 						problem,
 						methodName,
-						'Forced current through the resistor is 0 A, so power is always 0 W.'
+						'Forced current through the resistor is 0 A, so power is always 0 W.',
+						[],
+						termsMeta
 					);
 				}
 				const rx = pTarget / (powerScale * iMagSq);
-				const cand = verifyCandidate(doc, comp, Complex.from(rx, 0), constraint, yTarget, mode, solveOpts);
+				const cand = verifyCandidateTerms(
+					doc,
+					comp,
+					resolvedTerms,
+					Complex.from(rx / mult, 0),
+					constraint,
+					yTarget,
+					mode,
+					solveOpts
+				);
 				return {
 					valid: true,
 					componentId: comp.id,
 					componentLabel: comp.label,
 					componentKind: comp.kind,
 					symbol: sym,
+					terms: termsMeta,
 					constraint,
 					methodName,
 					solutions: [cand],
@@ -1072,13 +1442,18 @@ function solveUnknownPassive(
 							title: '1. Forced Series Current Through Unknown Resistor',
 							description: `${comp.label} carries a fixed Norton current I_N = ${formatEngineering(port.isc!.abs(), 'A', 4)}.`,
 							latex: [
-								`P_{${latexSub(comp.label)}}(${symTex}) = ${powerScale === 0.5 ? '\\frac{1}{2}' : ''}|I_N|^2 ${symTex} = ${formatLatexValue(Complex.from(pTarget, 0), 'dc')}\\text{ W}`
+								`P_{${latexSub(comp.label)}}(${symTex}) = ${powerScale === 0.5 ? '\\frac{1}{2}' : ''}|I_N|^2 ${formatUnknownTermLatex(mult, symTex)} = ${formatLatexValue(Complex.from(pTarget, 0), 'dc')}\\text{ W}`
 							]
 						},
 						{
 							title: '2. Exact Solution & MNA Verification',
 							description: 'Solved directly for R and verified against full MNA.',
 							latex: [
+								...(isScaledSingle
+									? [
+											`${formatUnknownTermLatex(mult, symTex)} = ${formatComplexAnswerLatex(Complex.from(rx, 0), 'Ω', 'dc')} \\implies ${symTex} = ${formatComplexAnswerLatex(cand.value, 'Ω', 'dc')}`
+										]
+									: []),
 								`${symTex} = ${formatComplexAnswerLatex(cand.value, 'Ω', 'dc')} \\quad (|\\Delta P| = ${formatLatexResidual(cand.discrepancy, 'W')})`
 							]
 						}
@@ -1123,7 +1498,16 @@ function solveUnknownPassive(
 
 			const roots = dedupeAndSortRoots(rawRoots, false);
 			const candidates = roots.map((r) =>
-				verifyCandidate(doc, comp, Complex.from(r, 0), constraint, yTarget, mode, solveOpts)
+				verifyCandidateTerms(
+					doc,
+					comp,
+					resolvedTerms,
+					Complex.from(r / mult, 0),
+					constraint,
+					yTarget,
+					mode,
+					solveOpts
+				)
 			);
 
 			const zLabel = mode === 'dc' ? 'R_{th}' : 'Z_{th}';
@@ -1163,6 +1547,7 @@ function solveUnknownPassive(
 				componentLabel: comp.label,
 				componentKind: comp.kind,
 				symbol: sym,
+				terms: termsMeta,
 				constraint,
 				methodName,
 				solutions: candidates,
@@ -1288,7 +1673,16 @@ function solveUnknownPassive(
 		}
 
 		const candidates = sorted.map((val) =>
-			verifyCandidate(doc, comp, Complex.from(val, 0), constraint, yTarget, mode, solveOpts)
+			verifyCandidateTerms(
+				doc,
+				comp,
+				resolvedTerms,
+				Complex.from(val / mult, 0),
+				constraint,
+				yTarget,
+				mode,
+				solveOpts
+			)
 		);
 
 		const steps: SolutionStep[] = [
@@ -1325,6 +1719,7 @@ function solveUnknownPassive(
 			componentLabel: comp.label,
 			componentKind: comp.kind,
 			symbol: sym,
+			terms: termsMeta,
 			constraint,
 			methodName,
 			solutions: candidates,
@@ -1506,13 +1901,15 @@ function solveUnknownPassive(
 
 	const physical = impedanceToPassiveValue(zx, comp.kind, omega);
 	if (!physical.ok) {
-		return makeFailure(comp, problem, methodName, physical.error, steps);
+		return makeFailure(comp, problem, methodName, physical.error, steps, termsMeta);
 	}
 
-	const candidate = verifyCandidate(
+	const baseVal = physical.value / mult;
+	const candidate = verifyCandidateTerms(
 		doc,
 		comp,
-		Complex.from(physical.value, 0),
+		resolvedTerms,
+		Complex.from(baseVal, 0),
 		constraint,
 		yTarget,
 		mode,
@@ -1524,7 +1921,11 @@ function solveUnknownPassive(
 		description: `Converted required impedance into the physical ${comp.kind} value and verified via full MNA re-solve.`,
 		latex: [
 			...(comp.kind !== 'resistor' ? [physical.conversionLatex] : []),
-			`${symTex} = ${formatComplexAnswerLatex(candidate.value, xUnit, 'dc')}`,
+			...(isScaledSingle
+				? [
+						`${formatUnknownTermLatex(mult, symTex)} = ${formatComplexAnswerLatex(Complex.from(physical.value, 0), xUnit, 'dc')} \\implies ${symTex} = ${formatComplexAnswerLatex(candidate.value, xUnit, 'dc')}`
+					]
+				: [`${symTex} = ${formatComplexAnswerLatex(candidate.value, xUnit, 'dc')}`]),
 			`|${ySymTex}(${symTex}) - ${yTargetTex}| = ${formatLatexResidual(candidate.discrepancy, yUnit)}`
 		]
 	});
@@ -1535,9 +1936,495 @@ function solveUnknownPassive(
 		componentLabel: comp.label,
 		componentKind: comp.kind,
 		symbol: sym,
+		terms: termsMeta,
 		constraint,
 		methodName,
 		solutions: [candidate],
+		steps
+	};
+}
+
+/**
+ * Brent's root-finding algorithm on a sign-changing bracket `[aInit, bInit]`.
+ */
+function brentRoot(
+	fn: (x: number) => number | null,
+	aInit: number,
+	bInit: number,
+	faInit: number,
+	fbInit: number,
+	maxIter = 80,
+	tol = 1e-13
+): number | null {
+	let a = aInit;
+	let b = bInit;
+	let fa = faInit;
+	let fb = fbInit;
+
+	if (Math.abs(fa) <= 1e-15) return a;
+	if (Math.abs(fb) <= 1e-15) return b;
+	if (fa * fb > 0) return null;
+
+	let c = a;
+	let fc = fa;
+	let d = b - a;
+	let e = d;
+
+	for (let iter = 0; iter < maxIter; iter++) {
+		if ((fb > 0 && fc > 0) || (fb < 0 && fc < 0)) {
+			c = a;
+			fc = fa;
+			d = b - a;
+			e = d;
+		}
+		if (Math.abs(fc) < Math.abs(fb)) {
+			a = b;
+			b = c;
+			c = a;
+			fa = fb;
+			fb = fc;
+			fc = fa;
+		}
+
+		const tol1 = 2 * Number.EPSILON * Math.abs(b) + 0.5 * tol * Math.max(1, Math.abs(b));
+		const xm = 0.5 * (c - b);
+
+		if (Math.abs(xm) <= tol1 || Math.abs(fb) <= 1e-15) {
+			return b;
+		}
+
+		if (Math.abs(e) >= tol1 && Math.abs(fa) > Math.abs(fb)) {
+			const s = fb / fa;
+			let p: number;
+			let q: number;
+			if (a === c) {
+				p = 2 * xm * s;
+				q = 1 - s;
+			} else {
+				const qRatio = fa / fc;
+				const r = fb / fc;
+				p = s * (2 * xm * qRatio * (qRatio - r) - (b - a) * (r - 1));
+				q = (qRatio - 1) * (r - 1) * (s - 1);
+			}
+			if (p > 0) q = -q;
+			p = Math.abs(p);
+			const min1 = 3 * xm * q - Math.abs(tol1 * q);
+			const min2 = Math.abs(e * q);
+			if (2 * p < Math.min(min1, min2)) {
+				e = d;
+				d = p / q;
+			} else {
+				d = xm;
+				e = d;
+			}
+		} else {
+			d = xm;
+			e = d;
+		}
+
+		a = b;
+		fa = fb;
+		if (Math.abs(d) > tol1) {
+			b += d;
+		} else {
+			b += xm >= 0 ? tol1 : -tol1;
+		}
+
+		const nextFb = fn(b);
+		if (nextFb === null || !Number.isFinite(nextFb)) {
+			return null;
+		}
+		fb = nextFb;
+	}
+
+	return b;
+}
+
+/**
+ * Brent's 1D derivative-free minimization in log-space over `[ax, bx]` (`ax > 0, bx > 0`).
+ * Ideal for tangent roots (e.g. P = P_max) and AC complex magnitude residuals.
+ */
+function brentMinimizeLog(
+	fn: (x: number) => number | null,
+	ax: number,
+	bx: number,
+	maxIter = 80,
+	tol = 1e-13
+): number | null {
+	const CGOLD = 0.3819660112501051;
+	let a = Math.log(ax);
+	let b = Math.log(bx);
+	if (a > b) [a, b] = [b, a];
+
+	let x = a + CGOLD * (b - a);
+	let w = x;
+	let v = x;
+	let fx = fn(Math.exp(x));
+	if (fx === null || !Number.isFinite(fx)) return null;
+	let fw = fx;
+	let fv = fx;
+	let d = 0;
+	let e = 0;
+
+	for (let iter = 0; iter < maxIter; iter++) {
+		const xm = 0.5 * (a + b);
+		const tol1 = tol * Math.abs(x) + 1e-14;
+		const tol2 = 2 * tol1;
+		if (Math.abs(x - xm) <= tol2 - 0.5 * (b - a)) {
+			return Math.exp(x);
+		}
+
+		let useGolden = true;
+		if (Math.abs(e) > tol1) {
+			const r = (x - w) * (fx - fv);
+			let q = (x - v) * (fx - fw);
+			let p = (x - v) * q - (x - w) * r;
+			q = 2 * (q - r);
+			if (q > 0) p = -p;
+			q = Math.abs(q);
+			const etemp = e;
+			e = d;
+			if (Math.abs(p) < Math.abs(0.5 * q * etemp) && p > q * (a - x) && p < q * (b - x)) {
+				d = p / q;
+				const u = x + d;
+				if (u - a < tol2 || b - u < tol2) {
+					d = xm - x >= 0 ? tol1 : -tol1;
+				}
+				useGolden = false;
+			}
+		}
+
+		if (useGolden) {
+			e = x >= xm ? a - x : b - x;
+			d = CGOLD * e;
+		}
+
+		const u = Math.abs(d) >= tol1 ? x + d : x + (d >= 0 ? tol1 : -tol1);
+		const fu = fn(Math.exp(u));
+		if (fu === null || !Number.isFinite(fu)) return Math.exp(x);
+
+		if (fu <= fx) {
+			if (u >= x) a = x;
+			else b = x;
+			v = w;
+			fv = fw;
+			w = x;
+			fw = fx;
+			x = u;
+			fx = fu;
+		} else {
+			if (u < x) a = u;
+			else b = u;
+			if (fu <= fw || w === x) {
+				v = w;
+				fv = fw;
+				w = u;
+				fw = fu;
+			} else if (fu <= fv || v === x || v === w) {
+				v = u;
+				fv = fu;
+			}
+		}
+	}
+
+	return Math.exp(x);
+}
+
+/**
+ * Case B-Multi: Multiple coupled passive elements of the same kind (e.g. R1 = R, R2 = 2R).
+ * Uses a deterministic 600-point log-spaced multi-bracket scan over [1e-9, 1e9] combined with
+ * Brent's root refinement (and log-space minimization for tangent / complex AC roots),
+ * cross-verifying every root via full MNA re-solve.
+ */
+function solveMultiTermPassive(
+	doc: CircuitDocument,
+	comp: CircuitComponent,
+	resolvedTerms: ResolvedUnknownTerm[],
+	problem: UnknownProblemSpec,
+	yTarget: Complex,
+	solveOpts: SolveMnaOptions
+): UnknownSolveResult {
+	const mode = doc.mode;
+	const constraint = problem.constraint;
+	const sym = problem.symbol?.trim() || getDefaultUnknownSymbol(comp.kind);
+	const symTex = formatSymbolLatex(sym);
+	const xUnit = UNIT_BY_KIND[comp.kind] ?? '';
+	const ySymTex = getConstraintSymbolLatex(constraint, doc);
+	const yUnit = getConstraintUnit(constraint.kind);
+	const yTargetTex = appendLatexSubscript(ySymTex, 'target');
+	const termsMeta = toResultTermsMeta(resolvedTerms);
+	const linkedIds = resolvedTerms.map((t) => t.comp.id);
+	const methodName = 'Coupled Parametric Inversion';
+
+	if (mode === 'dc' && comp.kind === 'capacitor') {
+		return makeFailure(
+			comp,
+			problem,
+			methodName,
+			'Cannot solve for unknown capacitance in DC steady-state: ideal capacitors act as open circuits independent of C. Switch to AC mode to solve for C.',
+			[],
+			termsMeta
+		);
+	}
+	if (mode === 'dc' && comp.kind === 'inductor') {
+		return makeFailure(
+			comp,
+			problem,
+			methodName,
+			'Cannot solve for unknown inductance in DC steady-state: ideal inductors act as short circuits independent of L. Switch to AC mode to solve for L.',
+			[],
+			termsMeta
+		);
+	}
+
+	const isRealScalarTarget = mode === 'dc' || constraint.kind === 'branch_power';
+
+	const evalComplexMeasurement = (x: number): Complex | null => {
+		if (!Number.isFinite(x) || x <= 0) return null;
+		const docX = withSubstitutedTerms(doc, resolvedTerms, x, mode);
+		const mnaX = solveMNA(docX, solveOpts);
+		if (!mnaX.valid) return null;
+		return measureConstraint(mnaX, constraint);
+	};
+
+	const N = 600;
+	const logMin = -9;
+	const logMax = 9;
+	const xs: number[] = new Array(N);
+	for (let i = 0; i < N; i++) {
+		xs[i] = 10 ** (logMin + ((logMax - logMin) * i) / (N - 1));
+	}
+
+	const rawPositiveRoots: number[] = [];
+
+	if (isRealScalarTarget) {
+		const targetRe = yTarget.re;
+		const scale = Math.max(1, Math.abs(targetRe));
+		const evalF = (x: number): number | null => {
+			const y = evalComplexMeasurement(x);
+			if (!y || !Number.isFinite(y.re)) return null;
+			return y.re - targetRe;
+		};
+
+		const fs: Array<number | null> = xs.map(evalF);
+		let validCount = 0;
+		let minF = Infinity;
+		let maxF = -Infinity;
+		for (const f of fs) {
+			if (f !== null) {
+				validCount++;
+				if (f < minF) minF = f;
+				if (f > maxF) maxF = f;
+			}
+		}
+
+		if (validCount === 0) {
+			return makeFailure(
+				comp,
+				problem,
+				methodName,
+				'Circuit topology is invalid and cannot be solved across the physical parameter range.',
+				[],
+				termsMeta
+			);
+		}
+
+		if (maxF - minF < 1e-13 * scale && Math.abs(minF) > 1e-9 * scale) {
+			return makeFailure(
+				comp,
+				problem,
+				methodName,
+				`Measured quantity is independent of unknown ${sym} (sensitivity = 0).`,
+				[],
+				termsMeta
+			);
+		}
+
+		for (let i = 0; i < N; i++) {
+			const fi = fs[i];
+			if (fi !== null && Math.abs(fi) <= 1e-13 * scale) {
+				rawPositiveRoots.push(xs[i]);
+			}
+			if (i < N - 1) {
+				const fNext = fs[i + 1];
+				if (fi !== null && fNext !== null && fi * fNext < 0) {
+					const root = brentRoot(evalF, xs[i], xs[i + 1], fi, fNext, 80, 1e-13);
+					if (root !== null && root > 1e-15) {
+						rawPositiveRoots.push(root);
+					}
+				}
+			}
+			if (i > 0 && i < N - 1) {
+				const fPrev = fs[i - 1];
+				const fNext = fs[i + 1];
+				if (
+					fi !== null &&
+					fPrev !== null &&
+					fNext !== null &&
+					Math.abs(fi) <= Math.abs(fPrev) &&
+					Math.abs(fi) <= Math.abs(fNext) &&
+					Math.abs(fi) < 0.05 * scale
+				) {
+					const minX = brentMinimizeLog(
+						(x) => {
+							const v = evalF(x);
+							return v === null ? null : v * v;
+						},
+						xs[i - 1],
+						xs[i + 1],
+						80,
+						1e-13
+					);
+					if (minX !== null && minX > 1e-15) {
+						const fMin = evalF(minX);
+						if (fMin !== null && Math.abs(fMin) < 1e-7 * scale) {
+							rawPositiveRoots.push(minX);
+						}
+					}
+				}
+			}
+		}
+	} else {
+		// AC complex phasor target: minimize |y(x) - yTarget|^2 over local minima brackets
+		const scale = Math.max(1, yTarget.abs());
+		const evalErrSq = (x: number): number | null => {
+			const y = evalComplexMeasurement(x);
+			if (!y) return null;
+			return y.sub(yTarget).absSq();
+		};
+
+		const errs: Array<number | null> = xs.map(evalErrSq);
+		let validCount = 0;
+		for (const e of errs) {
+			if (e !== null) validCount++;
+		}
+		if (validCount === 0) {
+			return makeFailure(
+				comp,
+				problem,
+				methodName,
+				'Circuit topology is invalid and cannot be solved across the physical parameter range.',
+				[],
+				termsMeta
+			);
+		}
+
+		for (let i = 0; i < N; i++) {
+			const ei = errs[i];
+			if (ei === null) continue;
+			if (Math.sqrt(ei) <= 1e-12 * scale) {
+				rawPositiveRoots.push(xs[i]);
+			}
+			if (i > 0 && i < N - 1) {
+				const ePrev = errs[i - 1];
+				const eNext = errs[i + 1];
+				if (ePrev !== null && eNext !== null && ei <= ePrev && ei <= eNext) {
+					const minX = brentMinimizeLog(evalErrSq, xs[i - 1], xs[i + 1], 80, 1e-13);
+					if (minX !== null && minX > 1e-15) {
+						const errMin = evalErrSq(minX);
+						if (errMin !== null && Math.sqrt(errMin) < 1e-7 * scale) {
+							rawPositiveRoots.push(minX);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Deduplicate roots within relative tolerance 1e-6 and sort ascending
+	const uniqueRoots: number[] = [];
+	const sortedRaw = [...rawPositiveRoots].filter((r) => Number.isFinite(r) && r > 1e-15).sort((a, b) => a - b);
+	for (const r of sortedRaw) {
+		if (
+			!uniqueRoots.some(
+				(u) => Math.abs(u - r) <= 1e-6 * Math.max(1e-12, Math.abs(u), Math.abs(r))
+			)
+		) {
+			uniqueRoots.push(r);
+		}
+	}
+
+	const verifiedCandidates = uniqueRoots
+		.map((r) =>
+			verifyCandidateTerms(
+				doc,
+				comp,
+				resolvedTerms,
+				Complex.from(r, 0),
+				constraint,
+				yTarget,
+				mode,
+				solveOpts
+			)
+		)
+		.filter((cand) => cand.verified);
+
+	if (verifiedCandidates.length === 0) {
+		return makeFailure(
+			comp,
+			problem,
+			methodName,
+			`No positive physical ${comp.kind} value satisfies ${formatConstraintQuantityProse(constraint, doc)} = ${constraint.value} for the coupled elements (${formatCoupledTermsProse(resolvedTerms, sym)}).`,
+			[],
+			termsMeta
+		);
+	}
+
+	const step2Latex = verifiedCandidates.map((cand, idx) => {
+		const name = verifiedCandidates.length > 1 ? `${symTex}_{${idx + 1}}` : symTex;
+		return `${name} = ${formatComplexAnswerLatex(cand.value, xUnit, 'dc')}`;
+	});
+
+	const step3Latex: string[] = [];
+	verifiedCandidates.forEach((cand, idx) => {
+		const prefix = verifiedCandidates.length > 1 ? `\\text{Sol. }${idx + 1}:\\; ` : '';
+		if (cand.termValues) {
+			const termsStr = cand.termValues
+				.map(
+					(tv) =>
+						`${formatSymbolLatex(tv.componentLabel)} = ${formatUnknownTermLatex(tv.multiplier, symTex)} = ${formatComplexAnswerLatex(tv.value, tv.unit, 'dc')}`
+				)
+				.join(', \\quad ');
+			step3Latex.push(`${prefix}${termsStr}`);
+		}
+		step3Latex.push(
+			`${prefix}|${ySymTex}(${symTex}) - ${yTargetTex}| = ${formatLatexResidual(cand.discrepancy, yUnit)}`
+		);
+	});
+
+	const steps: SolutionStep[] = [
+		{
+			title: '1. Coupled Unknown Element Relations',
+			description: `All ${resolvedTerms.length} linked ${comp.kind} elements scale jointly with ${sym} > 0 (${formatCoupledTermsProse(resolvedTerms, sym)}).`,
+			latex: [
+				formatCoupledTermsLatex(resolvedTerms, symTex),
+				`${yTargetTex} = ${formatComplexAnswerLatex(yTarget, yUnit, mode)}`
+			],
+			highlightIds:
+				constraint.kind === 'node_voltage' ? linkedIds : [...linkedIds, constraint.targetId]
+		},
+		{
+			title: '2. Coupled Network Parametric Solution',
+			description: `Solved ${formatConstraintQuantityProse(constraint, doc)}(${sym}) = ${constraint.value} across the positive physical domain (${sym} > 0) to machine precision.`,
+			latex: step2Latex
+		},
+		{
+			title: '3. Scaled Element Values & MNA Verification',
+			description: `Computed every linked component's scaled value and independently verified ${verifiedCandidates.length === 1 ? 'the solution' : 'each solution'} via full MNA re-solve.`,
+			latex: step3Latex
+		}
+	];
+
+	return {
+		valid: true,
+		componentId: comp.id,
+		componentLabel: comp.label,
+		componentKind: comp.kind,
+		symbol: sym,
+		terms: termsMeta,
+		constraint,
+		methodName,
+		solutions: verifiedCandidates,
 		steps
 	};
 }
@@ -1557,8 +2444,8 @@ export function solveUnknownParameter(
 		acMagnitudeMode: options?.acMagnitudeMode ?? doc.acMagnitudeMode ?? 'rms'
 	};
 
-	const comp = doc.components.find((c) => c.id === problem.componentId);
-	if (!comp) {
+	const rawTerms = getUnknownTerms(problem);
+	if (rawTerms.length === 0) {
 		return makeFailure(
 			undefined,
 			problem,
@@ -1567,23 +2454,88 @@ export function solveUnknownParameter(
 		);
 	}
 
-	if (!SOLVABLE_KINDS.has(comp.kind)) {
+	const resolvedTerms: ResolvedUnknownTerm[] = [];
+	for (const term of rawTerms) {
+		const found = doc.components.find((c) => c.id === term.componentId);
+		if (!found) {
+			return makeFailure(
+				undefined,
+				problem,
+				'Unknown Parameter Solver',
+				`Unknown component "${term.componentId}" was not found in the circuit.`
+			);
+		}
+		if (!SOLVABLE_KINDS.has(found.kind)) {
+			return makeFailure(
+				found,
+				problem,
+				'Unknown Parameter Solver',
+				`Component "${found.label}" (${found.kind}) does not have a solvable electrical parameter.`
+			);
+		}
+		resolvedTerms.push({ term, comp: found });
+	}
+
+	const primaryEntry =
+		resolvedTerms.find((t) => t.comp.id === problem.componentId) ?? resolvedTerms[0];
+	const comp = primaryEntry.comp;
+	const termsMeta = toResultTermsMeta(resolvedTerms);
+
+	const allSources = resolvedTerms.every((t) => SOURCE_KINDS.has(t.comp.kind));
+	const allPassives = resolvedTerms.every((t) => !SOURCE_KINDS.has(t.comp.kind));
+	if (!allSources && !allPassives) {
 		return makeFailure(
 			comp,
 			problem,
 			'Unknown Parameter Solver',
-			`Component "${comp.label}" (${comp.kind}) does not have a solvable electrical parameter.`
+			'Cannot mix independent sources and passive elements in the same linked unknown problem.',
+			[],
+			termsMeta
 		);
 	}
 
-	const methodName = SOURCE_KINDS.has(comp.kind)
+	if (allPassives) {
+		const sameKind = resolvedTerms.every((t) => t.comp.kind === comp.kind);
+		if (!sameKind) {
+			return makeFailure(
+				comp,
+				problem,
+				'Unknown Parameter Solver',
+				'All linked passive unknown elements must have the same component kind (all resistors, all capacitors, or all inductors).',
+				[],
+				termsMeta
+			);
+		}
+		const hasNonPositiveMult = resolvedTerms.some((t) => t.term.multiplier <= 0);
+		if (hasNonPositiveMult) {
+			return makeFailure(
+				comp,
+				problem,
+				'Unknown Parameter Solver',
+				'Passive unknown elements (R, C, L) require strictly positive scale multipliers.',
+				[],
+				termsMeta
+			);
+		}
+	}
+
+	const methodName = allSources
 		? 'Linearity / Superposition'
-		: 'Thévenin / Möbius Inversion';
+		: resolvedTerms.length >= 2
+			? 'Coupled Parametric Inversion'
+			: 'Thévenin / Möbius Inversion';
 
 	const { constraint } = problem;
 	const rawVal = constraint.value?.trim() ?? '';
 	if (!rawVal) {
-		return makeFailure(comp, problem, methodName, 'Enter a target measurement value.');
+		return makeFailure(
+			comp,
+			problem,
+			methodName,
+			'Enter a target measurement value.',
+			[],
+			termsMeta
+		);
 	}
 
 	let yTarget: Complex;
@@ -1594,7 +2546,9 @@ export function solveUnknownParameter(
 				comp,
 				problem,
 				methodName,
-				`Invalid target power "${constraint.value}" (enter a real power in W, e.g. 12m, 2.5).`
+				`Invalid target power "${constraint.value}" (enter a real power in W, e.g. 12m, 2.5).`,
+				[],
+				termsMeta
 			);
 		}
 		yTarget = Complex.from(pNum, 0);
@@ -1605,7 +2559,9 @@ export function solveUnknownParameter(
 				comp,
 				problem,
 				methodName,
-				`Invalid target measurement value "${constraint.value}".`
+				`Invalid target measurement value "${constraint.value}".`,
+				[],
+				termsMeta
 			);
 		}
 		if (mode === 'dc' && !parsed.isReal(1e-12)) {
@@ -1613,7 +2569,9 @@ export function solveUnknownParameter(
 				comp,
 				problem,
 				methodName,
-				`Complex target "${constraint.value}" is not valid in DC mode. Switch to AC mode or enter a real scalar.`
+				`Complex target "${constraint.value}" is not valid in DC mode. Switch to AC mode or enter a real scalar.`,
+				[],
+				termsMeta
 			);
 		}
 		yTarget = mode === 'dc' ? Complex.from(parsed.re, 0) : parsed;
@@ -1626,7 +2584,9 @@ export function solveUnknownParameter(
 				comp,
 				problem,
 				methodName,
-				'Reference node 0 (GND) is fixed at 0 V and cannot constrain an unknown value.'
+				'Reference node 0 (GND) is fixed at 0 V and cannot constrain an unknown value.',
+				[],
+				termsMeta
 			);
 		}
 		const graph = buildElectricalGraph({ ...doc, unknownProblem: undefined });
@@ -1635,7 +2595,9 @@ export function solveUnknownParameter(
 				comp,
 				problem,
 				methodName,
-				`Target node "${constraint.targetId}" does not exist in the circuit.`
+				`Target node "${constraint.targetId}" does not exist in the circuit.`,
+				[],
+				termsMeta
 			);
 		}
 	} else {
@@ -1645,13 +2607,18 @@ export function solveUnknownParameter(
 				comp,
 				problem,
 				methodName,
-				`Target branch component "${constraint.targetId}" was not found.`
+				`Target branch component "${constraint.targetId}" was not found.`,
+				[],
+				termsMeta
 			);
 		}
 	}
 
-	if (SOURCE_KINDS.has(comp.kind)) {
-		return solveUnknownSource(doc, comp, problem, yTarget, solveOpts);
+	if (allSources) {
+		return solveUnknownSource(doc, comp, resolvedTerms, problem, yTarget, solveOpts);
 	}
-	return solveUnknownPassive(doc, comp, problem, yTarget, solveOpts);
+	if (resolvedTerms.length >= 2) {
+		return solveMultiTermPassive(doc, comp, resolvedTerms, problem, yTarget, solveOpts);
+	}
+	return solveUnknownPassive(doc, comp, resolvedTerms, problem, yTarget, solveOpts);
 }

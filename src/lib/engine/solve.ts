@@ -11,7 +11,11 @@ import { solveNodal } from './methods/nodal';
 import { solveSourceTransform } from './methods/source-transform';
 import { solveSuperposition } from './methods/superposition';
 import { solveTheveninNorton } from './methods/thevenin-norton';
-import { solveUnknownParameter, substituteUnknownValue } from './unknown-solver';
+import {
+	solveUnknownParameter,
+	substituteUnknownTerms,
+	substituteUnknownValue
+} from './unknown-solver';
 import type {
 	CircuitDocument,
 	FullSolveResult,
@@ -57,11 +61,22 @@ export function solveCircuit(
 	if (doc.unknownProblem) {
 		unknownSolution = solveUnknownParameter(doc, doc.unknownProblem, mnaOpts);
 		if (unknownSolution.valid && unknownSolution.solutions.length > 0) {
-			workingDoc = substituteUnknownValue(
-				doc,
-				doc.unknownProblem.componentId,
-				unknownSolution.solutions[0].valueString
-			);
+			const primary = unknownSolution.solutions[0];
+			if (primary.termValues && primary.termValues.length > 0) {
+				workingDoc = substituteUnknownTerms(
+					doc,
+					primary.termValues.map((tv) => ({
+						componentId: tv.componentId,
+						valueString: tv.valueString
+					}))
+				);
+			} else {
+				workingDoc = substituteUnknownValue(
+					doc,
+					doc.unknownProblem.componentId,
+					primary.valueString
+				);
+			}
 		}
 	}
 

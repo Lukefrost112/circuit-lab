@@ -751,5 +751,156 @@ Let me know if you want node voltages calculated!`;
 		expect(solved.unknownSolution?.solutions[0].value.re).toBeCloseTo(4000, 6);
 		expect(solved.unknownSolution?.solutions[0].verified).toBe(true);
 	});
+
+	it('imports AI netlist with explicit multiple/scaled unknowns (V1 = V, V2 = 2V), solves exact V, and round-trips JSON', () => {
+		const res = parseCircuitImport(
+			JSON.stringify({
+				schemaVersion: 1,
+				name: 'Two Scaled Voltage Sources',
+				mode: 'dc',
+				unitSystem: 'kohm-v-ma',
+				elements: [
+					{
+						id: 'V1',
+						kind: 'voltage_source',
+						label: 'V1',
+						from: 'N1',
+						to: '0',
+						fromPos: [0, 0],
+						toPos: [0, 1],
+						value: 'V',
+						unknown: true,
+						unknownSymbol: 'V',
+						unknownMultiplier: 1
+					},
+					{
+						id: 'R1',
+						kind: 'resistor',
+						label: 'R1',
+						from: 'N1',
+						to: 'N2',
+						fromPos: [0, 0],
+						toPos: [1, 0],
+						value: '2k'
+					},
+					{
+						id: 'R2',
+						kind: 'resistor',
+						label: 'R2',
+						from: 'N2',
+						to: '0',
+						fromPos: [1, 0],
+						toPos: [1, 1],
+						value: '4k'
+					},
+					{
+						id: 'R3',
+						kind: 'resistor',
+						label: 'R3',
+						from: 'N2',
+						to: 'N3',
+						fromPos: [1, 0],
+						toPos: [2, 0],
+						value: '2k'
+					},
+					{
+						id: 'V2',
+						kind: 'voltage_source',
+						label: 'V2',
+						from: 'N3',
+						to: '0',
+						fromPos: [2, 0],
+						toPos: [2, 1],
+						value: '2V',
+						unknown: true,
+						unknownSymbol: 'V',
+						unknownMultiplier: 2
+					}
+				],
+				unknownProblem: {
+					componentId: 'V1',
+					symbol: 'V',
+					terms: [
+						{ componentId: 'V1', multiplier: 1 },
+						{ componentId: 'V2', multiplier: 2 }
+					],
+					constraint: {
+						kind: 'branch_current',
+						targetId: 'R2',
+						value: '3m',
+						label: 'I_o'
+					}
+				}
+			})
+		);
+
+		expect(res.ok).toBe(true);
+		if (!res.ok) return;
+
+		expect(res.document.unknownProblem?.terms).toEqual([
+			{ componentId: 'V1', multiplier: 1 },
+			{ componentId: 'V2', multiplier: 2 }
+		]);
+
+		const solved = solveCircuit(res.document);
+		expect(solved.unknownSolution?.valid).toBe(true);
+		expect(solved.unknownSolution?.solutions[0].value.re).toBeCloseTo(10, 9);
+		expect(solved.unknownSolution?.solutions[0].termValues?.[1].value.re).toBeCloseTo(20, 9);
+		expect(solved.allVerified).toBe(true);
+
+		// JSON export/import round-trip preserves unknownProblem.terms
+		const exported = exportCircuitJson(res.document);
+		const reimported = parseCircuitImport(exported);
+		expect(reimported.ok).toBe(true);
+		if (!reimported.ok) return;
+		expect(reimported.document.unknownProblem?.terms).toEqual([
+			{ componentId: 'V1', multiplier: 1 },
+			{ componentId: 'V2', multiplier: 2 }
+		]);
+		const solvedAgain = solveCircuit(reimported.document);
+		expect(solvedAgain.unknownSolution?.solutions[0].value.re).toBeCloseTo(10, 9);
+	});
+
+	it('infers multipliers from algebraic strings "V" and "2V" using unknownProblem.symbol without explicit unknownMultiplier', () => {
+		const res = parseCircuitImport(
+			JSON.stringify({
+				schemaVersion: 1,
+				name: 'Algebraic Multi-Unknown Netlist',
+				mode: 'dc',
+				elements: [
+					{ id: 'V1', kind: 'voltage_source', from: 'N1', to: '0', value: 'V' },
+					{ id: 'R1', kind: 'resistor', from: 'N1', to: 'N2', value: '2k' },
+					{ id: 'R2', kind: 'resistor', from: 'N2', to: '0', value: '4k' },
+					{ id: 'R3', kind: 'resistor', from: 'N2', to: 'N3', value: '2k' },
+					{ id: 'V2', kind: 'voltage_source', from: 'N3', to: '0', value: '2V' }
+				],
+				unknownProblem: {
+					componentId: 'V1',
+					symbol: 'V',
+					constraint: {
+						kind: 'branch_current',
+						targetId: 'R2',
+						value: '3m',
+						label: 'I_o'
+					}
+				}
+			})
+		);
+
+		expect(res.ok).toBe(true);
+		if (!res.ok) return;
+
+		expect(res.document.unknownProblem?.terms).toEqual([
+			{ componentId: 'V1', multiplier: 1 },
+			{ componentId: 'V2', multiplier: 2 }
+		]);
+
+		const solved = solveCircuit(res.document);
+		expect(solved.unknownSolution?.valid).toBe(true);
+		expect(solved.unknownSolution?.solutions[0].value.re).toBeCloseTo(10, 9);
+		expect(solved.unknownSolution?.solutions[0].termValues?.[0].value.re).toBeCloseTo(10, 9);
+		expect(solved.unknownSolution?.solutions[0].termValues?.[1].value.re).toBeCloseTo(20, 9);
+		expect(solved.allVerified).toBe(true);
+	});
 });
 

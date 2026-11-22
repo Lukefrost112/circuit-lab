@@ -2,13 +2,15 @@
 	import { AlertCircle, Check } from 'lucide-svelte';
 	import { Accordion, AccordionItem, Button } from '$lib/components/ui';
 	import {
+		formatUnknownTermExpr,
 		parseComplexValue,
 		parseEngineeringNumber,
 		type AnalysisMode,
 		type CircuitDocument,
 		type ComponentKind,
 		type UnknownSolutionCandidate,
-		type UnknownSolveResult
+		type UnknownSolveResult,
+		type UnknownTermSolvedValue
 	} from '$lib/engine';
 	import { settings } from '$lib/stores/settings.svelte';
 	import { cn } from '$lib/utils';
@@ -62,8 +64,10 @@
 
 	const answerUnit = $derived(UNIT_BY_KIND[unknownSolution.componentKind] ?? '');
 
+	const isMultiTerm = $derived((unknownSolution.terms?.length ?? 0) >= 2);
+
 	const showComponentLabel = $derived(
-		unknownSolution.componentLabel.trim() !== unknownSolution.symbol.trim()
+		!isMultiTerm && unknownSolution.componentLabel.trim() !== unknownSolution.symbol.trim()
 	);
 
 	const answerColorClass = $derived(
@@ -97,6 +101,13 @@
 		return {
 			primary: formatDcQuantity(cand.value.re, answerUnit, formatOpts)
 		};
+	}
+
+	function formatTermSolvedValue(tv: UnknownTermSolvedValue): string {
+		if (isSource) {
+			return formatComplexParts(tv.value, tv.unit, mode, formatOpts).primary;
+		}
+		return formatDcQuantity(tv.value.re, tv.unit, formatOpts);
 	}
 
 	const constraintSummary = $derived.by(() => {
@@ -215,6 +226,22 @@
 								{formatted.secondary}
 							</div>
 						{/if}
+						{#if isMultiTerm && cand.termValues && cand.termValues.length >= 2}
+							<div
+								class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-border/80 pt-1.5 font-engineering text-[11px] text-muted-foreground"
+							>
+								{#each cand.termValues as tv, tvIdx (tv.componentId)}
+									{#if tvIdx > 0}
+										<span aria-hidden="true" class="text-border">·</span>
+									{/if}
+									<span class="whitespace-nowrap">
+										<span class="font-medium text-foreground">{tv.componentLabel}</span>
+										<span> = {formatUnknownTermExpr(tv.multiplier, unknownSolution.symbol)} = </span>
+										<span class="font-medium text-foreground">{formatTermSolvedValue(tv)}</span>
+									</span>
+								{/each}
+							</div>
+						{/if}
 					</div>
 
 					{#if onApplySolution && isMulti}
@@ -250,7 +277,7 @@
 						onclick={() => onApplySolution(0)}
 					>
 						<Check class="size-3.5" aria-hidden="true" />
-						<span>Apply Solved Value to Circuit</span>
+						<span>{isMultiTerm ? 'Apply Solved Values to Circuit' : 'Apply Solved Value to Circuit'}</span>
 					</Button>
 				{/if}
 			</div>

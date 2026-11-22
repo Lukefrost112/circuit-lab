@@ -19,9 +19,11 @@ import type {
 	ConstraintKind,
 	Rotation,
 	UnitSystemId,
-	UnknownProblemSpec
+	UnknownProblemSpec,
+	UnknownTerm
 } from './types';
 import { parseComplexValue, parseEngineeringNumber } from './units';
+import { parseAlgebraicUnknownValue } from './unknown-solver';
 
 export const AI_CIRCUIT_IMPORT_PROMPT = `Convert the attached circuit diagram (and any problem statement) into a single valid JSON object for Circuit Lab.
 Output ONLY raw JSON (no markdown commentary, no explanation outside the JSON).
@@ -46,12 +48,17 @@ Schema:
       "value": "10k",
       "phaseDeg": 0,
       "unknown": false,
-      "unknownSymbol": "V"
+      "unknownSymbol": "V",
+      "unknownMultiplier": 1
     }
   ],
   "unknownProblem": {
     "componentId": "V1",
     "symbol": "V",
+    "terms": [
+      { "componentId": "V1", "multiplier": 1 },
+      { "componentId": "V2", "multiplier": 2 }
+    ],
     "constraint": {
       "kind": "branch_current" | "branch_voltage" | "node_voltage" | "branch_power",
       "targetId": "R2",
@@ -87,9 +94,12 @@ Rules:
    - All known passive values (R, C, L) must be strictly positive.
    - For AC circuits, set "mode": "ac", include positive "frequencyHz" (e.g. 60 or 1000), and write phasor sources as "120∠30°" (or numeric magnitude in "value" with "phaseDeg": 30).
 7. Unknown-Value Problems (omit "unknownProblem" if all values are known):
-   - If the problem asks to find an unknown source or component value (e.g. "Find V_s given I_o = 2 mA" or "Find R_x given V_o = 6 V"):
+   - Single unknown (e.g. "Find V_s given I_o = 2 mA" or "Find R_x given V_o = 6 V"):
      - On that element, set "unknown": true and "value": "?" (or placeholder "1").
      - Include top-level "unknownProblem" with "componentId", optional "symbol" (e.g. "V_s", "R_x"), and "constraint": { "kind": "branch_current" | "branch_voltage" | "node_voltage" | "branch_power", "targetId": "<elementId or nodeId>", "value": "<SI value>", "label": "<e.g. I_o or V_o>" }.
+   - Multiple / scaled identical unknowns (e.g. two sources labeled V and 2V, or resistors R and 2R):
+     - Mark EVERY linked element with "unknown": true, "unknownSymbol": "V", and "unknownMultiplier": <scalar> (e.g. V1 with "value": "V", "unknownMultiplier": 1 and V2 with "value": "2V", "unknownMultiplier": 2).
+     - Include "terms": [{ "componentId": "V1", "multiplier": 1 }, { "componentId": "V2", "multiplier": 2 }] inside "unknownProblem".
 
 Example 1 (DC) — Unknown Source with kΩ/V/mA & Exact Visual Grid:
 {
@@ -270,9 +280,25 @@ export function exportCircuitJson(doc: CircuitDocument): string {
 	out.components = normalizedComponents;
 	out.wires = normalizedWires;
 	if (doc.unknownProblem !== undefined) {
+		const validTerms = Array.isArray(doc.unknownProblem.terms)
+			? doc.unknownProblem.terms
+					.filter(
+						(t) =>
+							typeof t.componentId === 'string' &&
+							t.componentId.trim() !== '' &&
+							typeof t.multiplier === 'number' &&
+							Number.isFinite(t.multiplier) &&
+							Math.abs(t.multiplier) > 1e-15
+					)
+					.map((t) => ({
+						componentId: t.componentId.trim(),
+						multiplier: t.multiplier
+					}))
+			: [];
 		out.unknownProblem = {
 			componentId: doc.unknownProblem.componentId,
 			...(doc.unknownProblem.symbol ? { symbol: doc.unknownProblem.symbol } : {}),
+			...(validTerms.length > 0 ? { terms: validTerms } : {}),
 			constraint: {
 				kind: doc.unknownProblem.constraint.kind,
 				targetId: doc.unknownProblem.constraint.targetId,
@@ -285,6 +311,40 @@ export function exportCircuitJson(doc: CircuitDocument): string {
 	}
 
 	return JSON.stringify(out, null, 2);
+}
+
+function parseUnknownTermsArray(
+	raw: unknown,
+	warnings: string[],
+	contextLabel: string
+): UnknownTerm[] {
+	if (!Array.isArray(raw)) return [];
+	const seen = new Set<string>();
+	const terms: UnknownTerm[] = [];
+	raw.forEach((entry, idx) => {
+		if (!isPlainObject(entry)) {
+			warnings.push(`${contextLabel}[${idx}]: expected an object { componentId, multiplier }.`);
+			return;
+		}
+		const componentId =
+			typeof entry.componentId === 'string' ? entry.componentId.trim() : '';
+		const multiplier =
+			typeof entry.multiplier === 'number' ? entry.multiplier : Number(entry.multiplier);
+		if (!componentId) {
+			warnings.push(`${contextLabel}[${idx}]: missing "componentId".`);
+			return;
+		}
+		if (!Number.isFinite(multiplier) || Math.abs(multiplier) <= 1e-15) {
+			warnings.push(
+				`${contextLabel}[${idx}] (${componentId}): "multiplier" must be a finite non-zero number.`
+			);
+			return;
+		}
+		if (seen.has(componentId)) return;
+		seen.add(componentId);
+		terms.push({ componentId, multiplier });
+	});
+	return terms;
 }
 
 /**
@@ -611,12 +671,30 @@ function parseCircuitDocumentFormat(obj: Record<string, unknown>): CircuitImport
 			'unknownProblem.constraint'
 		);
 		if (parsedConstraint && typeof up.componentId === 'string' && up.componentId.trim() !== '') {
+			const primaryId = up.componentId.trim();
+			let parsedTerms: UnknownTerm[] | undefined;
+			if (up.terms !== undefined) {
+				const rawTerms = parseUnknownTermsArray(up.terms, warnings, 'unknownProblem.terms');
+				const validTerms = rawTerms.filter((t) => {
+					if (!seenCompIds.has(t.componentId)) {
+						warnings.push(
+							`unknownProblem.terms: component "${t.componentId}" not found; ignored.`
+						);
+						return false;
+					}
+					return true;
+				});
+				if (validTerms.length > 0) {
+					parsedTerms = validTerms;
+				}
+			}
 			document.unknownProblem = {
-				componentId: up.componentId.trim(),
+				componentId: primaryId,
 				symbol:
 					typeof up.symbol === 'string' && up.symbol.trim()
 						? up.symbol.trim()
 						: undefined,
+				...(parsedTerms ? { terms: parsedTerms } : {}),
 				constraint: parsedConstraint
 			};
 		}
@@ -646,17 +724,36 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 		return { ok: false, errors };
 	}
 
-	// Pre-inspect top-level unknownProblem so an element referenced by it may carry "?" or symbolic value
+	// Pre-inspect top-level unknownProblem so referenced/symbolic elements may carry "?", "V", "2V", etc.
+	const rawTopUnknown = isPlainObject(obj.unknownProblem) ? obj.unknownProblem : undefined;
 	const topLevelUnknownRef =
-		isPlainObject(obj.unknownProblem) &&
-		typeof obj.unknownProblem.componentId === 'string' &&
-		obj.unknownProblem.componentId.trim() !== ''
-			? obj.unknownProblem.componentId.trim()
+		rawTopUnknown &&
+		typeof rawTopUnknown.componentId === 'string' &&
+		rawTopUnknown.componentId.trim() !== ''
+			? rawTopUnknown.componentId.trim()
 			: undefined;
+	const topLevelUnknownSymbol =
+		rawTopUnknown &&
+		typeof rawTopUnknown.symbol === 'string' &&
+		rawTopUnknown.symbol.trim() !== ''
+			? rawTopUnknown.symbol.trim()
+			: undefined;
+	const topLevelTerms =
+		rawTopUnknown && rawTopUnknown.terms !== undefined
+			? parseUnknownTermsArray(rawTopUnknown.terms, warnings, 'unknownProblem.terms')
+			: [];
+	const topLevelTermMultMap = new Map<string, number>();
+	for (const t of topLevelTerms) {
+		topLevelTermMultMap.set(t.componentId, t.multiplier);
+	}
 
 	const elements: LayoutNetlistElement[] = [];
 	const seenIds = new Set<string>();
-	const unknownHints: Array<{ index: number; symbol?: string }> = [];
+	const unknownHints: Array<{
+		index: number;
+		symbol?: string;
+		multiplier: number;
+	}> = [];
 
 	(obj.elements as unknown[]).forEach((raw, idx) => {
 		const prefix = `Element[${idx}]`;
@@ -772,29 +869,79 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 			}
 		}
 
-		// Detect unknown-value markers on element
+		// Detect unknown-value markers & algebraic scaled expressions (e.g. "V", "2V", "-0.5V")
 		const rawValTrimmed = typeof raw.value === 'string' ? raw.value.trim() : '';
 		const isUnknownPlaceholder =
 			rawValTrimmed === '?' || rawValTrimmed.toLowerCase() === 'unknown';
+		const explicitlyKnown = raw.unknown === false;
 		const matchesTopLevelUnknown =
 			topLevelUnknownRef !== undefined &&
 			(elId === topLevelUnknownRef || labelStr === topLevelUnknownRef);
-		const isMarkedUnknown =
-			raw.unknown === true || isUnknownPlaceholder || matchesTopLevelUnknown;
+		const topLevelTermMult =
+			(elId !== undefined ? topLevelTermMultMap.get(elId) : undefined) ??
+			(labelStr !== '' ? topLevelTermMultMap.get(labelStr) : undefined);
+		const explicitMultiplier =
+			typeof raw.unknownMultiplier === 'number' &&
+			Number.isFinite(raw.unknownMultiplier) &&
+			Math.abs(raw.unknownMultiplier) > 1e-15
+				? raw.unknownMultiplier
+				: undefined;
 
 		let unknownSymbol =
 			typeof raw.unknownSymbol === 'string' && raw.unknownSymbol.trim() !== ''
 				? raw.unknownSymbol.trim()
 				: undefined;
 
-		// Validate value (allowing "?" / "unknown" / symbolic placeholder when element is marked unknown)
+		let algebraicParsed: { multiplier: number; symbol: string } | null = null;
+		if (kind !== 'ground' && kind !== 'terminal' && rawValTrimmed !== '' && !isUnknownPlaceholder) {
+			if (raw.unknown === true || matchesTopLevelUnknown || topLevelTermMult !== undefined) {
+				algebraicParsed =
+					parseAlgebraicUnknownValue(
+						rawValTrimmed,
+						unknownSymbol ?? topLevelUnknownSymbol
+					) ?? parseAlgebraicUnknownValue(rawValTrimmed);
+			} else if (!explicitlyKnown) {
+				if (topLevelUnknownSymbol) {
+					algebraicParsed = parseAlgebraicUnknownValue(
+						rawValTrimmed,
+						topLevelUnknownSymbol
+					);
+				}
+				if (
+					!algebraicParsed &&
+					parseEngineeringNumber(rawValTrimmed) === null &&
+					parseComplexValue(rawValTrimmed) === null
+				) {
+					algebraicParsed = parseAlgebraicUnknownValue(rawValTrimmed);
+				}
+			}
+		}
+
+		const isMarkedUnknown =
+			kind !== 'ground' &&
+			kind !== 'terminal' &&
+			(raw.unknown === true ||
+				isUnknownPlaceholder ||
+				matchesTopLevelUnknown ||
+				topLevelTermMult !== undefined ||
+				algebraicParsed !== null);
+
+		const resolvedMultiplier =
+			explicitMultiplier ?? topLevelTermMult ?? algebraicParsed?.multiplier ?? 1;
+		if (!unknownSymbol && algebraicParsed?.symbol) {
+			unknownSymbol = algebraicParsed.symbol;
+		}
+
+		// Validate value (allowing "?" / "unknown" / algebraic expression when element is marked unknown)
 		let valueStr = '';
 		if (kind === 'ground' || kind === 'terminal') {
 			valueStr = typeof raw.value === 'string' ? raw.value.trim() : '0';
 		} else if (isMarkedUnknown) {
-			if (typeof raw.value === 'number' && Number.isFinite(raw.value) && raw.value > 0) {
+			if (algebraicParsed !== null || isUnknownPlaceholder || rawValTrimmed === '') {
+				valueStr = '1';
+			} else if (typeof raw.value === 'number' && Number.isFinite(raw.value) && raw.value > 0) {
 				valueStr = String(raw.value);
-			} else if (rawValTrimmed !== '' && !isUnknownPlaceholder) {
+			} else {
 				const validAsKnown = PASSIVE_KINDS.has(kind)
 					? (() => {
 							const n = parseEngineeringNumber(rawValTrimmed);
@@ -810,8 +957,6 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 					if (!unknownSymbol) unknownSymbol = rawValTrimmed;
 					valueStr = '1';
 				}
-			} else {
-				valueStr = '1';
 			}
 		} else {
 			if (typeof raw.value === 'number' && Number.isFinite(raw.value)) {
@@ -876,12 +1021,12 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 		if (isMarkedUnknown) {
 			el.unknown = true;
 			if (unknownSymbol) el.unknownSymbol = unknownSymbol;
-			if (unknownHints.length === 0 && kind !== 'ground' && kind !== 'terminal') {
-				unknownHints.push({
-					index: elements.length,
-					symbol: unknownSymbol ?? (labelStr || undefined)
-				});
-			}
+			el.unknownMultiplier = resolvedMultiplier;
+			unknownHints.push({
+				index: elements.length,
+				symbol: unknownSymbol ?? (labelStr || undefined),
+				multiplier: resolvedMultiplier
+			});
 		}
 
 		elements.push(el);
@@ -895,28 +1040,32 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 
 	// Normalize unknownProblem (accepting full `obj.unknownProblem` OR shorthand `obj.constraint` + element `unknown: true`)
 	let rawUnknownProblem: UnknownProblemSpec | undefined;
-	if (isPlainObject(obj.unknownProblem)) {
-		const up = obj.unknownProblem;
+	if (rawTopUnknown) {
 		const parsedConstraint = parseConstraintObject(
-			up.constraint,
+			rawTopUnknown.constraint,
 			warnings,
 			'unknownProblem.constraint'
 		);
 		const compRef =
-			typeof up.componentId === 'string' && up.componentId.trim() !== ''
-				? up.componentId.trim()
-				: firstUnknownElementHint !== null
-					? (elements[firstUnknownElementHint.index]?.id ??
-						elements[firstUnknownElementHint.index]?.label ??
-						'')
-					: '';
-		if (parsedConstraint && compRef) {
+			topLevelUnknownRef ??
+			(topLevelTerms[0]?.componentId || '') ??
+			(firstUnknownElementHint !== null
+				? (elements[firstUnknownElementHint.index]?.id ??
+					elements[firstUnknownElementHint.index]?.label ??
+					'')
+				: '');
+		const resolvedCompRef =
+			compRef ||
+			(firstUnknownElementHint !== null
+				? (elements[firstUnknownElementHint.index]?.id ??
+					elements[firstUnknownElementHint.index]?.label ??
+					'')
+				: '');
+		if (parsedConstraint && resolvedCompRef) {
 			rawUnknownProblem = {
-				componentId: compRef,
-				symbol:
-					typeof up.symbol === 'string' && up.symbol.trim()
-						? up.symbol.trim()
-						: firstUnknownElementHint?.symbol,
+				componentId: resolvedCompRef,
+				symbol: topLevelUnknownSymbol ?? firstUnknownElementHint?.symbol,
+				...(topLevelTerms.length > 0 ? { terms: topLevelTerms } : {}),
 				constraint: parsedConstraint
 			};
 		}
@@ -973,6 +1122,32 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 			if (fallbackComp) resolvedCompId = fallbackComp.id;
 		}
 
+		// Merge explicit top-level terms + all per-element unknownHints, deduplicating by resolved componentId
+		const mergedTerms: UnknownTerm[] = [];
+		const seenTermCompIds = new Set<string>();
+		const pushResolvedTerm = (compId: string | null, multiplier: number) => {
+			if (!compId || seenTermCompIds.has(compId)) return;
+			if (!Number.isFinite(multiplier) || Math.abs(multiplier) <= 1e-15) return;
+			seenTermCompIds.add(compId);
+			mergedTerms.push({ componentId: compId, multiplier });
+		};
+
+		if (rawUnknownProblem.terms) {
+			for (const t of rawUnknownProblem.terms) {
+				pushResolvedTerm(resolveCompId(t.componentId), t.multiplier);
+			}
+		}
+		for (const hint of unknownHints) {
+			const el = elements[hint.index];
+			const ref = el?.id ?? el?.label ?? '';
+			const resolved = ref ? resolveCompId(ref) : null;
+			pushResolvedTerm(resolved, hint.multiplier);
+		}
+		if (resolvedCompId && !seenTermCompIds.has(resolvedCompId)) {
+			mergedTerms.unshift({ componentId: resolvedCompId, multiplier: 1 });
+			seenTermCompIds.add(resolvedCompId);
+		}
+
 		let resolvedTargetId: string | null = rawUnknownProblem.constraint.targetId;
 		if (rawUnknownProblem.constraint.kind === 'node_voltage') {
 			resolvedTargetId = nodeIdMap[resolvedTargetId] ?? resolvedTargetId;
@@ -981,9 +1156,14 @@ function parseAiNetlistFormat(obj: Record<string, unknown>): CircuitImportResult
 		}
 
 		if (resolvedCompId && resolvedTargetId) {
+			const shouldAttachTerms =
+				mergedTerms.length >= 2 ||
+				(mergedTerms.length === 1 && Math.abs(mergedTerms[0].multiplier - 1) >= 1e-12) ||
+				Boolean(rawUnknownProblem.terms && rawUnknownProblem.terms.length > 0);
 			document.unknownProblem = {
 				componentId: resolvedCompId,
 				symbol: rawUnknownProblem.symbol,
+				...(shouldAttachTerms ? { terms: mergedTerms } : {}),
 				constraint: {
 					...rawUnknownProblem.constraint,
 					targetId: resolvedTargetId

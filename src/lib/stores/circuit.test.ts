@@ -227,4 +227,74 @@ describe('circuit reactive store', () => {
 		expect(circuit.loadPreset(PRESETS[1].id)).toBe(true);
 		expect(circuit.activeTool).toBe('select');
 	});
+
+	it('manages multi-term unknown linking, multiplier updates, unlinking, applySolvedUnknown + single undo, and deleteComponent cleanup', () => {
+		circuit.loadDocument({
+			schemaVersion: 1,
+			name: 'Multi Unknown Store Test',
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				{ id: 'V1', kind: 'voltage_source', label: 'V1', x: 0, y: 4, rotation: 90, value: '5' },
+				{ id: 'R1', kind: 'resistor', label: 'R1', x: 2, y: 2, rotation: 0, value: '2k' },
+				{ id: 'R2', kind: 'resistor', label: 'R2', x: 4, y: 4, rotation: 90, value: '4k' },
+				{ id: 'R3', kind: 'resistor', label: 'R3', x: 6, y: 2, rotation: 0, value: '2k' },
+				{ id: 'V2', kind: 'voltage_source', label: 'V2', x: 8, y: 4, rotation: 90, value: '5' },
+				{ id: 'G1', kind: 'ground', label: 'GND', x: 0, y: 6, rotation: 0, value: '0' }
+			],
+			wires: [{ id: 'w_gnd', points: [{ x: 0, y: 6 }, { x: 8, y: 6 }] }]
+		});
+
+		circuit.setUnknownProblem({
+			componentId: 'V1',
+			symbol: 'V',
+			terms: [{ componentId: 'V1', multiplier: 1 }],
+			constraint: { kind: 'branch_current', targetId: 'R2', value: '3m', label: 'I_o' }
+		});
+
+		// Incompatible passive component cannot be linked to source unknown
+		circuit.linkComponentToUnknown('R1', 2);
+		expect(circuit.document.unknownProblem?.terms).toHaveLength(1);
+
+		// Link compatible voltage source V2 with multiplier 2 -> V1 = V = 10 V, V2 = 2V = 20 V
+		circuit.linkComponentToUnknown('V2', 1);
+		circuit.setUnknownTermMultiplier('V2', 2);
+		expect(circuit.document.unknownProblem?.terms).toEqual([
+			{ componentId: 'V1', multiplier: 1 },
+			{ componentId: 'V2', multiplier: 2 }
+		]);
+		expect(circuit.solution.unknownSolution?.valid).toBe(true);
+		expect(circuit.solution.unknownSolution?.solutions[0].value.re).toBeCloseTo(10, 9);
+		expect(circuit.solution.unknownSolution?.solutions[0].termValues?.[1].value.re).toBeCloseTo(20, 9);
+
+		// applySolvedUnknown writes BOTH scaled values and clears unknownProblem in ONE undoable step
+		expect(circuit.applySolvedUnknown(0)).toBe(true);
+		expect(circuit.document.unknownProblem).toBeUndefined();
+		expect(circuit.document.components.find((c) => c.id === 'V1')?.value).toBe('10');
+		expect(circuit.document.components.find((c) => c.id === 'V2')?.value).toBe('20');
+
+		// Single undo restores both original values and unknownProblem.terms
+		expect(circuit.undo()).toBe(true);
+		expect(circuit.document.unknownProblem?.terms).toEqual([
+			{ componentId: 'V1', multiplier: 1 },
+			{ componentId: 'V2', multiplier: 2 }
+		]);
+		expect(circuit.document.components.find((c) => c.id === 'V1')?.value).toBe('5');
+		expect(circuit.document.components.find((c) => c.id === 'V2')?.value).toBe('5');
+
+		// Unlink primary V1 -> promotes V2 to primary componentId
+		circuit.unlinkComponentFromUnknown('V1');
+		expect(circuit.document.unknownProblem?.componentId).toBe('V2');
+		expect(circuit.document.unknownProblem?.terms).toEqual([{ componentId: 'V2', multiplier: 2 }]);
+
+		// Undo unlink, then delete V1 -> promotes V2 cleanly instead of clearing entire unknownProblem
+		expect(circuit.undo()).toBe(true);
+		circuit.deleteComponent('V1');
+		expect(circuit.document.unknownProblem?.componentId).toBe('V2');
+		expect(circuit.document.unknownProblem?.terms).toEqual([{ componentId: 'V2', multiplier: 2 }]);
+
+		// Deleting last remaining unknown component V2 clears unknownProblem
+		circuit.deleteComponent('V2');
+		expect(circuit.document.unknownProblem).toBeUndefined();
+	});
 });

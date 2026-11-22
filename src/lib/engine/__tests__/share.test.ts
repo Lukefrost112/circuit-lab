@@ -397,4 +397,60 @@ describe('Shareable Circuit URL Codec (share.ts)', () => {
 		expect(decoded?.theveninTarget).toBeUndefined();
 		expect(decoded?.unitSystem).toBeUndefined();
 	});
+
+	it('round-trips a multi-term unknown circuit (V & 2V) through compressed #c=v1. hash intact', async () => {
+		const multiDoc: CircuitDocument = {
+			schemaVersion: 1,
+			id: 'multi-unknown-share',
+			name: 'Coupled V and 2V Share Test',
+			mode: 'dc',
+			frequencyHz: 60,
+			unitSystem: 'kohm-v-ma',
+			components: [
+				{ id: 'V1', kind: 'voltage_source', label: 'V1', x: 0, y: 4, rotation: 90, value: '1' },
+				{ id: 'R1', kind: 'resistor', label: 'R1', x: 2, y: 2, rotation: 0, value: '2k' },
+				{ id: 'R2', kind: 'resistor', label: 'R2', x: 4, y: 4, rotation: 90, value: '4k' },
+				{ id: 'R3', kind: 'resistor', label: 'R3', x: 6, y: 2, rotation: 0, value: '2k' },
+				{ id: 'V2', kind: 'voltage_source', label: 'V2', x: 8, y: 4, rotation: 90, value: '1' },
+				{ id: 'G1', kind: 'ground', label: 'GND', x: 0, y: 6, rotation: 0, value: '0' }
+			],
+			wires: [{ id: 'w_gnd', points: [{ x: 0, y: 6 }, { x: 8, y: 6 }] }],
+			unknownProblem: {
+				componentId: 'V1',
+				symbol: 'V',
+				terms: [
+					{ componentId: 'V1', multiplier: 1 },
+					{ componentId: 'V2', multiplier: 2 }
+				],
+				constraint: {
+					kind: 'branch_current',
+					targetId: 'R2',
+					value: '3m',
+					label: 'I_o'
+				}
+			}
+		};
+
+		const origSol = solveCircuit(multiDoc);
+		expect(origSol.unknownSolution?.valid).toBe(true);
+		expect(origSol.unknownSolution?.solutions[0].value.re).toBeCloseTo(10, 9);
+
+		const hash = await encodeCircuitToHash({ document: multiDoc, unitSystem: 'kohm-v-ma' });
+		expect(hash.startsWith('#c=v1.')).toBe(true);
+
+		const decoded = await decodeCircuitFromHash(hash);
+		expect(decoded).not.toBeNull();
+		if (!decoded) return;
+
+		expect(decoded.document.unknownProblem?.terms).toEqual([
+			{ componentId: 'V1', multiplier: 1 },
+			{ componentId: 'V2', multiplier: 2 }
+		]);
+
+		const decodedSol = solveCircuit(decoded.document);
+		expect(decodedSol.unknownSolution?.valid).toBe(true);
+		expect(decodedSol.unknownSolution?.solutions[0].value.re).toBeCloseTo(10, 9);
+		expect(decodedSol.unknownSolution?.solutions[0].termValues?.[1].value.re).toBeCloseTo(20, 9);
+		expect(decodedSol.allVerified).toBe(true);
+	});
 });

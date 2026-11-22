@@ -14,6 +14,7 @@
 	import { AI_CIRCUIT_IMPORT_PROMPT, parseCircuitImport } from '$lib/engine/io';
 	import type { CircuitDocument, ConstraintKind } from '$lib/engine/types';
 	import { UNIT_SYSTEMS } from '$lib/engine/units';
+	import { formatUnknownTermExpr, getUnknownTerms } from '$lib/engine/unknown-solver';
 	import { AC_ENABLED } from '$lib/env';
 	import { cn } from '$lib/utils';
 
@@ -267,11 +268,28 @@
 									{/if}
 									{#if detectedUnknown}
 										{@const sym = detectedUnknown.symbol || detectedUnknown.componentId}
+										{@const detectedTerms = getUnknownTerms(detectedUnknown)}
+										{@const termsSummary =
+											detectedTerms.length >= 2
+												? detectedTerms
+														.map((t) => {
+															const compLabel =
+																parseResult.document.components.find(
+																	(c) => c.id === t.componentId
+																)?.label ?? t.componentId;
+															return `${compLabel} = ${formatUnknownTermExpr(t.multiplier, sym)}`;
+														})
+														.join(', ')
+												: ''}
 										{@const cLabel =
 											detectedUnknown.constraint.label ||
 											`${CONSTRAINT_KIND_LABELS[detectedUnknown.constraint.kind]}(${detectedUnknown.constraint.targetId})`}
 										<span>
-											Unknown: Find {sym} (given {cLabel} = {detectedUnknown.constraint.value})
+											{#if termsSummary}
+												Unknown: Find {sym} ({termsSummary}; given {cLabel} = {detectedUnknown.constraint.value})
+											{:else}
+												Unknown: Find {sym} (given {cLabel} = {detectedUnknown.constraint.value})
+											{/if}
 										</span>
 									{/if}
 								</div>

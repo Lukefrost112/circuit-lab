@@ -3,7 +3,14 @@ import { Complex } from '../complex';
 import { exportCircuitJson, parseCircuitImport } from '../io';
 import { solveCircuit } from '../solve';
 import type { CircuitComponent, CircuitDocument } from '../types';
-import { formatLatexResidual, solveUnknownParameter } from '../unknown-solver';
+import {
+	formatLatexResidual,
+	formatUnknownTermExpr,
+	formatUnknownTermLatex,
+	getUnknownTerms,
+	parseAlgebraicUnknownValue,
+	solveUnknownParameter
+} from '../unknown-solver';
 
 function comp(
 	id: string,
@@ -467,5 +474,347 @@ describe('solveUnknownParameter — Exact Analytical Inverse Circuit Solver', ()
 		if (reimported.ok) {
 			expect(reimported.document.unknownProblem).toEqual(doc.unknownProblem);
 		}
+	});
+
+	it('11. Multi-term helpers: getUnknownTerms, formatUnknownTermExpr/Latex, parseAlgebraicUnknownValue', () => {
+		expect(
+			getUnknownTerms({
+				componentId: 'V1',
+				constraint: { kind: 'branch_current', targetId: 'R1', value: '1m' }
+			})
+		).toEqual([{ componentId: 'V1', multiplier: 1 }]);
+
+		expect(
+			getUnknownTerms({
+				componentId: 'V1',
+				terms: [
+					{ componentId: 'V1', multiplier: 1 },
+					{ componentId: 'V2', multiplier: 2 },
+					{ componentId: 'V2', multiplier: 5 }, // duplicate ignored
+					{ componentId: 'V3', multiplier: 0 } // zero ignored
+				],
+				constraint: { kind: 'branch_current', targetId: 'R1', value: '1m' }
+			})
+		).toEqual([
+			{ componentId: 'V1', multiplier: 1 },
+			{ componentId: 'V2', multiplier: 2 }
+		]);
+
+		expect(formatUnknownTermExpr(1, 'V')).toBe('V');
+		expect(formatUnknownTermExpr(-1, 'V')).toBe('-V');
+		expect(formatUnknownTermExpr(2, 'V')).toBe('2V');
+		expect(formatUnknownTermExpr(0.5, 'V')).toBe('0.5V');
+		expect(formatUnknownTermExpr(2.000000001, 'V')).toBe('2V');
+		expect(formatUnknownTermLatex(2, 'V_s')).toBe('2V_s');
+		expect(formatUnknownTermLatex(-1, 'V_s')).toBe('-V_s');
+
+		expect(parseAlgebraicUnknownValue('V')).toEqual({ multiplier: 1, symbol: 'V' });
+		expect(parseAlgebraicUnknownValue('2V')).toEqual({ multiplier: 2, symbol: 'V' });
+		expect(parseAlgebraicUnknownValue('2*V')).toEqual({ multiplier: 2, symbol: 'V' });
+		expect(parseAlgebraicUnknownValue('2 V')).toEqual({ multiplier: 2, symbol: 'V' });
+		expect(parseAlgebraicUnknownValue('-V')).toEqual({ multiplier: -1, symbol: 'V' });
+		expect(parseAlgebraicUnknownValue('-0.5V')).toEqual({ multiplier: -0.5, symbol: 'V' });
+		expect(parseAlgebraicUnknownValue('3.5R_x')).toEqual({ multiplier: 3.5, symbol: 'R_x' });
+		expect(parseAlgebraicUnknownValue('1/2 V')).toEqual({ multiplier: 0.5, symbol: 'V' });
+		expect(parseAlgebraicUnknownValue('2V', 'V')).toEqual({ multiplier: 2, symbol: 'V' });
+
+		// Reject engineering numbers, SI suffixes, phasors, and placeholders
+		expect(parseAlgebraicUnknownValue('10k')).toBeNull();
+		expect(parseAlgebraicUnknownValue('2m')).toBeNull();
+		expect(parseAlgebraicUnknownValue('4.7u')).toBeNull();
+		expect(parseAlgebraicUnknownValue('100')).toBeNull();
+		expect(parseAlgebraicUnknownValue('1e-3')).toBeNull();
+		expect(parseAlgebraicUnknownValue('120∠30°')).toBeNull();
+		expect(parseAlgebraicUnknownValue('?')).toBeNull();
+		expect(parseAlgebraicUnknownValue('2mA')).toBeNull();
+		expect(parseAlgebraicUnknownValue('10kΩ')).toBeNull();
+		expect(parseAlgebraicUnknownValue('4.7uF')).toBeNull();
+		expect(parseAlgebraicUnknownValue('0V')).toBeNull();
+	});
+
+	it('12. Multi-source DC: V1 = V and V2 = 2V given branch current I(R2) solves exact V and verifies all methods', () => {
+		// V1 (N1 -> 0) = V, R1 = 2k (N1 -> N2), R2 = 4k (N2 -> 0), R3 = 2k (N2 -> N3), V2 (N3 -> 0) = 2V
+		// KCL at N2: (V_N2 - V)/2k + V_N2/4k + (V_N2 - 2V)/2k = 0
+		// Multiply by 4k: 2(V_N2 - V) + V_N2 + 2(V_N2 - 2V) = 0 => 5 V_N2 = 6 V => V_N2 = 1.2 V
+		// I(R2) = V_N2 / 4k = 1.2 V / 4k = 0.3e-3 * V.
+		// Target I(R2) = 3mA => V = 10 V, V1 = 10 V, V2 = 20 V, V_N2 = 12 V.
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			name: 'Coupled Sources V and 2V',
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', 0, 4, 90, '1'),
+				comp('R1', 'resistor', 2, 2, 0, '2k'),
+				comp('R2', 'resistor', 4, 4, 90, '4k'),
+				comp('R3', 'resistor', 6, 2, 0, '2k'),
+				comp('V2', 'voltage_source', 8, 4, 90, '1'),
+				comp('G1', 'ground', 0, 6, 0, '0')
+			],
+			wires: [wire('w_gnd', [0, 6], [8, 6])],
+			unknownProblem: {
+				componentId: 'V1',
+				symbol: 'V',
+				terms: [
+					{ componentId: 'V1', multiplier: 1 },
+					{ componentId: 'V2', multiplier: 2 }
+				],
+				constraint: { kind: 'branch_current', targetId: 'R2', value: '3m', label: 'I_o' }
+			}
+		};
+
+		const full = solveCircuit(doc);
+		expect(full.unknownSolution?.valid).toBe(true);
+		expect(full.unknownSolution?.solutions).toHaveLength(1);
+		const sol0 = full.unknownSolution!.solutions[0];
+		expect(sol0.value.re).toBeCloseTo(10, 10);
+		expect(sol0.discrepancy).toBeLessThan(1e-10);
+		expect(sol0.verified).toBe(true);
+		expect(sol0.termValues).toHaveLength(2);
+		expect(sol0.termValues![0].value.re).toBeCloseTo(10, 10);
+		expect(sol0.termValues![1].value.re).toBeCloseTo(20, 10);
+		expect(full.mna.valid).toBe(true);
+		expect(full.mna.branches['V1'].voltage.re).toBeCloseTo(10, 10);
+		expect(full.mna.branches['V2'].voltage.re).toBeCloseTo(20, 10);
+		expect(full.mna.branches['R2'].current.re).toBeCloseTo(0.003, 10);
+		expect(full.mna.powerBalance.balanced).toBe(true);
+		expect(full.allVerified).toBe(true);
+		expect(full.maxDiscrepancy).toBeLessThan(1e-8);
+	});
+
+	it('13. Multi-source DC with negative multiplier: V1 = V and V2 = -0.5V', () => {
+		// KCL at N2: 2(V_N2 - V) + V_N2 + 2(V_N2 - (-0.5V)) = 0 => 5 V_N2 = V => V_N2 = 0.2 V
+		// Target V_N2 = 4 V => V = 20 V, V1 = 20 V, V2 = -10 V.
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', 0, 4, 90, '1'),
+				comp('R1', 'resistor', 2, 2, 0, '2k'),
+				comp('R2', 'resistor', 4, 4, 90, '4k'),
+				comp('R3', 'resistor', 6, 2, 0, '2k'),
+				comp('V2', 'voltage_source', 8, 4, 90, '1'),
+				comp('G1', 'ground', 0, 6, 0, '0')
+			],
+			wires: [wire('w_gnd', [0, 6], [8, 6])]
+		};
+
+		const res = solveUnknownParameter(doc, {
+			componentId: 'V1',
+			symbol: 'V',
+			terms: [
+				{ componentId: 'V1', multiplier: 1 },
+				{ componentId: 'V2', multiplier: -0.5 }
+			],
+			constraint: { kind: 'branch_voltage', targetId: 'R2', value: '4' }
+		});
+
+		expect(res.valid).toBe(true);
+		expect(res.solutions[0].value.re).toBeCloseTo(20, 10);
+		expect(res.solutions[0].termValues?.[1].value.re).toBeCloseTo(-10, 10);
+		expect(res.solutions[0].verified).toBe(true);
+		expect(res.solutions[0].discrepancy).toBeLessThan(1e-10);
+	});
+
+	it('14. Multi-source DC current sources: I1 = I and I2 = 3I', () => {
+		// I1 (0 -> N1) = I, I2 (0 -> N1) = 3I, R1 = 1k (N1 -> 0)
+		// Total current through R1 = 4I => V(R1) = 4k * I. Target V(R1) = 8 V => I = 2 mA, I1 = 2 mA, I2 = 6 mA.
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('I1', 'current_source', 0, 4, 270, '1m'),
+				comp('R1', 'resistor', 4, 4, 90, '1k'),
+				comp('I2', 'current_source', 8, 4, 270, '1m'),
+				comp('G1', 'ground', 0, 6, 0, '0')
+			],
+			wires: [wire('w_top', [0, 2], [8, 2]), wire('w_gnd', [0, 6], [8, 6])]
+		};
+
+		const res = solveUnknownParameter(doc, {
+			componentId: 'I1',
+			symbol: 'I',
+			terms: [
+				{ componentId: 'I1', multiplier: 1 },
+				{ componentId: 'I2', multiplier: 3 }
+			],
+			constraint: { kind: 'branch_voltage', targetId: 'R1', value: '8' }
+		});
+
+		expect(res.valid).toBe(true);
+		expect(res.solutions[0].value.re).toBeCloseTo(0.002, 10);
+		expect(res.solutions[0].termValues?.[0].value.re).toBeCloseTo(0.002, 10);
+		expect(res.solutions[0].termValues?.[1].value.re).toBeCloseTo(0.006, 10);
+		expect(res.solutions[0].verified).toBe(true);
+	});
+
+	it('15. AC phasor multi-source: V1 = V and V2 = 2V solves exact complex phasor', () => {
+		// V1 (N1 -> 0) = V, R1 = 100 (N1 -> N2), C1 = 10u (N2 -> 0) at ω = 1000 => Z_C = -j100
+		// R2 = 100 (N2 -> N3), V2 (N3 -> 0) = 2V
+		// KCL at N2: (V_N2 - V)/100 + V_N2/(-j100) + (V_N2 - 2V)/100 = 0
+		// => (2 + j) V_N2 = 3V => V_N2 = 3V / (2 + j).
+		// Choose V_target = 10∠30° => V_N2 = 3*(10∠30°)/(2+j). Setting V_N2_target = that yields exact V = 10∠30°!
+		const trueV = Complex.fromPolar(10, 30);
+		const targetVn2 = trueV.scale(3).div(Complex.from(2, 1));
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'ac',
+			frequencyHz: OMEGA_1000_HZ,
+			acMagnitudeMode: 'rms',
+			components: [
+				comp('V1', 'voltage_source', 0, 4, 90, '1'),
+				comp('R1', 'resistor', 2, 2, 0, '100'),
+				comp('C1', 'capacitor', 4, 4, 90, '10u'),
+				comp('R2', 'resistor', 6, 2, 0, '100'),
+				comp('V2', 'voltage_source', 8, 4, 90, '1'),
+				comp('G1', 'ground', 0, 6, 0, '0')
+			],
+			wires: [wire('w_gnd', [0, 6], [8, 6])]
+		};
+
+		const res = solveUnknownParameter(doc, {
+			componentId: 'V1',
+			symbol: 'V',
+			terms: [
+				{ componentId: 'V1', multiplier: 1 },
+				{ componentId: 'V2', multiplier: 2 }
+			],
+			constraint: {
+				kind: 'branch_voltage',
+				targetId: 'C1',
+				value: `${targetVn2.abs()}∠${targetVn2.argDeg()}°`
+			}
+		});
+
+		expect(res.valid).toBe(true);
+		expect(res.solutions[0].value.re).toBeCloseTo(trueV.re, 8);
+		expect(res.solutions[0].value.im).toBeCloseTo(trueV.im, 8);
+		expect(res.solutions[0].termValues?.[1].value.re).toBeCloseTo(2 * trueV.re, 8);
+		expect(res.solutions[0].termValues?.[1].value.im).toBeCloseTo(2 * trueV.im, 8);
+		expect(res.solutions[0].verified).toBe(true);
+		expect(res.solutions[0].discrepancy).toBeLessThan(1e-8);
+	});
+
+	it('16. Multi-source DC quadratic branch_power target: V1 = V and V2 = 2V yields both exact roots', () => {
+		// Same network as test 12: V_R2 = 1.2 * V, R2 = 4k => P(R2) = (1.2 V)^2 / 4000 = 0.00036 * V^2.
+		// Target P(R2) = 36mW => V^2 = 100 => V = +10 V and V = -10 V!
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', 0, 4, 90, '1'),
+				comp('R1', 'resistor', 2, 2, 0, '2k'),
+				comp('R2', 'resistor', 4, 4, 90, '4k'),
+				comp('R3', 'resistor', 6, 2, 0, '2k'),
+				comp('V2', 'voltage_source', 8, 4, 90, '1'),
+				comp('G1', 'ground', 0, 6, 0, '0')
+			],
+			wires: [wire('w_gnd', [0, 6], [8, 6])]
+		};
+
+		const res = solveUnknownParameter(doc, {
+			componentId: 'V1',
+			symbol: 'V',
+			terms: [
+				{ componentId: 'V1', multiplier: 1 },
+				{ componentId: 'V2', multiplier: 2 }
+			],
+			constraint: { kind: 'branch_power', targetId: 'R2', value: '36m' }
+		});
+
+		expect(res.valid).toBe(true);
+		expect(res.solutions).toHaveLength(2);
+		expect(res.solutions[0].value.re).toBeCloseTo(10, 9);
+		expect(res.solutions[1].value.re).toBeCloseTo(-10, 9);
+		expect(res.solutions[0].verified).toBe(true);
+		expect(res.solutions[1].verified).toBe(true);
+		expect(res.solutions[0].termValues?.[1].value.re).toBeCloseTo(20, 9);
+		expect(res.solutions[1].termValues?.[1].value.re).toBeCloseTo(-20, 9);
+	});
+
+	it('17. Multi-term scaled passives: R1 = R and R2 = 2R solved to < 1e-8 via coupled parametric solver', () => {
+		// V1 = 12 V (N1 -> 0), R1 = R (N1 -> N2), R2 = 2R (N2 -> 0), R3 = 3k (N2 -> 0)
+		// R_eq = R + (2R || 3k).
+		// When R = 1.5k (1500 Ω): R1 = 1.5k, R2 = 3k, R2 || R3 = 1.5k => V(N2) = 12 * 1.5k / (1.5k + 1.5k) = 6 V!
+		// And I(R1) = 12 / 3k = 4 mA!
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', 0, 4, 90, '12'),
+				comp('R1', 'resistor', 2, 2, 0, '1k'),
+				comp('R2', 'resistor', 4, 4, 90, '1k'),
+				comp('R3', 'resistor', 8, 4, 90, '3k'),
+				comp('G1', 'ground', 0, 6, 0, '0')
+			],
+			wires: [wire('w_top', [4, 2], [8, 2]), wire('w_gnd', [0, 6], [8, 6])],
+			unknownProblem: {
+				componentId: 'R1',
+				symbol: 'R',
+				terms: [
+					{ componentId: 'R1', multiplier: 1 },
+					{ componentId: 'R2', multiplier: 2 }
+				],
+				constraint: { kind: 'branch_voltage', targetId: 'R3', value: '6' }
+			}
+		};
+
+		const full = solveCircuit(doc);
+		expect(full.unknownSolution?.valid).toBe(true);
+		expect(full.unknownSolution?.solutions).toHaveLength(1);
+		const sol0 = full.unknownSolution!.solutions[0];
+		expect(sol0.value.re).toBeCloseTo(1500, 6);
+		expect(sol0.termValues?.[0].value.re).toBeCloseTo(1500, 6);
+		expect(sol0.termValues?.[1].value.re).toBeCloseTo(3000, 6);
+		expect(sol0.discrepancy).toBeLessThan(1e-8);
+		expect(sol0.verified).toBe(true);
+		expect(full.mna.valid).toBe(true);
+		expect(full.mna.branches['R3'].voltage.re).toBeCloseTo(6, 8);
+		expect(full.mna.powerBalance.balanced).toBe(true);
+		expect(full.allVerified).toBe(true);
+		expect(full.maxDiscrepancy).toBeLessThan(1e-8);
+	});
+
+	it('18. Rejects incompatible mixed source + passive terms and non-positive passive multipliers cleanly', () => {
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', 0, 4, 90, '12'),
+				comp('R1', 'resistor', 2, 2, 0, '2k'),
+				comp('R2', 'resistor', 4, 4, 90, '4k'),
+				comp('G1', 'ground', 0, 6, 0, '0')
+			],
+			wires: [wire('w_gnd', [0, 6], [4, 6])]
+		};
+
+		const mixedRes = solveUnknownParameter(doc, {
+			componentId: 'V1',
+			symbol: 'X',
+			terms: [
+				{ componentId: 'V1', multiplier: 1 },
+				{ componentId: 'R1', multiplier: 2 }
+			],
+			constraint: { kind: 'branch_current', targetId: 'R2', value: '2m' }
+		});
+		expect(mixedRes.valid).toBe(false);
+		expect(mixedRes.error).toMatch(/mix independent sources and passive/i);
+
+		const negPassiveRes = solveUnknownParameter(doc, {
+			componentId: 'R1',
+			symbol: 'R',
+			terms: [
+				{ componentId: 'R1', multiplier: 1 },
+				{ componentId: 'R2', multiplier: -2 }
+			],
+			constraint: { kind: 'branch_current', targetId: 'R2', value: '2m' }
+		});
+		expect(negPassiveRes.valid).toBe(false);
+		expect(negPassiveRes.error).toMatch(/strictly positive/i);
 	});
 });

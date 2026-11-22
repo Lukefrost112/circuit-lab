@@ -21,8 +21,10 @@
 	import { Button, Separator, Tooltip } from '$lib/components/ui';
 	import {
 		Complex,
+		formatUnknownTermExpr,
 		getDefaultUnknownSymbol,
 		getPinPositions,
+		getUnknownTerms,
 		type CircuitComponent,
 		type CircuitWire,
 		type ComponentKind,
@@ -1954,29 +1956,41 @@
 				{@const isThevenin =
 					circuit.theveninTarget?.kind === 'component' &&
 					circuit.theveninTarget.componentId === comp.id}
-				{@const isUnknownComp = circuit.document.unknownProblem?.componentId === comp.id}
+				{@const unknownTerm =
+					getUnknownTerms(circuit.document.unknownProblem).find(
+						(t) => t.componentId === comp.id
+					) ?? null}
+				{@const isUnknownComp = unknownTerm !== null}
 				{@const unknownSym =
 					circuit.document.unknownProblem?.symbol?.trim() || getDefaultUnknownSymbol(comp.kind)}
-				{@const unknownSolvedVal =
+				{@const unknownTermExpr = unknownTerm
+					? formatUnknownTermExpr(unknownTerm.multiplier, unknownSym)
+					: unknownSym}
+				{@const unknownSolvedTermValueString =
 					isUnknownComp &&
 					circuit.solution.unknownSolution?.valid &&
 					circuit.solution.unknownSolution.solutions.length > 0
-						? formatComponentDisplayValue(
-								{
-									...comp,
-									value: circuit.solution.unknownSolution.solutions[0].valueString,
-									phaseDeg: undefined
-								},
-								circuit.document.mode,
-								settings.unitSystem
-							)
+						? (circuit.solution.unknownSolution.solutions[0].termValues?.find(
+								(tv) => tv.componentId === comp.id
+							)?.valueString ?? circuit.solution.unknownSolution.solutions[0].valueString)
 						: null}
+				{@const unknownSolvedVal = unknownSolvedTermValueString
+					? formatComponentDisplayValue(
+							{
+								...comp,
+								value: unknownSolvedTermValueString,
+								phaseDeg: undefined
+							},
+							circuit.document.mode,
+							settings.unitSystem
+						)
+					: null}
 				{@const pins = getPinPositions(renderComp)}
 				{@const labelLayout = getComponentLabelLayout(renderComp)}
 				{@const displayVal = isUnknownComp
 					? unknownSolvedVal
-						? `${unknownSym}? (${unknownSolvedVal})`
-						: `${unknownSym} = ?`
+						? `${unknownTermExpr}? (${unknownSolvedVal})`
+						: `${unknownTermExpr} = ?`
 					: formatComponentDisplayValue(comp, circuit.document.mode, settings.unitSystem)}
 				{@const isVertical = comp.rotation === 90 || comp.rotation === 270}
 				{@const isOnePinComp = comp.kind === 'ground' || comp.kind === 'terminal'}

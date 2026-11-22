@@ -1,10 +1,13 @@
 <script lang="ts">
-	import { Eraser, RotateCw, Target, Trash2 } from 'lucide-svelte';
+	import { Eraser, RotateCw, Target, Trash2, X } from 'lucide-svelte';
 	import { CircuitSymbol } from '$lib/components/symbols';
 	import { Button, Input, Label, Select, Switch } from '$lib/components/ui';
 	import {
+		areUnknownKindsCompatible,
 		formatEngineering,
+		formatUnknownTermExpr,
 		getDefaultUnknownSymbol,
+		getUnknownTerms,
 		parseComplexValue,
 		type ComponentKind,
 		type ConstraintKind
@@ -41,6 +44,8 @@
 	let sourceFreqDraft = $state('');
 	let globalFreqDraft = $state(String(circuit.document.frequencyHz));
 	let unknownSymbolDraft = $state('');
+	let selectedMultiplierDraft = $state('1');
+	let linkSelectValue = $state('');
 
 	$effect(() => {
 		if (selectedComp) {
@@ -87,16 +92,41 @@
 	);
 
 	const activeUnknownProblem = $derived(circuit.document.unknownProblem);
-	const isUnknownComp = $derived(
-		selectedComp !== null && activeUnknownProblem?.componentId === selectedComp.id
+	const activeUnknownTerms = $derived(getUnknownTerms(activeUnknownProblem));
+	const selectedUnknownTerm = $derived(
+		selectedComp
+			? (activeUnknownTerms.find((t) => t.componentId === selectedComp.id) ?? null)
+			: null
+	);
+	const isUnknownComp = $derived(selectedUnknownTerm !== null);
+	const primaryUnknownComp = $derived(
+		activeUnknownTerms.length > 0
+			? (circuit.document.components.find((c) => c.id === activeUnknownTerms[0].componentId) ??
+				null)
+			: null
+	);
+	const activeUnknownSymbol = $derived(
+		activeUnknownProblem?.symbol?.trim() ||
+			(primaryUnknownComp ? getDefaultUnknownSymbol(primaryUnknownComp.kind) : 'X')
+	);
+	const canLinkToActiveUnknown = $derived(
+		Boolean(
+			selectedComp &&
+				activeUnknownProblem &&
+				!isUnknownComp &&
+				primaryUnknownComp &&
+				areUnknownKindsCompatible(primaryUnknownComp.kind, selectedComp.kind)
+		)
 	);
 
 	$effect(() => {
 		if (selectedComp && isUnknownComp && activeUnknownProblem) {
 			unknownSymbolDraft =
 				activeUnknownProblem.symbol ?? getDefaultUnknownSymbol(selectedComp.kind);
+			selectedMultiplierDraft = String(selectedUnknownTerm?.multiplier ?? 1);
 		} else if (selectedComp) {
 			unknownSymbolDraft = getDefaultUnknownSymbol(selectedComp.kind);
+			selectedMultiplierDraft = '1';
 		}
 	});
 
@@ -174,12 +204,38 @@
 		return unknownCompId;
 	}
 
+	const linkableCompatibleOptions = $derived.by(() => {
+		if (!activeUnknownProblem || !primaryUnknownComp) return [];
+		const linkedIds = new Set(activeUnknownTerms.map((t) => t.componentId));
+		return twoTerminalComponents
+			.filter(
+				(c) => !linkedIds.has(c.id) && areUnknownKindsCompatible(primaryUnknownComp.kind, c.kind)
+			)
+			.map((c) => ({
+				value: c.id,
+				label: `${c.label} (${KIND_LABELS[c.kind]})`
+			}));
+	});
+
+	const selectedTermExprPreview = $derived.by(() => {
+		const num = Number(selectedMultiplierDraft);
+		const mult =
+			Number.isFinite(num) && Math.abs(num) > 1e-15
+				? num
+				: (selectedUnknownTerm?.multiplier ?? 1);
+		return formatUnknownTermExpr(mult, unknownSymbolDraft.trim() || activeUnknownSymbol);
+	});
+
 	function handleToggleUnknown(checked: boolean) {
 		if (!selectedComp || !isTwoTerminal) return;
 		if (!checked) {
 			if (isUnknownComp) {
-				circuit.clearUnknownProblem();
+				circuit.unlinkComponentFromUnknown(selectedComp.id);
 			}
+			return;
+		}
+		if (canLinkToActiveUnknown) {
+			circuit.linkComponentToUnknown(selectedComp.id, 1);
 			return;
 		}
 		const defaultKind: ConstraintKind = 'branch_current';
@@ -189,12 +245,40 @@
 		circuit.setUnknownProblem({
 			componentId: selectedComp.id,
 			symbol: defaultSym,
+			terms: [{ componentId: selectedComp.id, multiplier: 1 }],
 			constraint: {
 				kind: defaultKind,
 				targetId: defaultTargetId,
 				value: defaultValue
 			}
 		});
+	}
+
+	function commitSelectedMultiplier() {
+		if (!selectedComp || !selectedUnknownTerm) return;
+		const parsed = Number(selectedMultiplierDraft);
+		if (!Number.isFinite(parsed) || Math.abs(parsed) <= 1e-15 || (isPassive && parsed <= 0)) {
+			selectedMultiplierDraft = String(selectedUnknownTerm.multiplier);
+			return;
+		}
+		circuit.setUnknownTermMultiplier(selectedComp.id, parsed);
+	}
+
+	function handleInlineTermMultiplierCommit(compId: string, kind: ComponentKind, rawVal: string, inputEl: HTMLInputElement) {
+		const parsed = Number(rawVal);
+		const isPassiveTerm = kind === 'resistor' || kind === 'capacitor' || kind === 'inductor';
+		const current = activeUnknownTerms.find((t) => t.componentId === compId);
+		if (!Number.isFinite(parsed) || Math.abs(parsed) <= 1e-15 || (isPassiveTerm && parsed <= 0)) {
+			inputEl.value = String(current?.multiplier ?? 1);
+			return;
+		}
+		circuit.setUnknownTermMultiplier(compId, parsed);
+	}
+
+	function handleLinkCompatibleSelect(targetId: string) {
+		if (!targetId) return;
+		circuit.linkComponentToUnknown(targetId, 1);
+		linkSelectValue = '';
 	}
 
 	function commitUnknownSymbol() {
@@ -475,36 +559,160 @@
 			<div class="flex flex-col gap-3 px-4 py-3.5">
 				<div class="flex min-h-11 items-center justify-between gap-2 py-0.5 lg:min-h-0 lg:py-0">
 					<div class="flex flex-col gap-0.5">
-						<Label for="comp-unknown-toggle">Solve for Unknown (?)</Label>
+						<Label for="comp-unknown-toggle">
+							{#if isUnknownComp}
+								Unknown Parameter ({activeUnknownSymbol})
+							{:else if canLinkToActiveUnknown}
+								Link to Unknown {activeUnknownSymbol}
+							{:else}
+								Solve for Unknown (?)
+							{/if}
+						</Label>
 						<span class="text-[11px] text-muted-foreground">
-							Mark value as Unknown (?)
+							{#if isUnknownComp}
+								Assigned {selectedComp.label} = {selectedTermExprPreview}
+							{:else if canLinkToActiveUnknown}
+								Link {selectedComp.label} as a scaled multiple of {activeUnknownSymbol}
+							{:else}
+								Mark value as Unknown (?)
+							{/if}
 						</span>
 					</div>
 					<Switch
 						id="comp-unknown-toggle"
-						aria-label="Mark value as Unknown (?)"
+						aria-label={isUnknownComp
+							? `Unknown Parameter (${activeUnknownSymbol})`
+							: canLinkToActiveUnknown
+								? `Link to Unknown ${activeUnknownSymbol}`
+								: 'Mark value as Unknown (?)'}
 						checked={isUnknownComp}
 						onCheckedChange={handleToggleUnknown}
 					/>
 				</div>
 
-				{#if isUnknownComp && activeUnknownProblem}
+				{#if isUnknownComp && activeUnknownProblem && selectedUnknownTerm}
 					<div class="flex flex-col gap-2.5 border-t border-border pt-3">
-						<div class="flex flex-col gap-1.5">
-							<Label for="unknown-symbol">Unknown Symbol</Label>
-							<Input
-								id="unknown-symbol"
-								tabular
-								placeholder="e.g. V, Vs, Rx"
-								bind:value={unknownSymbolDraft}
-								onblur={commitUnknownSymbol}
-								onkeydown={(e) => {
-									if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
-								}}
-							/>
+						<div class="grid grid-cols-1 gap-2.5 min-[360px]:grid-cols-2">
+							<div class="flex flex-col gap-1.5">
+								<Label for="unknown-symbol">Unknown Symbol</Label>
+								<Input
+									id="unknown-symbol"
+									tabular
+									placeholder="e.g. V, Vs, Rx"
+									bind:value={unknownSymbolDraft}
+									onblur={commitUnknownSymbol}
+									onkeydown={(e) => {
+										if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
+									}}
+								/>
+							</div>
+
+							<div class="flex flex-col gap-1.5">
+								<div class="flex items-baseline justify-between gap-1">
+									<Label for="unknown-multiplier">Scale / Multiplier</Label>
+									<span class="font-engineering text-[11px] font-semibold text-warning">
+										= {selectedTermExprPreview}
+									</span>
+								</div>
+								<Input
+									id="unknown-multiplier"
+									type="number"
+									step="any"
+									min={isPassive ? '0.000001' : undefined}
+									tabular
+									placeholder="e.g. 1, 2, 0.5"
+									class="min-h-11 text-base lg:min-h-0 lg:text-xs"
+									bind:value={selectedMultiplierDraft}
+									onblur={commitSelectedMultiplier}
+									onkeydown={(e) => {
+										if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
+									}}
+								/>
+							</div>
 						</div>
 
-						<div class="flex flex-col gap-1.5">
+						<!-- Linked Elements List -->
+						<div class="flex flex-col gap-1.5 border-t border-border pt-2.5">
+							<div class="flex items-center justify-between gap-2">
+								<span class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+									Linked Elements ({activeUnknownTerms.length})
+								</span>
+							</div>
+
+							<div class="flex flex-col divide-y divide-border rounded-[4px] border border-border bg-surface-rail/40">
+								{#each activeUnknownTerms as term (term.componentId)}
+									{@const termComp = circuit.document.components.find(
+										(c) => c.id === term.componentId
+									)}
+									{#if termComp}
+										{@const termExpr = formatUnknownTermExpr(
+											term.multiplier,
+											activeUnknownSymbol
+										)}
+										<div class="flex items-center justify-between gap-2 px-2.5 py-1.5">
+											<div class="flex min-w-0 items-baseline gap-1.5 font-engineering text-xs">
+												<span class="font-semibold text-foreground">{termComp.label}</span>
+												<span class="text-muted-foreground">=</span>
+												<span class="font-semibold text-warning">{termExpr}</span>
+											</div>
+
+											<div class="flex shrink-0 items-center gap-1.5">
+												<input
+													type="number"
+													step="any"
+													min={termComp.kind === 'resistor' ||
+													termComp.kind === 'capacitor' ||
+													termComp.kind === 'inductor'
+														? '0.000001'
+														: undefined}
+													aria-label="Scale multiplier for {termComp.label}"
+													value={term.multiplier}
+													class="font-engineering h-11 min-h-11 w-20 rounded-[4px] border border-input bg-card px-2 text-right text-base text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:h-6 lg:min-h-0 lg:w-14 lg:px-1.5 lg:text-xs"
+													onblur={(e) =>
+														handleInlineTermMultiplierCommit(
+															term.componentId,
+															termComp.kind,
+															e.currentTarget.value,
+															e.currentTarget
+														)}
+													onkeydown={(e) => {
+														if (e.key === 'Enter') e.currentTarget.blur();
+													}}
+												/>
+												<button
+													type="button"
+													aria-label="Unlink {termComp.label} from {activeUnknownSymbol}"
+													title="Unlink {termComp.label}"
+													class="inline-flex h-11 w-11 min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-[4px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:h-6 lg:w-6 lg:min-h-0 lg:min-w-0"
+													onclick={() =>
+														circuit.unlinkComponentFromUnknown(term.componentId)}
+												>
+													<X class="size-3.5" aria-hidden="true" />
+												</button>
+											</div>
+										</div>
+									{/if}
+								{/each}
+							</div>
+
+							{#if linkableCompatibleOptions.length > 0}
+								<Select
+									id="unknown-link-compatible"
+									aria-label="Link another compatible element"
+									value={linkSelectValue}
+									options={[
+										{ value: '', label: '+ Link another compatible element…' },
+										...linkableCompatibleOptions
+									]}
+									onchange={(e) => {
+										const val = (e.currentTarget as HTMLSelectElement).value;
+										handleLinkCompatibleSelect(val);
+									}}
+								/>
+							{/if}
+						</div>
+
+						<div class="flex flex-col gap-1.5 border-t border-border pt-2.5">
 							<Label for="unknown-constraint-kind">Given Measurement</Label>
 							<Select
 								id="unknown-constraint-kind"

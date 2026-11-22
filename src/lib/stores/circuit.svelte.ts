@@ -6,7 +6,9 @@
 
 import { PRESETS, getPresetById } from '$lib/data/presets';
 import {
+	areUnknownKindsCompatible,
 	buildElectricalGraph,
+	getUnknownTerms,
 	parseEngineeringNumber,
 	solveCircuit,
 	type AnalysisMode,
@@ -86,6 +88,9 @@ function cloneDocument(doc: CircuitDocument): CircuitDocument {
 		unknownProblem: doc.unknownProblem
 			? {
 					...doc.unknownProblem,
+					...(doc.unknownProblem.terms
+						? { terms: doc.unknownProblem.terms.map((t) => ({ ...t })) }
+						: {}),
 					constraint: { ...doc.unknownProblem.constraint }
 				}
 			: undefined
@@ -546,15 +551,32 @@ class CircuitStore {
 		this.recordSnapshot();
 
 		const up = this._document.unknownProblem;
-		const shouldClearUnknown =
-			up !== undefined &&
-			(up.componentId === id ||
-				(up.constraint.kind !== 'node_voltage' && up.constraint.targetId === id));
+		let nextUnknownProblem: UnknownProblemSpec | undefined = up;
+		if (up !== undefined) {
+			if (up.constraint.kind !== 'node_voltage' && up.constraint.targetId === id) {
+				nextUnknownProblem = undefined;
+			} else {
+				const terms = getUnknownTerms(up);
+				if (terms.some((t) => t.componentId === id)) {
+					const remaining = terms.filter((t) => t.componentId !== id);
+					if (remaining.length === 0) {
+						nextUnknownProblem = undefined;
+					} else {
+						nextUnknownProblem = {
+							...up,
+							componentId: up.componentId === id ? remaining[0].componentId : up.componentId,
+							terms: remaining,
+							constraint: { ...up.constraint }
+						};
+					}
+				}
+			}
+		}
 
 		this._document = {
 			...this._document,
 			components: this._document.components.filter((c) => c.id !== id),
-			unknownProblem: shouldClearUnknown ? undefined : this._document.unknownProblem
+			unknownProblem: nextUnknownProblem
 		};
 
 		if (this._selectedComponentId === id) {
@@ -746,6 +768,7 @@ class CircuitStore {
 			unknownProblem: problem
 				? {
 						...problem,
+						...(problem.terms ? { terms: problem.terms.map((t) => ({ ...t })) } : {}),
 						constraint: { ...problem.constraint }
 					}
 				: undefined
@@ -762,7 +785,122 @@ class CircuitStore {
 	}
 
 	/**
-	 * Writes the solved unknown value directly into the target component and clears
+	 * Links a compatible component to the active `unknownProblem` with the given scalar multiplier
+	 * (or updates its multiplier if already linked).
+	 */
+	linkComponentToUnknown(componentId: string, multiplier = 1): void {
+		const up = this._document.unknownProblem;
+		if (!up) return;
+		if (!Number.isFinite(multiplier) || Math.abs(multiplier) <= 1e-15) return;
+
+		const targetComp = this._document.components.find((c) => c.id === componentId);
+		if (!targetComp) return;
+
+		const currentTerms = getUnknownTerms(up);
+		const primaryComp = this._document.components.find(
+			(c) => c.id === (currentTerms[0]?.componentId ?? up.componentId)
+		);
+		if (!primaryComp) return;
+		if (!areUnknownKindsCompatible(primaryComp.kind, targetComp.kind)) return;
+
+		const isPassive =
+			targetComp.kind === 'resistor' ||
+			targetComp.kind === 'capacitor' ||
+			targetComp.kind === 'inductor';
+		if (isPassive && multiplier <= 0) return;
+
+		this.recordSnapshot();
+		const exists = currentTerms.some((t) => t.componentId === componentId);
+		const nextTerms = exists
+			? currentTerms.map((t) =>
+					t.componentId === componentId ? { componentId, multiplier } : { ...t }
+				)
+			: [...currentTerms.map((t) => ({ ...t })), { componentId, multiplier }];
+
+		this._document = {
+			...this._document,
+			unknownProblem: {
+				...up,
+				terms: nextTerms,
+				constraint: { ...up.constraint }
+			}
+		};
+	}
+
+	/**
+	 * Unlinks a component from the active `unknownProblem`.
+	 * Promotes the next remaining term to primary `componentId`, or clears `unknownProblem` if none remain.
+	 */
+	unlinkComponentFromUnknown(componentId: string): void {
+		const up = this._document.unknownProblem;
+		if (!up) return;
+
+		const currentTerms = getUnknownTerms(up);
+		if (!currentTerms.some((t) => t.componentId === componentId)) return;
+
+		this.recordSnapshot();
+		const remaining = currentTerms
+			.filter((t) => t.componentId !== componentId)
+			.map((t) => ({ ...t }));
+
+		if (remaining.length === 0) {
+			this._document = {
+				...this._document,
+				unknownProblem: undefined
+			};
+			return;
+		}
+
+		const nextPrimaryId =
+			up.componentId === componentId ? remaining[0].componentId : up.componentId;
+		this._document = {
+			...this._document,
+			unknownProblem: {
+				...up,
+				componentId: nextPrimaryId,
+				terms: remaining,
+				constraint: { ...up.constraint }
+			}
+		};
+	}
+
+	/**
+	 * Updates the scalar multiplier for an already-linked unknown term.
+	 */
+	setUnknownTermMultiplier(componentId: string, multiplier: number): void {
+		const up = this._document.unknownProblem;
+		if (!up) return;
+		if (!Number.isFinite(multiplier) || Math.abs(multiplier) <= 1e-15) return;
+
+		const targetComp = this._document.components.find((c) => c.id === componentId);
+		if (!targetComp) return;
+		const isPassive =
+			targetComp.kind === 'resistor' ||
+			targetComp.kind === 'capacitor' ||
+			targetComp.kind === 'inductor';
+		if (isPassive && multiplier <= 0) return;
+
+		const currentTerms = getUnknownTerms(up);
+		const existing = currentTerms.find((t) => t.componentId === componentId);
+		if (!existing) return;
+		if (Math.abs(existing.multiplier - multiplier) < 1e-15) return;
+
+		this.recordSnapshot();
+		const nextTerms = currentTerms.map((t) =>
+			t.componentId === componentId ? { componentId, multiplier } : { ...t }
+		);
+		this._document = {
+			...this._document,
+			unknownProblem: {
+				...up,
+				terms: nextTerms,
+				constraint: { ...up.constraint }
+			}
+		};
+	}
+
+	/**
+	 * Writes the solved unknown value(s) directly into all linked component(s) and clears
 	 * `unknownProblem` in a single undoable step.
 	 */
 	applySolvedUnknown(solutionIndex = 0): boolean {
@@ -771,26 +909,33 @@ class CircuitStore {
 		const candidate = unknownRes.solutions[solutionIndex];
 		if (!candidate) return false;
 
-		const target = this._document.components.find((c) => c.id === unknownRes.componentId);
-		if (!target) return false;
+		const updates = new Map<string, string>();
+		if (candidate.termValues && candidate.termValues.length > 0) {
+			for (const tv of candidate.termValues) {
+				updates.set(tv.componentId, tv.valueString);
+			}
+		} else {
+			updates.set(unknownRes.componentId, candidate.valueString);
+		}
+
+		const hasAnyTarget = this._document.components.some((c) => updates.has(c.id));
+		if (!hasAnyTarget) return false;
 
 		this.recordSnapshot();
-		const nextValue = candidate.valueString;
-		const nextNumeric = parseEngineeringNumber(nextValue) ?? undefined;
-
 		this._document = {
 			...this._document,
 			unknownProblem: undefined,
-			components: this._document.components.map((c) =>
-				c.id === target.id
-					? {
-							...c,
-							value: nextValue,
-							numericValue: nextNumeric,
-							phaseDeg: undefined
-						}
-					: c
-			)
+			components: this._document.components.map((c) => {
+				const nextValue = updates.get(c.id);
+				if (nextValue === undefined) return c;
+				const nextNumeric = parseEngineeringNumber(nextValue) ?? undefined;
+				return {
+					...c,
+					value: nextValue,
+					numericValue: nextNumeric,
+					phaseDeg: undefined
+				};
+			})
 		};
 		return true;
 	}
