@@ -133,7 +133,8 @@
 	});
 
 	function commitToolbarFrequency() {
-		const hz = Number(freqDraft);
+		const trimmed = String(freqDraft ?? '').trim();
+		const hz = trimmed === '' ? Number.NaN : Number(trimmed);
 		if (!Number.isFinite(hz) || hz <= 0) {
 			freqDraft = String(circuit.document.frequencyHz);
 			return;

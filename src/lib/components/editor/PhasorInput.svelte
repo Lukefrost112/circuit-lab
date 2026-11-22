@@ -142,8 +142,8 @@
 
 	const evaluation = $derived.by<Evaluation>(() => {
 		if (inputMode === 'polar') {
-			const magTrim = magDraft.trim();
-			const phaseTrim = phaseDraft.trim();
+			const magTrim = String(magDraft ?? '').trim();
+			const phaseTrim = String(phaseDraft ?? '').trim();
 			if (!magTrim) {
 				return { valid: false, error: 'Magnitude is required' };
 			}
@@ -441,9 +441,10 @@
 						inputmode="decimal"
 						placeholder="0"
 						{disabled}
-						bind:value={phaseDraft}
+						value={phaseDraft}
 						aria-invalid={!evaluation.valid ? 'true' : undefined}
-						oninput={() => {
+						oninput={(e) => {
+							phaseDraft = e.currentTarget.value;
 							dirtySinceSwitch = true;
 						}}
 						onfocus={() => handleFocus('phase')}

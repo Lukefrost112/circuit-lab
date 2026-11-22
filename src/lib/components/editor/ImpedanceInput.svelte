@@ -311,7 +311,7 @@
 				{kind === 'inductor' ? 'Inductive reactance magnitude' : 'Capacitive reactance magnitude'}
 			</label>
 			<div
-				class={`flex h-11 min-h-11 w-full items-stretch overflow-hidden rounded-[4px] border bg-card transition-colors duration-150 focus-within:ring-2 focus-within:ring-offset-1 focus-within:ring-offset-background lg:h-8 lg:min-h-0 ${
+				class={`flex h-auto min-h-11 w-full items-stretch overflow-hidden rounded-[4px] border bg-card transition-colors duration-150 focus-within:ring-2 focus-within:ring-offset-1 focus-within:ring-offset-background lg:h-8 lg:min-h-0 ${
 					!evaluation.valid
 						? 'border-destructive focus-within:ring-destructive'
 						: 'border-input hover:border-muted-foreground/50 focus-within:ring-ring'
@@ -337,7 +337,7 @@
 					onfocus={() => handleFocus('pure')}
 					onblur={() => handleBlur('pure')}
 					onkeydown={handleKeyDown}
-					class="font-engineering min-w-0 flex-1 bg-transparent px-2.5 py-1 text-base text-foreground placeholder:text-muted-foreground/80 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 lg:px-2 lg:text-xs"
+					class="font-engineering min-h-11 min-w-0 flex-1 bg-transparent px-2.5 py-1 text-base text-foreground placeholder:text-muted-foreground/80 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 lg:h-full lg:min-h-0 lg:px-2 lg:text-xs"
 				/>
 				<span
 					aria-hidden="true"

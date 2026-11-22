@@ -286,7 +286,8 @@
 	});
 
 	const selectedTermExprPreview = $derived.by(() => {
-		const num = Number(selectedMultiplierDraft);
+		const raw = String(selectedMultiplierDraft ?? '').trim();
+		const num = raw === '' ? Number.NaN : Number(raw);
 		const mult =
 			Number.isFinite(num) && Math.abs(num) > 1e-15
 				? num
@@ -324,7 +325,8 @@
 
 	function commitSelectedMultiplier() {
 		if (!selectedComp || !selectedUnknownTerm) return;
-		const parsed = Number(selectedMultiplierDraft);
+		const raw = String(selectedMultiplierDraft ?? '').trim();
+		const parsed = raw === '' ? Number.NaN : Number(raw);
 		if (!Number.isFinite(parsed) || Math.abs(parsed) <= 1e-15 || (isPassive && parsed <= 0)) {
 			selectedMultiplierDraft = String(selectedUnknownTerm.multiplier);
 			return;
@@ -333,7 +335,8 @@
 	}
 
 	function handleInlineTermMultiplierCommit(compId: string, kind: ComponentKind, rawVal: string, inputEl: HTMLInputElement) {
-		const parsed = Number(rawVal);
+		const raw = String(rawVal ?? '').trim();
+		const parsed = raw === '' ? Number.NaN : Number(raw);
 		const isPassiveTerm = kind === 'resistor' || kind === 'capacitor' || kind === 'inductor';
 		const current = activeUnknownTerms.find((t) => t.componentId === compId);
 		if (!Number.isFinite(parsed) || Math.abs(parsed) <= 1e-15 || (isPassiveTerm && parsed <= 0)) {
@@ -525,8 +528,9 @@
 
 	function commitSourceFrequency() {
 		if (!AC_ENABLED || !selectedComp || !isSource) return;
-		const trimmed = sourceFreqDraft.trim();
+		const trimmed = String(sourceFreqDraft ?? '').trim();
 		if (trimmed === '') {
+			sourceFreqDraft = '';
 			if (selectedComp.frequencyHz !== undefined) {
 				circuit.updateComponent(selectedComp.id, { frequencyHz: undefined });
 			}
@@ -545,7 +549,8 @@
 
 	function commitGlobalFrequency() {
 		if (!AC_ENABLED) return;
-		const hz = Number(globalFreqDraft);
+		const trimmed = String(globalFreqDraft ?? '').trim();
+		const hz = trimmed === '' ? Number.NaN : Number(trimmed);
 		if (!Number.isFinite(hz) || hz <= 0) {
 			globalFreqDraft = String(circuit.document.frequencyHz);
 			return;
