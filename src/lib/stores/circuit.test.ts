@@ -226,6 +226,22 @@ describe('circuit reactive store', () => {
 		circuit.activeTool = 'wire';
 		expect(circuit.loadPreset(PRESETS[1].id)).toBe(true);
 		expect(circuit.activeTool).toBe('select');
+
+		// documentLoadSeq increments on loadDocument even when doc.id is undefined (e.g. AI import / share URL)
+		const seqBefore = circuit.documentLoadSeq;
+		const { id: _omittedId, ...docWithoutId } = PRESETS[0].document;
+		expect('id' in docWithoutId).toBe(false);
+		circuit.loadDocument(docWithoutId);
+		expect(circuit.document.id).toBeUndefined();
+		expect(circuit.documentLoadSeq).toBe(seqBefore + 1);
+
+		// Reloading another id-less document also increments documentLoadSeq
+		circuit.loadDocument(docWithoutId);
+		expect(circuit.documentLoadSeq).toBe(seqBefore + 2);
+
+		// resetToDefault also increments documentLoadSeq
+		circuit.resetToDefault();
+		expect(circuit.documentLoadSeq).toBe(seqBefore + 3);
 	});
 
 	it('manages multi-term unknown linking, multiplier updates, unlinking, applySolvedUnknown + single undo, and deleteComponent cleanup', () => {

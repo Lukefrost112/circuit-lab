@@ -116,7 +116,7 @@
 	let settledZoom = $state(1);
 	let pan = $state({ x: 80, y: 60 });
 	let needsFit = $state(true);
-	let lastLoadedDocId = $state<string | undefined>(circuit.document.id);
+	let lastDocumentLoadSeq = $state(circuit.documentLoadSeq);
 
 	// Interaction states
 	let hoverGrid = $state<GridPoint | null>(null);
@@ -280,14 +280,12 @@
 		};
 	});
 
-	// Mark document for refit whenever switching to a different loaded document id
+	// Mark document for refit whenever a document is loaded (including AI imports / share URLs without an id)
 	$effect(() => {
-		const docId = circuit.document.id;
-		if (docId !== lastLoadedDocId) {
-			lastLoadedDocId = docId;
-			if (docId) {
-				needsFit = true;
-			}
+		const seq = circuit.documentLoadSeq;
+		if (seq !== lastDocumentLoadSeq) {
+			lastDocumentLoadSeq = seq;
+			needsFit = true;
 		}
 	});
 
@@ -394,11 +392,48 @@
 		let maxX = -Infinity;
 		let maxY = -Infinity;
 
+		const theveninCompId =
+			circuit.theveninTarget?.kind === 'component' ? circuit.theveninTarget.componentId : null;
+
 		for (const c of comps) {
-			minX = Math.min(minX, (c.x - 3) * GRID_SIZE);
-			maxX = Math.max(maxX, (c.x + 3) * GRID_SIZE);
-			minY = Math.min(minY, (c.y - 2.5) * GRID_SIZE);
-			maxY = Math.max(maxY, (c.y + 2.5) * GRID_SIZE);
+			const cx = c.x * GRID_SIZE;
+			const cy = c.y * GRID_SIZE;
+			const isVertical = c.rotation % 180 === 90;
+			const isThevenin = theveninCompId === c.id;
+			const valueText =
+				c.kind === 'ground' || c.kind === 'terminal' ? '' : getComponentDisplayMeta(c).displayVal;
+
+			if (c.kind === 'ground') {
+				const rightExtent = Math.max(3 * GRID_SIZE, 24 + c.label.length * 7.5);
+				minX = Math.min(minX, cx - 3 * GRID_SIZE);
+				maxX = Math.max(maxX, cx + rightExtent);
+				minY = Math.min(minY, cy - 2.5 * GRID_SIZE);
+				maxY = Math.max(maxY, cy + 2.5 * GRID_SIZE);
+			} else if (c.kind === 'terminal') {
+				const halfExtent = Math.max(3 * GRID_SIZE, 16 + (c.label.length * 7.5) / 2);
+				minX = Math.min(minX, cx - halfExtent);
+				maxX = Math.max(maxX, cx + halfExtent);
+				minY = Math.min(minY, cy - 2.5 * GRID_SIZE);
+				maxY = Math.max(maxY, cy + 2.5 * GRID_SIZE);
+			} else if (isVertical) {
+				const rightExtent = Math.max(
+					3 * GRID_SIZE,
+					32 + Math.max(c.label.length, valueText.length) * 7.5
+				);
+				minX = Math.min(minX, cx - 3 * GRID_SIZE);
+				maxX = Math.max(maxX, cx + rightExtent);
+				minY = Math.min(minY, cy - (isThevenin ? 66 : 2.5 * GRID_SIZE));
+				maxY = Math.max(maxY, cy + 2.5 * GRID_SIZE);
+			} else {
+				const halfExtent = Math.max(
+					3 * GRID_SIZE,
+					16 + (Math.max(c.label.length, valueText.length) * 7.5) / 2
+				);
+				minX = Math.min(minX, cx - halfExtent);
+				maxX = Math.max(maxX, cx + halfExtent);
+				minY = Math.min(minY, cy - (isThevenin ? 66 : 3 * GRID_SIZE));
+				maxY = Math.max(maxY, cy + 2.5 * GRID_SIZE);
+			}
 		}
 		for (const w of wires) {
 			for (const pt of w.points) {
@@ -1297,6 +1332,49 @@
 		return 'dc';
 	}
 
+	function getComponentDisplayMeta(comp: CircuitComponent): {
+		isUnknownComp: boolean;
+		displayVal: string;
+	} {
+		const unknownTerm =
+			getUnknownTerms(circuit.document.unknownProblem).find(
+				(t) => t.componentId === comp.id
+			) ?? null;
+		if (!unknownTerm) {
+			return {
+				isUnknownComp: false,
+				displayVal: formatComponentDisplayValue(comp, circuit.document.mode, settings.unitSystem)
+			};
+		}
+		const unknownSym =
+			circuit.document.unknownProblem?.symbol?.trim() || getDefaultUnknownSymbol(comp.kind);
+		const unknownTermExpr = formatUnknownTermExpr(unknownTerm.multiplier, unknownSym);
+		const unknownSolvedTermValueString =
+			circuit.solution.unknownSolution?.valid &&
+			circuit.solution.unknownSolution.solutions.length > 0
+				? (circuit.solution.unknownSolution.solutions[0].termValues?.find(
+						(tv) => tv.componentId === comp.id
+					)?.valueString ?? circuit.solution.unknownSolution.solutions[0].valueString)
+				: null;
+		const unknownSolvedVal = unknownSolvedTermValueString
+			? formatComponentDisplayValue(
+					{
+						...comp,
+						value: unknownSolvedTermValueString,
+						phaseDeg: undefined
+					},
+					circuit.document.mode,
+					settings.unitSystem
+				)
+			: null;
+		return {
+			isUnknownComp: true,
+			displayVal: unknownSolvedVal
+				? `${unknownTermExpr}? (${unknownSolvedVal})`
+				: `${unknownTermExpr} = ?`
+		};
+	}
+
 	function getComponentLabelLayout(comp: CircuitComponent) {
 		const isVertical = comp.rotation === 90 || comp.rotation === 270;
 		if (comp.kind === 'ground') {
@@ -1434,7 +1512,7 @@
 		const obstacles = buildSchematicObstacles(
 			circuit.document.components,
 			circuit.document.wires,
-			(c) => formatComponentDisplayValue(c, circuit.document.mode, settings.unitSystem),
+			(c) => getComponentDisplayMeta(c).displayVal,
 			theveninCompId
 		);
 		const placedPills: LayoutRect[] = [];
@@ -1991,42 +2069,11 @@
 				{@const isThevenin =
 					circuit.theveninTarget?.kind === 'component' &&
 					circuit.theveninTarget.componentId === comp.id}
-				{@const unknownTerm =
-					getUnknownTerms(circuit.document.unknownProblem).find(
-						(t) => t.componentId === comp.id
-					) ?? null}
-				{@const isUnknownComp = unknownTerm !== null}
-				{@const unknownSym =
-					circuit.document.unknownProblem?.symbol?.trim() || getDefaultUnknownSymbol(comp.kind)}
-				{@const unknownTermExpr = unknownTerm
-					? formatUnknownTermExpr(unknownTerm.multiplier, unknownSym)
-					: unknownSym}
-				{@const unknownSolvedTermValueString =
-					isUnknownComp &&
-					circuit.solution.unknownSolution?.valid &&
-					circuit.solution.unknownSolution.solutions.length > 0
-						? (circuit.solution.unknownSolution.solutions[0].termValues?.find(
-								(tv) => tv.componentId === comp.id
-							)?.valueString ?? circuit.solution.unknownSolution.solutions[0].valueString)
-						: null}
-				{@const unknownSolvedVal = unknownSolvedTermValueString
-					? formatComponentDisplayValue(
-							{
-								...comp,
-								value: unknownSolvedTermValueString,
-								phaseDeg: undefined
-							},
-							circuit.document.mode,
-							settings.unitSystem
-						)
-					: null}
+				{@const displayMeta = getComponentDisplayMeta(comp)}
+				{@const isUnknownComp = displayMeta.isUnknownComp}
 				{@const pins = getPinPositions(renderComp)}
 				{@const labelLayout = getComponentLabelLayout(renderComp)}
-				{@const displayVal = isUnknownComp
-					? unknownSolvedVal
-						? `${unknownTermExpr}? (${unknownSolvedVal})`
-						: `${unknownTermExpr} = ?`
-					: formatComponentDisplayValue(comp, circuit.document.mode, settings.unitSystem)}
+				{@const displayVal = displayMeta.displayVal}
 				{@const isVertical = comp.rotation === 90 || comp.rotation === 270}
 				{@const isOnePinComp = comp.kind === 'ground' || comp.kind === 'terminal'}
 				{@const hitHalfW = isOnePinComp ? 18 : isVertical ? 18 : 34}
@@ -2584,7 +2631,12 @@
 	<div class="hidden h-8 shrink-0 items-center justify-between gap-2 border-t border-border bg-surface-rail px-2.5 text-[11px] lg:flex xl:gap-3 xl:px-3">
 		<!-- Left: Solver Status, Telemetry & Contextual Hint -->
 		<div class="flex min-w-0 flex-1 items-center gap-2 overflow-hidden xl:gap-2.5">
-			<div class="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
+			<div
+				class={cn(
+					'flex shrink-0 items-center gap-1.5 whitespace-nowrap',
+					effectiveAutoWireFeedback && 'hidden xl:flex'
+				)}
+			>
 				{#if circuit.document.components.length === 0}
 					<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/50" aria-hidden="true"></span>
 					<span class="text-muted-foreground">Empty</span>
@@ -2606,33 +2658,35 @@
 				{/if}
 			</div>
 
-			<Separator orientation="vertical" class="h-3.5 shrink-0" />
-
-			<div class="flex min-w-0 items-center gap-2 overflow-hidden font-engineering whitespace-nowrap xl:gap-2.5">
-				<span class="hidden shrink-0 text-muted-foreground xl:inline">Grid 20px</span>
-				<span class="hidden shrink-0 text-muted-foreground xl:inline">
-					Snap <span class="text-foreground">{settings.snapToGrid ? 'ON' : 'OFF'}</span>
-				</span>
-				<span class="shrink-0 text-voltage">
-					{nodeCount} {nodeCount === 1 ? 'Node' : 'Nodes'}
-				</span>
-				{#if hoverGrid}
-					<span class="truncate text-muted-foreground">
-						({hoverGrid.x}, {hoverGrid.y})
-					</span>
-				{/if}
-			</div>
+			<Separator
+				orientation="vertical"
+				class={cn('h-3.5 shrink-0', effectiveAutoWireFeedback && 'hidden xl:block')}
+			/>
 
 			{#if effectiveAutoWireFeedback}
-				<Separator orientation="vertical" class="h-3.5 shrink-0" />
 				<span
 					role="status"
 					aria-live="polite"
-					class="truncate font-engineering text-foreground"
+					class="min-w-0 truncate font-engineering text-foreground"
 				>
 					{effectiveAutoWireFeedback}
 				</span>
 			{:else}
+				<div class="flex min-w-0 items-center gap-2 overflow-hidden font-engineering whitespace-nowrap xl:gap-2.5">
+					<span class="hidden shrink-0 text-muted-foreground xl:inline">Grid 20px</span>
+					<span class="hidden shrink-0 text-muted-foreground xl:inline">
+						Snap <span class="text-foreground">{settings.snapToGrid ? 'ON' : 'OFF'}</span>
+					</span>
+					<span class="shrink-0 text-voltage">
+						{nodeCount} {nodeCount === 1 ? 'Node' : 'Nodes'}
+					</span>
+					{#if hoverGrid}
+						<span class="truncate text-muted-foreground">
+							({hoverGrid.x}, {hoverGrid.y})
+						</span>
+					{/if}
+				</div>
+
 				<Separator orientation="vertical" class="hidden h-3.5 shrink-0 2xl:block" />
 				<span class="hidden truncate text-muted-foreground/80 2xl:inline">
 					{activeToolHint}

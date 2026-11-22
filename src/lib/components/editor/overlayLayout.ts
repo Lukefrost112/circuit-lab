@@ -77,7 +77,7 @@ export function buildSchematicObstacles(
 				y2: cy + (val ? 15 : 2)
 			});
 		} else {
-			solid.push({ x1: cx - 35, y1: cy - 17, x2: cx + 35, y2: cy + 17 });
+			solid.push({ x1: cx - 35, y1: cy - 16, x2: cx + 35, y2: cy + 16 });
 			const val = getDisplayVal(comp);
 			const halfW = (Math.max(comp.label.length * 6.8, val.length * 6.2) + 8) / 2;
 			solid.push({
@@ -118,7 +118,7 @@ function scoreRect(
 ): number {
 	let cost = distPenalty;
 	for (const obs of obstacles.solid) {
-		const area = overlapArea(rect, obs, 4);
+		const area = overlapArea(rect, obs, 3);
 		if (area > 0) cost += 10000 + area * 10;
 	}
 	for (const pill of placedPills) {
@@ -127,7 +127,7 @@ function scoreRect(
 	}
 	for (const w of obstacles.wires) {
 		const area = overlapArea(rect, w, 2);
-		if (area > 0) cost += 400 + area * 2;
+		if (area > 0) cost += 2000 + area * 5;
 	}
 	return cost;
 }
@@ -145,21 +145,25 @@ export function chooseBranchPillPosition(
 
 	const candidates: Array<{ x: number; y: number; bias: number }> = isVertical
 		? [
-				{ x: cx + 21 + pillWidth / 2, y: cy + 25, bias: 0 },
-				{ x: cx - 18 - pillWidth / 2, y: cy, bias: 2 },
-				{ x: cx + 21 + pillWidth / 2, y: cy - 24, bias: 4 },
-				{ x: cx - 18 - pillWidth / 2, y: cy + 25, bias: 8 },
-				{ x: cx - 18 - pillWidth / 2, y: cy - 24, bias: 10 },
-				{ x: cx, y: cy + 48, bias: 14 },
-				{ x: cx, y: cy - 48, bias: 16 }
+				{ x: cx + 21 + pillWidth / 2, y: cy + 26, bias: 0 },
+				{ x: cx - 21 - pillWidth / 2, y: cy, bias: 2 },
+				{ x: cx + 21 + pillWidth / 2, y: cy - 26, bias: 4 },
+				{ x: cx - 21 - pillWidth / 2, y: cy + 26, bias: 8 },
+				{ x: cx - 21 - pillWidth / 2, y: cy - 26, bias: 10 },
+				{ x: cx, y: cy + 54, bias: 14 },
+				{ x: cx, y: cy - 54, bias: 16 },
+				{ x: cx + 21 + pillWidth / 2, y: cy + 54, bias: 18 },
+				{ x: cx - 21 - pillWidth / 2, y: cy + 54, bias: 20 },
+				{ x: cx + 21 + pillWidth / 2, y: cy - 54, bias: 22 },
+				{ x: cx - 21 - pillWidth / 2, y: cy - 54, bias: 24 }
 			]
 		: [
-				{ x: cx, y: cy + 25, bias: 0 },
-				{ x: cx, y: cy + 38, bias: 4 },
-				{ x: cx - 24, y: cy + 25, bias: 6 },
-				{ x: cx + 24, y: cy + 25, bias: 6 },
+				{ x: cx, y: cy + 27, bias: 0 },
+				{ x: cx - 24, y: cy + 27, bias: 4 },
+				{ x: cx + 24, y: cy + 27, bias: 4 },
+				{ x: cx, y: cy + 38, bias: 8 },
 				{ x: cx, y: cy - 58, bias: 10 },
-				{ x: cx, y: cy + 52, bias: 14 }
+				{ x: cx, y: cy + 54, bias: 14 }
 			];
 
 	let best = candidates[0];

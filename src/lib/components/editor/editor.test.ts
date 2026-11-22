@@ -24,6 +24,12 @@ import {
 	isPointInComponentBodyHitbox,
 	isTouchLikePointer
 } from './index';
+import {
+	buildSchematicObstacles,
+	chooseBranchPillPosition,
+	rectsOverlap,
+	type LayoutRect
+} from './overlayLayout';
 
 beforeEach(() => {
 	circuit.resetToDefault();
@@ -339,6 +345,80 @@ describe('editor geometry & formatting helpers', () => {
 		expect(isPointInComponentBodyHitbox(term, 18.8, 4.8)).toBe(true);
 		expect(isPointInComponentBodyHitbox(term, 18, 5.2)).toBe(false);
 	});
+
+	it('places branch current pills clear of horizontal wires passing over vertical top pins', () => {
+		const verticalBranch = {
+			id: 'R2',
+			kind: 'resistor' as const,
+			label: 'R2',
+			x: 12,
+			y: 8,
+			rotation: 90 as const,
+			value: '6k'
+		};
+		const wires = [
+			// Horizontal wire passing directly over the vertical branch top pin (12, 6)
+			{ id: 'w-top', points: [{ x: 4, y: 6 }, { x: 18, y: 6 }] },
+			// Horizontal bottom rail passing over the bottom pin (12, 10)
+			{ id: 'w-bot', points: [{ x: 4, y: 10 }, { x: 18, y: 10 }] }
+		];
+
+		const obstacles = buildSchematicObstacles(
+			[verticalBranch],
+			wires,
+			(c) => formatComponentDisplayValue(c, 'dc')
+		);
+		const chosen = chooseBranchPillPosition(verticalBranch, 48, 16, obstacles, []);
+
+		// Must not overlap any wire segment (including y=6 top pin wire) or component/label solid
+		for (const wireRect of obstacles.wires) {
+			expect(rectsOverlap(chosen.rect, wireRect, 2)).toBe(false);
+		}
+		for (const solidRect of obstacles.solid) {
+			expect(rectsOverlap(chosen.rect, solidRect, 2)).toBe(false);
+		}
+
+		// Even when preferred bottom-right is occupied by another pill, it still avoids the y=6 wire
+		const blockedRight = chooseBranchPillPosition(verticalBranch, 48, 16, obstacles, [
+			chosen.rect
+		]);
+		for (const wireRect of obstacles.wires) {
+			expect(rectsOverlap(blockedRight.rect, wireRect, 2)).toBe(false);
+		}
+		for (const solidRect of obstacles.solid) {
+			expect(rectsOverlap(blockedRight.rect, solidRect, 2)).toBe(false);
+		}
+	});
+
+	it('places all branch current pills cleanly without overlapping wires or component solids across presets', () => {
+		for (const preset of PRESETS) {
+			const doc = preset.document;
+			const obstacles = buildSchematicObstacles(
+				doc.components,
+				doc.wires,
+				(c) => formatComponentDisplayValue(c, doc.mode),
+				preset.theveninLoadId ?? null
+			);
+			const placed: LayoutRect[] = [];
+			for (const comp of doc.components) {
+				if (comp.kind === 'ground' || comp.kind === 'terminal') continue;
+				const chosen = chooseBranchPillPosition(comp, 48, 16, obstacles, placed);
+				placed.push(chosen.rect);
+				for (const wireRect of obstacles.wires) {
+					expect(
+						rectsOverlap(chosen.rect, wireRect, 2),
+						`${preset.id} ${comp.id} pill overlaps wire`
+					).toBe(false);
+				}
+				for (const solidRect of obstacles.solid) {
+					expect(
+						rectsOverlap(chosen.rect, solidRect, 2),
+						`${preset.id} ${comp.id} pill overlaps solid`
+					).toBe(false);
+				}
+			}
+		}
+	});
 });
 
 describe('editor Svelte components SSR rendering', () => {
@@ -450,5 +530,19 @@ describe('editor Svelte components SSR rendering', () => {
 		const selectOut = render(SchematicCanvas);
 		expect(selectOut.body).toContain('r="8" fill="transparent"');
 		expect(selectOut.body).not.toContain('r="24" fill="transparent"');
+	});
+
+	it('renders desktop Auto-Wire feedback in place of secondary telemetry without losing solver status', () => {
+		const idleOut = render(SchematicCanvas);
+		expect(idleOut.body).toContain('Grid 20px');
+		expect(idleOut.body).toContain('Nodes');
+		expect(idleOut.body).toContain('All methods verified');
+
+		const feedbackOut = render(SchematicCanvas, {
+			props: { autoWireFeedback: 'Auto-wired (+5 wires)' }
+		});
+		expect(feedbackOut.body).toContain('All methods verified');
+		expect(feedbackOut.body).toContain('Auto-wired (+5 wires)');
+		expect(feedbackOut.body).not.toContain('Grid 20px');
 	});
 });

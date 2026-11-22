@@ -212,6 +212,7 @@ class CircuitStore {
 	);
 	private _activeMethod = $state<MethodId>(initialPreset.featuredMethod ?? 'nodal');
 	private _emptyBannerDismissed = $state(false);
+	private _documentLoadSeq = $state(0);
 
 	private _undoStack = $state<HistorySnapshot[]>([]);
 	private _redoStack = $state<HistorySnapshot[]>([]);
@@ -237,6 +238,10 @@ class CircuitStore {
 
 	get document(): CircuitDocument {
 		return this._document;
+	}
+
+	get documentLoadSeq(): number {
+		return this._documentLoadSeq;
 	}
 
 	get selectedComponentId(): string | null {
@@ -694,6 +699,7 @@ class CircuitStore {
 		this.recordSnapshot();
 		const cloned = cloneDocument(doc);
 		this._document = cloned;
+		this._documentLoadSeq += 1;
 		this._selectedComponentId = null;
 		this._selectedWireId = null;
 		this._activeTool = 'select';
@@ -963,6 +969,7 @@ class CircuitStore {
 	/** Resets the store cleanly back to initial PRESETS[0] with empty undo/redo stacks (for tests). */
 	resetToDefault(): void {
 		this._document = cloneDocument(initialPreset.document);
+		this._documentLoadSeq += 1;
 		this._selectedComponentId = null;
 		this._selectedWireId = null;
 		this._activeTool = 'select';
