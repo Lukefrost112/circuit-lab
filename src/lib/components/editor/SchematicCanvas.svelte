@@ -766,7 +766,24 @@
 		return false;
 	}
 
+	/**
+	 * Inspector fields commit on blur, but the canvas changes the selection on pointerdown,
+	 * before the field loses focus. Blur the field first so a half-typed value is saved to the
+	 * component it was typed for, not to the one just clicked.
+	 */
+	function commitPendingFieldEdit(): void {
+		const el = typeof document !== 'undefined' ? document.activeElement : null;
+		if (
+			el instanceof HTMLInputElement ||
+			el instanceof HTMLTextAreaElement ||
+			el instanceof HTMLSelectElement
+		) {
+			el.blur();
+		}
+	}
+
 	function handleBackgroundPointerDown(e: PointerEvent): void {
+		commitPendingFieldEdit();
 		lastPointerType = e.pointerType;
 		isTouchInteraction = isTouchLikePointer(e.pointerType);
 		refreshSvgRect();
@@ -879,6 +896,7 @@
 	}
 
 	function handleComponentPointerDown(e: PointerEvent, comp: CircuitComponent): void {
+		commitPendingFieldEdit();
 		lastPointerType = e.pointerType;
 		refreshSvgRect();
 
@@ -930,6 +948,7 @@
 		pinX: number,
 		pinY: number
 	): void {
+		commitPendingFieldEdit();
 		lastPointerType = e.pointerType;
 		refreshSvgRect();
 
@@ -995,6 +1014,7 @@
 	}
 
 	function handleWirePointerDown(e: PointerEvent, wire: CircuitWire): void {
+		commitPendingFieldEdit();
 		lastPointerType = e.pointerType;
 		isTouchInteraction = isTouchLikePointer(e.pointerType);
 		refreshSvgRect();
@@ -1068,6 +1088,7 @@
 	 * (mouse click-click or touch press-drag-release), or completes the in-progress wire there.
 	 */
 	function handleWireEndpointPointerDown(e: PointerEvent, wireId: string, pt: GridPoint): void {
+		commitPendingFieldEdit();
 		lastPointerType = e.pointerType;
 		isTouchInteraction = isTouchLikePointer(e.pointerType);
 		refreshSvgRect();
@@ -1108,6 +1129,7 @@
 	}
 
 	function handleCrossingPointerDown(e: PointerEvent, crossing: WireCrossing): void {
+		commitPendingFieldEdit();
 		lastPointerType = e.pointerType;
 		isTouchInteraction = isTouchLikePointer(e.pointerType);
 		refreshSvgRect();
