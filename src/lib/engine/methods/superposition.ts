@@ -8,7 +8,7 @@
  */
 
 import { Complex } from '../complex';
-import { buildElectricalGraph, parseSourceValue } from '../graph';
+import { buildElectricalGraph, parseSourceValue, latexNodeId } from '../graph';
 import { solveMNA } from '../mna';
 import {
 	isDependentSourceKind,
@@ -213,7 +213,7 @@ export function solveSuperposition(doc: CircuitDocument, mna: MnaSolution): Meth
 
 		const contribLatex = origGraph.nonRefNodeIds.map(
 			(nid) =>
-				`V_{${nid}}^{(${k + 1})} = ${formatLatexValue(subNodesMapped[nid], subMode)}\\text{ V}`
+				`V_{${latexNodeId(nid)}}^{(${k + 1})} = ${formatLatexValue(subNodesMapped[nid], subMode)}\\text{ V}`
 		);
 		const branchContribLatex = twoTerminal.slice(0, 4).map((c) => {
 			const br = subSol.branches[c.id];
@@ -267,7 +267,7 @@ export function solveSuperposition(doc: CircuitDocument, mna: MnaSolution): Meth
 			const rmsTotal = Math.sqrt(rmsSqSum);
 			const rhsExpr = terms.join(' + ') || '0';
 			timeDomainLatex.push(
-				`v_{${nid}}(t) = ${rhsExpr}\\text{ V},\\quad V_{${nid},\\text{rms}} = ${formatLatexValue(Complex.from(rmsTotal, 0), 'ac')}\\text{ V}`
+				`v_{${latexNodeId(nid)}}(t) = ${rhsExpr}\\text{ V},\\quad V_{${latexNodeId(nid)},\\text{rms}} = ${formatLatexValue(Complex.from(rmsTotal, 0), 'ac')}\\text{ V}`
 			);
 		}
 
@@ -292,7 +292,7 @@ export function solveSuperposition(doc: CircuitDocument, mna: MnaSolution): Meth
 	// Same-frequency combination & MNA cross-verification
 	const sumLatex = [
 		...origGraph.nonRefNodeIds.map(
-			(nid) => `V_{${nid}} = \\sum_k V_{${nid}}^{(k)} = ${formatLatexValue(totalNodeV[nid], mna.mode)}\\text{ V}`
+			(nid) => `V_{${latexNodeId(nid)}} = \\sum_k V_{${latexNodeId(nid)}}^{(k)} = ${formatLatexValue(totalNodeV[nid], mna.mode)}\\text{ V}`
 		),
 		...twoTerminal.slice(0, 4).map(
 			(c) =>

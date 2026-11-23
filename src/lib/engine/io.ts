@@ -374,6 +374,12 @@ export function exportCircuitJson(doc: CircuitDocument): string {
 			}
 		};
 	}
+	if (doc.nodeNames !== undefined && doc.nodeNames.length > 0) {
+		out.nodeNames = doc.nodeNames.map((e) => ({
+			pin: { componentId: e.pin.componentId, pinIndex: e.pin.pinIndex },
+			name: e.name
+		}));
+	}
 
 	return JSON.stringify(out, null, 2);
 }
@@ -794,6 +800,30 @@ function parseCircuitDocumentFormat(obj: Record<string, unknown>): CircuitImport
 				constraint: parsedConstraint
 			};
 		}
+	}
+	if (Array.isArray(obj.nodeNames)) {
+		const names: NonNullable<CircuitDocument['nodeNames']> = [];
+		obj.nodeNames.forEach((entry, idx) => {
+			const pin = isPlainObject(entry) && isPlainObject(entry.pin) ? entry.pin : undefined;
+			if (
+				!isPlainObject(entry) ||
+				!pin ||
+				typeof pin.componentId !== 'string' ||
+				!seenCompIds.has(pin.componentId) ||
+				typeof pin.pinIndex !== 'number' ||
+				!Number.isInteger(pin.pinIndex) ||
+				pin.pinIndex < 0 ||
+				typeof entry.name !== 'string'
+			) {
+				warnings.push(`nodeNames[${idx}]: expected { pin: { componentId, pinIndex }, name }; ignored.`);
+				return;
+			}
+			names.push({
+				pin: { componentId: pin.componentId, pinIndex: pin.pinIndex },
+				name: entry.name.trim()
+			});
+		});
+		if (names.length > 0) document.nodeNames = names;
 	}
 
 	return {
