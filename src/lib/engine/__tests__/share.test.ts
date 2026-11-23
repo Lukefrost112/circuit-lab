@@ -7,6 +7,7 @@ import {
 	encodeCircuitToHashUncompressed,
 	type ShareableCircuitPayload
 } from '../share';
+import { exportCircuitJson, parseCircuitImport } from '../io';
 import { solveCircuit } from '../solve';
 import type { CircuitDocument, TheveninTarget, UnitSystemId } from '../types';
 
@@ -602,5 +603,34 @@ describe('Shareable Circuit URL Codec (share.ts)', () => {
 		expect(decodedSol.mna.branches['R2'].voltage.re).toBeCloseTo(10, 9);
 		expect(decodedSol.mna.branches['E1'].voltage.re).toBeCloseTo(12, 9);
 		expect(decodedSol.allVerified).toBe(true);
+	});
+
+	it('keeps per-source frequencies through share links and JSON export/import', async () => {
+		// Two sources at different frequencies (multi-frequency superposition)
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'ac',
+			frequencyHz: 60,
+			components: [
+				{ id: 'V1', kind: 'voltage_source', label: 'V1', x: 0, y: 2, rotation: 90, value: '10∠0°', frequencyHz: 60 },
+				{ id: 'R1', kind: 'resistor', label: 'R1', x: 2, y: 0, rotation: 0, value: '10' },
+				{ id: 'R2', kind: 'resistor', label: 'R2', x: 4, y: 2, rotation: 90, value: '10' },
+				{ id: 'V2', kind: 'voltage_source', label: 'V2', x: 8, y: 2, rotation: 90, value: '6∠90°', frequencyHz: 120 },
+				{ id: 'R3', kind: 'resistor', label: 'R3', x: 6, y: 0, rotation: 0, value: '10' },
+				{ id: 'G1', kind: 'ground', label: 'G1', x: 0, y: 4, rotation: 0, value: '0' }
+			],
+			wires: [{ id: 'w_gnd', points: [{ x: 0, y: 4 }, { x: 8, y: 4 }] }]
+		};
+		const freqs = (d: CircuitDocument) =>
+			Object.fromEntries(d.components.filter((c) => c.kind === 'voltage_source').map((c) => [c.id, c.frequencyHz]));
+
+		const decoded = await decodeCircuitFromHash(await encodeCircuitToHash({ document: doc }));
+		expect(decoded).not.toBeNull();
+		expect(freqs(decoded!.document)).toEqual({ V1: 60, V2: 120 });
+		expect(solveCircuit(decoded!.document).mna.multiFrequencyHz).toEqual([60, 120]);
+
+		const reimported = parseCircuitImport(exportCircuitJson(doc));
+		if (!reimported.ok) throw new Error(reimported.errors.join('; '));
+		expect(freqs(reimported.document)).toEqual({ V1: 60, V2: 120 });
 	});
 });

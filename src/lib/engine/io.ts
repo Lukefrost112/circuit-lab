@@ -320,6 +320,7 @@ export function exportCircuitJson(doc: CircuitDocument): string {
 		};
 		if (c.numericValue !== undefined) out.numericValue = c.numericValue;
 		if (c.phaseDeg !== undefined) out.phaseDeg = c.phaseDeg;
+		if (c.frequencyHz !== undefined) out.frequencyHz = c.frequencyHz;
 		if (c.unit !== undefined) out.unit = c.unit;
 		if (c.valueMode !== undefined) out.valueMode = c.valueMode;
 		if (c.terminalName !== undefined) out.terminalName = c.terminalName;
@@ -647,6 +648,15 @@ function parseCircuitDocumentFormat(obj: Record<string, unknown>): CircuitImport
 		}
 		if (typeof raw.phaseDeg === 'number' && Number.isFinite(raw.phaseDeg)) {
 			candidate.phaseDeg = raw.phaseDeg;
+		}
+		// Per-source frequency (multi-frequency AC superposition); 0 Hz = DC term
+		if (
+			(candidate.kind === 'voltage_source' || candidate.kind === 'current_source') &&
+			typeof raw.frequencyHz === 'number' &&
+			Number.isFinite(raw.frequencyHz) &&
+			raw.frequencyHz >= 0
+		) {
+			candidate.frequencyHz = raw.frequencyHz;
 		}
 		if (typeof raw.unit === 'string') candidate.unit = raw.unit;
 		if (raw.valueMode !== undefined) {
