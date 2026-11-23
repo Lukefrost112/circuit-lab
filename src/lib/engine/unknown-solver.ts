@@ -55,6 +55,10 @@ const SOURCE_KINDS = new Set<ComponentKind>(['voltage_source', 'current_source']
 const DEFAULT_SYMBOL_BY_KIND: Record<ComponentKind, string> = {
 	voltage_source: 'V',
 	current_source: 'I',
+	vcvs: 'E',
+	vccs: 'G',
+	ccvs: 'H',
+	cccs: 'F',
 	resistor: 'R',
 	capacitor: 'C',
 	inductor: 'L',

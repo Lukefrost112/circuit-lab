@@ -27,6 +27,7 @@ import {
 	formatLatexTerm,
 	formatLatexValue,
 	getPassiveImpedance,
+	hasDependentSources,
 	latexSub,
 	verifyAgainstMna
 } from './shared';
@@ -140,6 +141,23 @@ export function solveSourceTransform(doc: CircuitDocument, mna: MnaSolution): Me
 			applicable: false,
 			inapplicableReason: 'Circuit has topology or value errors; fix validation errors first.',
 			steps: []
+		};
+	}
+
+	if (hasDependentSources(doc)) {
+		return {
+			methodId: 'source_transform',
+			title,
+			applicable: false,
+			inapplicableReason:
+				'Circuit contains dependent source(s). Keep dependent sources and their controlling variables intact — use Nodal Analysis, Mesh Analysis, Superposition, or Thévenin/Norton (Test-Source Method) instead.',
+			steps: [
+				{
+					title: 'Dependent Sources Present',
+					description:
+						'Iterative source transformation is skipped when dependent sources are present so controlling branch currents and node voltages are never eliminated.'
+				}
+			]
 		};
 	}
 

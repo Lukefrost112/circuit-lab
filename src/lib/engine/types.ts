@@ -11,21 +11,40 @@ export type AcMagnitudeMode = 'rms' | 'peak';
 export type UnitSystemId = 'auto' | 'ohm-v-a' | 'kohm-v-ma' | 'mohm-v-ua';
 export type PassiveValueMode = 'physical' | 'impedance';
 
+export type DependentSourceKind = 'vcvs' | 'vccs' | 'ccvs' | 'cccs';
+
 export type ComponentKind =
 	| 'resistor'
 	| 'capacitor'
 	| 'inductor'
 	| 'voltage_source'
 	| 'current_source'
+	| DependentSourceKind
 	| 'ground'
 	| 'terminal'
 	| 'voltmeter';
 
-/**
- * Reserved component kinds for v2 dependent sources (VCVS, VCCS, CCVS, CCCS).
- */
-export type DependentSourceKind = 'vcvs' | 'vccs' | 'ccvs' | 'cccs';
-export type AnyComponentKind = ComponentKind | DependentSourceKind;
+export type AnyComponentKind = ComponentKind;
+
+export function isDependentSourceKind(kind: ComponentKind): kind is DependentSourceKind {
+	return kind === 'vcvs' || kind === 'vccs' || kind === 'ccvs' || kind === 'cccs';
+}
+
+export function isDependentVoltageSource(kind: ComponentKind): kind is 'vcvs' | 'ccvs' {
+	return kind === 'vcvs' || kind === 'ccvs';
+}
+
+export function isDependentCurrentSource(kind: ComponentKind): kind is 'vccs' | 'cccs' {
+	return kind === 'vccs' || kind === 'cccs';
+}
+
+export function isVoltageControlledSource(kind: ComponentKind): kind is 'vcvs' | 'vccs' {
+	return kind === 'vcvs' || kind === 'vccs';
+}
+
+export function isCurrentControlledSource(kind: ComponentKind): kind is 'ccvs' | 'cccs' {
+	return kind === 'ccvs' || kind === 'cccs';
+}
 
 export type Rotation = 0 | 90 | 180 | 270;
 
@@ -35,16 +54,21 @@ export interface GridPoint {
 }
 
 /**
- * Reserved control reference for v2 dependent sources (`vcvs`, `vccs`, `ccvs`, `cccs`),
- * enabling zero-breaking-change extension of `CircuitComponent` and `mna.ts`.
+ * Control reference for linear dependent sources (`vcvs`, `vccs`, `ccvs`, `cccs`).
  */
 export interface DependentControlRef {
-	/** For voltage-controlled sources (VCVS/VCCS): controlling positive/negative nodes */
+	/** For VCVS/VCCS: optional controlling component ID (V_ctrl = V_pin0 - V_pin1, flipped if controlPolarity === -1) */
+	controlComponentId?: string;
+	/** For VCVS/VCCS: controlling positive/negative nodes (used when controlComponentId is not set) */
 	controlNodePos?: string;
 	controlNodeNeg?: string;
-	/** For current-controlled sources (CCVS/CCCS): ID of branch sensing control current */
+	/** For CCVS/CCCS: ID of branch component whose current (pin 0 -> pin 1) controls the source */
 	controlBranchComponentId?: string;
-	/** Scalar or complex gain (A_v, g_m, r_m, beta) */
+	/** Optional sign multiplier for the controlling variable (+1 default, -1 flipped) */
+	controlPolarity?: 1 | -1;
+	/** Optional textbook display variable name (e.g. "v_x", "i_x", "v_o") */
+	controlVarName?: string;
+	/** Scalar or complex gain (A_v, g_m, r_m, beta) — synced with component.value */
 	gain?: number | string;
 }
 

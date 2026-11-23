@@ -540,4 +540,67 @@ describe('Shareable Circuit URL Codec (share.ts)', () => {
 		expect(decodedSol.mna.branches['VM1'].voltage.re).toBeCloseTo(4, 9);
 		expect(decodedSol.allVerified).toBe(true);
 	});
+
+	it('round-trips a dependent source (VCVS) circuit with full controlRef through #c=v1.', async () => {
+		const depDoc: CircuitDocument = {
+			schemaVersion: 1,
+			name: 'Shareable VCVS',
+			mode: 'dc',
+			frequencyHz: 60,
+			unitSystem: 'kohm-v-ma',
+			components: [
+				{ id: 'V1', kind: 'voltage_source', label: 'V1', x: 4, y: 8, rotation: 90, value: '16' },
+				{ id: 'R1', kind: 'resistor', label: 'R1', x: 8, y: 4, rotation: 0, value: '4k' },
+				{ id: 'R2', kind: 'resistor', label: 'R2', x: 12, y: 8, rotation: 90, value: '4k' },
+				{ id: 'R3', kind: 'resistor', label: 'R3', x: 16, y: 4, rotation: 0, value: '2k' },
+				{
+					id: 'E1',
+					kind: 'vcvs',
+					label: 'E1',
+					x: 20,
+					y: 8,
+					rotation: 90,
+					value: '2',
+					unit: 'V/V',
+					controlRef: {
+						controlComponentId: 'R1',
+						controlPolarity: 1,
+						controlVarName: 'v_x',
+						gain: '2'
+					}
+				},
+				{ id: 'G1', kind: 'ground', label: 'G1', x: 4, y: 10, rotation: 0, value: '0' }
+			],
+			wires: [
+				{ id: 'w1', points: [{ x: 4, y: 6 }, { x: 4, y: 4 }, { x: 6, y: 4 }] },
+				{ id: 'w2', points: [{ x: 10, y: 4 }, { x: 14, y: 4 }] },
+				{ id: 'w3', points: [{ x: 12, y: 4 }, { x: 12, y: 6 }] },
+				{ id: 'w4', points: [{ x: 18, y: 4 }, { x: 20, y: 4 }, { x: 20, y: 6 }] },
+				{ id: 'w5', points: [{ x: 4, y: 10 }, { x: 20, y: 10 }] }
+			]
+		};
+
+		const hash = await encodeCircuitToHash({ document: depDoc, unitSystem: 'kohm-v-ma' });
+		expect(hash).toMatch(/^#c=v1\.[A-Za-z0-9_-]+$/);
+
+		const decoded = await decodeCircuitFromHash(hash);
+		expect(decoded).not.toBeNull();
+		if (!decoded) return;
+
+		const e1 = decoded.document.components.find((c) => c.id === 'E1');
+		expect(e1?.kind).toBe('vcvs');
+		expect(e1?.controlRef).toEqual({
+			controlComponentId: 'R1',
+			controlPolarity: 1,
+			controlVarName: 'v_x',
+			gain: '2'
+		});
+
+		const decodedSol = solveCircuit(decoded.document);
+		expect(decodedSol.mna.valid).toBe(true);
+		expect(decodedSol.mna.powerBalance.balanced).toBe(true);
+		expect(decodedSol.mna.branches['R2'].voltage.re).toBeCloseTo(10, 9);
+		expect(decodedSol.mna.branches['E1'].voltage.re).toBeCloseTo(12, 9);
+		expect(decodedSol.allVerified).toBe(true);
+	});
 });

@@ -98,7 +98,11 @@ const KNOWN_UNITS = new Set([
 	'w',
 	'va',
 	'var',
-	's'
+	's',
+	'v/v',
+	'a/v',
+	'v/a',
+	'a/a'
 ]);
 
 const DISPLAY_PREFIXES: Array<{ exp: number; symbol: string; factor: number }> = [

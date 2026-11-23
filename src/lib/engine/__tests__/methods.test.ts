@@ -391,4 +391,106 @@ describe('All 6 Pedagogical Method Solvers + Cross-Verification Gate', () => {
 		expect(acSol.allVerified).toBe(true);
 		expect(acSol.maxDiscrepancy).toBeLessThan(1e-8);
 	});
+
+	it('10. Superposition with Dependent Source + 2 Independent Sources keeps dependent source active in every sub-circuit', () => {
+		// V1=12V (N1->0), R1=4Ω (N1->N2), R2=4Ω (N2->0), E1=2*V_R1 (N3->0), R3=2Ω (N2->N3), I1=2A (0->N2)
+		// Hand solution: V_N3 = 2*(12 - V2) = 24 - 2*V2
+		// KCL at N2: (V2 - 12)/4 + V2/4 + (V2 - (24 - 2*V2))/2 - 2 = 0
+		// *4: (V2 - 12) + V2 + 2*(3*V2 - 24) - 8 = 0 => 8*V2 = 68 => V2 = 8.5 V, V_N3 = 7 V
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', 4, 8, 90, '12'),
+				comp('R1', 'resistor', 8, 4, 0, '4'),
+				comp('R2', 'resistor', 12, 8, 90, '4'),
+				comp('I1', 'current_source', 16, 8, 270, '2'),
+				comp('R3', 'resistor', 20, 4, 0, '2'),
+				comp('E1', 'vcvs', 24, 8, 90, '2', {
+					controlRef: { controlComponentId: 'R1', controlVarName: 'v_x' }
+				}),
+				comp('G1', 'ground', 4, 10, 0, '0')
+			],
+			wires: [
+				wire('w1', [4, 6], [4, 4], [6, 4]),
+				wire('w2', [10, 4], [18, 4]),
+				wire('w3', [12, 4], [12, 6]),
+				wire('w4', [16, 4], [16, 6]),
+				wire('w5', [22, 4], [24, 4], [24, 6]),
+				wire('w6', [4, 10], [24, 10])
+			]
+		};
+
+		const full = solveCircuit(doc, {
+			theveninTarget: { kind: 'component', componentId: 'R2' }
+		});
+		expect(full.mna.valid).toBe(true);
+		expect(full.mna.powerBalance.balanced).toBe(true);
+		expect(full.mna.branches['R2'].voltage.re).toBeCloseTo(8.5, 9);
+		expect(full.mna.branches['E1'].voltage.re).toBeCloseTo(7, 9);
+		expect(full.allVerified).toBe(true);
+		expect(full.maxDiscrepancy).toBeLessThan(1e-8);
+
+		const sup = full.methods.superposition!;
+		expect(sup.applicable).toBe(true);
+		expect(sup.verifiedAgainstMna).toBe(true);
+		expect(sup.maxDiscrepancy!).toBeLessThan(1e-8);
+		expect(sup.steps[0].description).toContain('NEVER deactivated');
+	});
+
+	it('11. Thévenin & Norton Test-Source Method with Dependent Sources (VCVS & CCCS) matches exact textbook R_th', () => {
+		// 11a. dc-dependent-vcvs preset across R2: V_th = 80/7 V, R_th = 4000/7 Ω, I_N = 20 mA
+		const preset = getPresetById('dc-dependent-vcvs')!;
+		const fullVcvs = solveCircuit(preset.document, {
+			theveninTarget: { kind: 'component', componentId: 'R2' }
+		});
+		expect(fullVcvs.allVerified).toBe(true);
+		expect(fullVcvs.theveninNorton).toBeDefined();
+		expect(fullVcvs.theveninNorton!.vth.re).toBeCloseTo(80 / 7, 9);
+		expect(fullVcvs.theveninNorton!.zth!.re).toBeCloseTo(4000 / 7, 9);
+		expect(fullVcvs.theveninNorton!.isc!.re).toBeCloseTo(0.02, 9);
+		expect(
+			fullVcvs.methods.thevenin_norton!.steps.some((s) => s.title.includes('Test-Source Method'))
+		).toBe(true);
+
+		// 11b. CCCS circuit: V1=12V (N1->0), R1=4Ω (N1->N2), F1=2*I_R1 (0->N2), R2=6Ω (N2->0)
+		// Removing R2: I_R1 enters N2, F1=2*I_R1 enters N2 => 3*I_R1 = 0 => I_R1 = 0 => V_th = 12 V!
+		// Test source I_test=1A into N2 with V1=0:
+		// I_R1 = -V2/4 (from N1=0 to N2), F1 = 2*I_R1 = -V2/2 (from 0 to N2)
+		// KCL at N2: V2/4 - (-V2/2) = 1 => (3/4)*V2 = 1 => R_th = 4/3 Ω!
+		// Reconnect R2=6Ω: I_R2 = 12 / (4/3 + 6) = 12 / (22/3) = 18/11 A, V_R2 = 108/11 V!
+		const cccsDoc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', 4, 8, 90, '12'),
+				comp('R1', 'resistor', 8, 4, 0, '4'),
+				comp('F1', 'cccs', 12, 8, 270, '2', {
+					controlRef: { controlBranchComponentId: 'R1', controlVarName: 'i_x' }
+				}),
+				comp('R2', 'resistor', 18, 8, 90, '6'),
+				comp('G1', 'ground', 4, 10, 0, '0')
+			],
+			wires: [
+				wire('w1', [4, 6], [4, 4], [6, 4]),
+				wire('w2', [10, 4], [18, 4], [18, 6]),
+				wire('w3', [12, 4], [12, 6]),
+				wire('w4', [4, 10], [18, 10])
+			]
+		};
+		const fullCccs = solveCircuit(cccsDoc, {
+			theveninTarget: { kind: 'component', componentId: 'R2' }
+		});
+		expect(fullCccs.mna.valid).toBe(true);
+		expect(fullCccs.allVerified).toBe(true);
+		expect(fullCccs.maxDiscrepancy).toBeLessThan(1e-8);
+		expect(fullCccs.theveninNorton!.vth.re).toBeCloseTo(12, 9);
+		expect(fullCccs.theveninNorton!.zth!.re).toBeCloseTo(4 / 3, 9);
+		expect(fullCccs.methods.kcl_kvl!.verifiedAgainstMna).toBe(true);
+		expect(fullCccs.methods.nodal!.verifiedAgainstMna).toBe(true);
+		expect(fullCccs.methods.mesh!.verifiedAgainstMna).toBe(true);
+		expect(fullCccs.methods.superposition!.verifiedAgainstMna).toBe(true);
+	});
 });
