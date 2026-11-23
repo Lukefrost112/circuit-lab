@@ -11,6 +11,8 @@ import {
 	buildElectricalGraph,
 	getPinPositions,
 	getUnknownTerms,
+	isDependentSourceKind,
+	isVoltageControlledSource,
 	parseEngineeringNumber,
 	solveCircuit,
 	type AnalysisMode,
@@ -19,6 +21,7 @@ import {
 	type CircuitDocument,
 	type CircuitWire,
 	type ComponentKind,
+	type DependentControlRef,
 	type ElectricalGraph,
 	type FullSolveResult,
 	type GridPoint,
@@ -46,6 +49,7 @@ export interface AddComponentOptions {
 	unit?: string;
 	valueMode?: PassiveValueMode;
 	terminalName?: string;
+	controlRef?: DependentControlRef;
 }
 
 export interface HistorySnapshot {
@@ -61,6 +65,10 @@ const DEFAULT_UNITS: Record<ComponentKind, string | undefined> = {
 	inductor: 'H',
 	voltage_source: 'V',
 	current_source: 'A',
+	vcvs: 'V/V',
+	vccs: 'S',
+	ccvs: 'Ω',
+	cccs: 'A/A',
 	ground: undefined,
 	terminal: undefined,
 	voltmeter: undefined
@@ -72,6 +80,10 @@ const LABEL_PREFIXES: Record<ComponentKind, string> = {
 	inductor: 'L',
 	voltage_source: 'V',
 	current_source: 'I',
+	vcvs: 'E',
+	vccs: 'G',
+	ccvs: 'H',
+	cccs: 'F',
 	ground: 'GND',
 	terminal: 'T',
 	voltmeter: 'VM'
@@ -246,6 +258,14 @@ function getDefaultValue(kind: ComponentKind, sourceMode: SourceMode): string {
 			return sourceMode === 'ac' ? '10∠0°' : '10';
 		case 'current_source':
 			return sourceMode === 'ac' ? '10m∠0°' : '10m';
+		case 'vcvs':
+			return '2';
+		case 'vccs':
+			return '1m';
+		case 'ccvs':
+			return '1k';
+		case 'cccs':
+			return '2';
 		case 'ground':
 		case 'terminal':
 		case 'voltmeter':
@@ -512,6 +532,14 @@ class CircuitStore {
 		const resolvedUnit =
 			opts?.unit ?? (valueMode === 'impedance' ? 'Ω' : DEFAULT_UNITS[kind]);
 
+		const resolvedControlRef: DependentControlRef | undefined = isDependentSourceKind(kind)
+			? {
+					controlPolarity: 1,
+					controlVarName: isVoltageControlledSource(kind) ? 'v_x' : 'i_x',
+					...(opts?.controlRef ?? {})
+				}
+			: opts?.controlRef;
+
 		const component: CircuitComponent = {
 			id,
 			kind,
@@ -526,7 +554,8 @@ class CircuitStore {
 			unit: resolvedUnit,
 			...(valueMode !== undefined ? { valueMode } : {}),
 			terminalName:
-				kind === 'terminal' ? (opts?.terminalName ?? generated.terminalName ?? 'A') : undefined
+				kind === 'terminal' ? (opts?.terminalName ?? generated.terminalName ?? 'A') : undefined,
+			...(resolvedControlRef !== undefined ? { controlRef: resolvedControlRef } : {})
 		};
 
 		this._document = {
@@ -642,15 +671,61 @@ class CircuitStore {
 
 		this._document = {
 			...this._document,
+			components: this._document.components.map((c) => {
+				if (c.id !== id) return c;
+				const nextControlRef =
+					patch.controlRef !== undefined
+						? patch.controlRef
+						: isDependentSourceKind(c.kind) && patch.value !== undefined && c.controlRef
+							? { ...c.controlRef, gain: nextValue }
+							: c.controlRef;
+				return {
+					...c,
+					...patch,
+					value: nextValue,
+					numericValue: nextNumeric,
+					...(nextControlRef !== undefined ? { controlRef: nextControlRef } : {})
+				};
+			})
+		};
+	}
+
+	updateComponentControlRef(id: string, patch: Partial<DependentControlRef>): void {
+		const target = this._document.components.find((c) => c.id === id);
+		if (!target || !isDependentSourceKind(target.kind)) return;
+
+		this.recordSnapshot();
+
+		const merged: DependentControlRef = {
+			...(target.controlRef ?? {}),
+			...patch
+		};
+
+		if (
+			'controlComponentId' in patch &&
+			typeof patch.controlComponentId === 'string' &&
+			patch.controlComponentId.trim() !== ''
+		) {
+			delete merged.controlNodePos;
+			delete merged.controlNodeNeg;
+		} else if (
+			('controlNodePos' in patch && patch.controlNodePos !== undefined && patch.controlNodePos !== '') ||
+			('controlNodeNeg' in patch && patch.controlNodeNeg !== undefined && patch.controlNodeNeg !== '')
+		) {
+			delete merged.controlComponentId;
+		}
+
+		// Strip explicitly cleared empty strings so serialization stays canonical
+		if (merged.controlComponentId === '') delete merged.controlComponentId;
+		if (merged.controlNodePos === '') delete merged.controlNodePos;
+		if (merged.controlNodeNeg === '') delete merged.controlNodeNeg;
+		if (merged.controlBranchComponentId === '') delete merged.controlBranchComponentId;
+		if (merged.controlVarName === '') delete merged.controlVarName;
+
+		this._document = {
+			...this._document,
 			components: this._document.components.map((c) =>
-				c.id === id
-					? {
-							...c,
-							...patch,
-							value: nextValue,
-							numericValue: nextNumeric
-						}
-					: c
+				c.id === id ? { ...c, controlRef: merged } : c
 			)
 		};
 		return true;

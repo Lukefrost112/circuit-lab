@@ -28,6 +28,8 @@
 		getDefaultUnknownSymbol,
 		getPinPositions,
 		getUnknownTerms,
+		isDependentSourceKind,
+		isVoltageControlledSource,
 		type CircuitComponent,
 		type CircuitWire,
 		type ComponentKind,
@@ -51,6 +53,7 @@
 		findNearestAnchor,
 		formatComplexOverlay,
 		formatComponentDisplayValue,
+		formatControlVarDisplay,
 		getDragThresholdPx,
 		hasExceededDragThreshold,
 		isPointInComponentBodyHitbox,
@@ -247,6 +250,10 @@
 		'inductor',
 		'voltage_source',
 		'current_source',
+		'vcvs',
+		'vccs',
+		'ccvs',
+		'cccs',
 		'ground',
 		'terminal',
 		'voltmeter'
@@ -1552,6 +1559,7 @@
 		displayVal: string;
 		isVoltmeterReading?: boolean;
 		isVoltmeterOpen?: boolean;
+		isDependentUnset?: boolean;
 	} {
 		if (comp.kind === 'voltmeter') {
 			const branch = circuit.solution.mna.valid && !circuit.solution.mna.multiFrequencyHz ? circuit.solution.mna.branches[comp.id] : undefined;
@@ -1582,9 +1590,16 @@
 				(t) => t.componentId === comp.id
 			) ?? null;
 		if (!unknownTerm) {
+			const displayVal = formatComponentDisplayValue(
+				comp,
+				circuit.document.mode,
+				settings.unitSystem,
+				circuit.document.components
+			);
 			return {
 				isUnknownComp: false,
-				displayVal: formatComponentDisplayValue(comp, circuit.document.mode, settings.unitSystem)
+				displayVal,
+				isDependentUnset: isDependentSourceKind(comp.kind) && displayVal === 'Set control'
 			};
 		}
 		const unknownSym =
@@ -1720,6 +1735,55 @@
 			height: isVertical ? 84 : 36
 		};
 	}
+
+	const selectedDependentControlHighlight = $derived.by(() => {
+		const sel = circuit.selectedComponent;
+		if (!sel || !isDependentSourceKind(sel.kind) || !sel.controlRef) return null;
+		const ref = sel.controlRef;
+		const isV = isVoltageControlledSource(sel.kind);
+		const rawVar = ref.controlVarName?.trim() || (isV ? 'v_x' : 'i_x');
+		const varLabel = formatControlVarDisplay(rawVar);
+		const accent = isV ? 'var(--voltage)' : 'var(--branch-current)';
+
+		const targetCompId = isV ? ref.controlComponentId : ref.controlBranchComponentId;
+		if (targetCompId) {
+			const targetComp = circuit.document.components.find((c) => c.id === targetCompId);
+			if (targetComp) {
+				return {
+					mode: 'component' as const,
+					componentId: targetComp.id,
+					varLabel,
+					accent
+				};
+			}
+		}
+
+		if (isV && (ref.controlNodePos !== undefined || ref.controlNodeNeg !== undefined)) {
+			const nodes: Array<{ nodeId: string; sign: '+' | '−'; pt: GridPoint }> = [];
+			if (ref.controlNodePos) {
+				const gNode = circuit.graph.nodes[ref.controlNodePos];
+				if (gNode && gNode.gridPoints.length > 0) {
+					nodes.push({ nodeId: ref.controlNodePos, sign: '+', pt: gNode.gridPoints[0] });
+				}
+			}
+			if (ref.controlNodeNeg) {
+				const gNode = circuit.graph.nodes[ref.controlNodeNeg];
+				if (gNode && gNode.gridPoints.length > 0) {
+					nodes.push({ nodeId: ref.controlNodeNeg, sign: '−', pt: gNode.gridPoints[0] });
+				}
+			}
+			if (nodes.length > 0) {
+				return {
+					mode: 'nodes' as const,
+					nodes,
+					varLabel,
+					accent
+				};
+			}
+		}
+
+		return null;
+	});
 
 	interface NodeOverlayItem {
 		nodeId: string;
@@ -2525,6 +2589,43 @@
 							stroke-dasharray="4 3"
 							pointer-events="none"
 						/>
+					{:else if selectedDependentControlHighlight?.mode === 'component' && selectedDependentControlHighlight.componentId === comp.id}
+						{@const ctrlRect = getSelectionRect(renderComp)}
+						<g pointer-events="none" data-control-highlight={comp.id}>
+							<rect
+								x={ctrlRect.x - 2}
+								y={ctrlRect.y - 2}
+								width={ctrlRect.width + 4}
+								height={ctrlRect.height + 4}
+								rx="4"
+								fill={selectedDependentControlHighlight.accent}
+								fill-opacity="0.06"
+								stroke={selectedDependentControlHighlight.accent}
+								stroke-width="1.5"
+								stroke-dasharray="3 2.5"
+							/>
+							<rect
+								x={ctrlRect.x + ctrlRect.width - 20}
+								y={ctrlRect.y - 16}
+								width="24"
+								height="13"
+								rx="3"
+								fill="var(--card)"
+								stroke={selectedDependentControlHighlight.accent}
+								stroke-width="1"
+							/>
+							<text
+								x={ctrlRect.x + ctrlRect.width - 8}
+								y={ctrlRect.y - 6.5}
+								text-anchor="middle"
+								fill={selectedDependentControlHighlight.accent}
+								font-family="var(--font-mono)"
+								font-size="9"
+								font-weight="600"
+							>
+								{selectedDependentControlHighlight.varLabel}
+							</text>
+						</g>
 					{/if}
 
 					<!-- Invisible generous click hitbox -->
@@ -2579,12 +2680,13 @@
 									? displayMeta.isVoltmeterOpen
 										? 'var(--muted-foreground)'
 										: 'var(--voltage)'
-									: isUnknownComp
+									: isUnknownComp || displayMeta.isDependentUnset
 										? 'var(--warning)'
 										: 'var(--muted-foreground)'}
 								font-family="var(--font-mono)"
 								font-size={displayMeta.isVoltmeterReading ? '10.5' : '10'}
 								font-weight={isUnknownComp ||
+								displayMeta.isDependentUnset ||
 								(displayMeta.isVoltmeterReading && !displayMeta.isVoltmeterOpen)
 									? '600'
 									: undefined}
@@ -2793,6 +2895,47 @@
 					</g>
 				</g>
 			{/each}
+
+			<!-- Dependent Source Controlling Node Highlights (painted above node/branch overlay pills) -->
+			{#if selectedDependentControlHighlight?.mode === 'nodes'}
+				<g pointer-events="none" data-control-nodes-highlight="true">
+					{#each selectedDependentControlHighlight.nodes as nodeHl (`${nodeHl.nodeId}-${nodeHl.sign}`)}
+						<g transform="translate({nodeHl.pt.x * GRID_SIZE}, {nodeHl.pt.y * GRID_SIZE})">
+							<circle
+								cx="0"
+								cy="0"
+								r="10"
+								fill={selectedDependentControlHighlight.accent}
+								fill-opacity="0.08"
+								stroke={selectedDependentControlHighlight.accent}
+								stroke-width="1.5"
+								stroke-dasharray="3 2"
+							/>
+							<rect
+								x="8"
+								y="6"
+								width="14"
+								height="13"
+								rx="3"
+								fill="var(--card)"
+								stroke={selectedDependentControlHighlight.accent}
+								stroke-width="1"
+							/>
+							<text
+								x="15"
+								y="15.5"
+								text-anchor="middle"
+								fill={selectedDependentControlHighlight.accent}
+								font-family="var(--font-mono)"
+								font-size="10"
+								font-weight="700"
+							>
+								{nodeHl.sign}
+							</text>
+						</g>
+					{/each}
+				</g>
+			{/if}
 		</g>
 	</svg>
 
