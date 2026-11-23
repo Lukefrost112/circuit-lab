@@ -148,7 +148,10 @@ export function solveCircuit(
 				methods.superposition = solveSuperposition(electricalDoc, mna);
 				break;
 			case 'source_transform':
-				methods.source_transform = solveSourceTransform(electricalDoc, mna);
+				methods.source_transform = solveSourceTransform(electricalDoc, mna, {
+					targetComponentId:
+						safeTheveninTarget?.kind === 'component' ? safeTheveninTarget.componentId : undefined
+				});
 				break;
 			case 'thevenin_norton': {
 				const res = solveTheveninNorton(electricalDoc, mna, safeTheveninTarget);

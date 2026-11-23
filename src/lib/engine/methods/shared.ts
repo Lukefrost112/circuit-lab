@@ -5,6 +5,7 @@
  */
 
 import { Complex, formatRational } from '../complex';
+import { matrixToLatex } from '../linalg';
 import {
 	buildElectricalGraph,
 	getPassiveImpedance as resolvePassiveImpedance,
@@ -348,4 +349,109 @@ export function buildPortTestWires(
 		{ id: `${idPrefix}wB__`, points: route(pinB, ptB, 0.61) },
 		{ id: `${idPrefix}wA__`, points: route(pinA, ptA, 0.37) }
 	];
+}
+
+export interface CourseSolveDisplay {
+	/** Lines for the "solve" step (substitutions and/or the one-line solve). */
+	latex: string[];
+	/** Present only when two or more equations remain after substitution. */
+	matrixLatex?: string;
+	/** Number of equations still solved simultaneously (0, 1 or ≥2). */
+	remaining: number;
+}
+
+/**
+ * Presents the solution of `A x = b` the way it is done by hand in the course:
+ * rows with a single unknown are solved directly and substituted into the rest
+ * (e.g. a mesh current fixed by a current source); one remaining equation is
+ * solved in one line (collect terms, divide); a matrix is shown only when two or
+ * more equations remain. Display only — the caller still solves the full system.
+ */
+export function courseSolveDisplay(
+	A: Complex[][],
+	b: Complex[],
+	names: string[],
+	unit: string,
+	mode: AnalysisMode
+): CourseSolveDisplay {
+	const n = names.length;
+	const EPS = 1e-12;
+	const known = new Map<number, Complex>();
+	const usedRows = new Set<number>();
+	const latex: string[] = [];
+	const val = (c: Complex) => formatLatexValue(c, mode);
+	const term = (c: Complex) => formatLatexTerm(c, mode);
+
+	const reducedRow = (r: number) => {
+		let rhs = b[r];
+		const unknowns: number[] = [];
+		for (let j = 0; j < n; j++) {
+			const a = A[r][j];
+			if (a.isZero(EPS)) continue;
+			const kv = known.get(j);
+			if (kv) rhs = rhs.sub(a.mul(kv));
+			else unknowns.push(j);
+		}
+		return { rhs, unknowns };
+	};
+
+	// Peel off rows with a single unknown, substituting known values each pass.
+	// Only rows with one unknown *before* substitution are peeled here, so a row
+	// that becomes single-unknown only after substitution is left as the final
+	// "one equation" step and is shown with its substituted terms.
+	let progress = true;
+	while (progress) {
+		progress = false;
+		for (let r = 0; r < A.length; r++) {
+			if (usedRows.has(r)) continue;
+			// The last unknown is left for the one-line solve step below.
+			if (n - known.size <= 1) break;
+			const nonzero = A[r].filter((a) => !a.isZero(EPS)).length;
+			if (nonzero !== 1) continue;
+			const { rhs, unknowns } = reducedRow(r);
+			usedRows.add(r);
+			if (unknowns.length !== 1) continue;
+			const j = unknowns[0];
+			const a = A[r][j];
+			const x = rhs.div(a);
+			known.set(j, x);
+			latex.push(
+				a.equals(Complex.one(), EPS)
+					? `${names[j]} = ${val(x)}\\text{ ${unit}}`
+					: `${term(a)}\\,${names[j]} = ${val(rhs)} \\;\\Rightarrow\\; ${names[j]} = ${val(x)}\\text{ ${unit}}`
+			);
+			progress = true;
+		}
+	}
+
+	const rows = A.map((_, r) => r).filter((r) => !usedRows.has(r));
+	const unknownCols = names.map((_, j) => j).filter((j) => !known.has(j));
+
+	if (unknownCols.length === 0) return { latex, remaining: 0 };
+
+	if (unknownCols.length === 1 && rows.length >= 1) {
+		const j = unknownCols[0];
+		const r = rows.find((rr) => !A[rr][j].isZero(EPS)) ?? rows[0];
+		const { rhs } = reducedRow(r);
+		const a = A[r][j];
+		const x = rhs.div(a);
+		if (known.size > 0) latex.push(`\\text{Substituting the known values leaves one equation:}`);
+		latex.push(
+			`${term(a)}\\,${names[j]} = ${val(rhs)} \\;\\Rightarrow\\; ${names[j]} = ${val(rhs).includes('\\frac') || val(a).includes('\\frac') ? `${term(rhs)} \\div ${term(a)}` : `\\frac{${val(rhs)}}{${val(a)}}`} = ${val(x)}\\text{ ${unit}}`
+		);
+		return { latex, remaining: 1 };
+	}
+
+	const Ar = rows.map((r) => unknownCols.map((j) => A[r][j]));
+	const br = rows.map((r) => reducedRow(r).rhs);
+	if (known.size > 0) latex.push(`\\text{Substituting the known values leaves ${unknownCols.length} simultaneous equations.}`);
+	return {
+		latex,
+		matrixLatex: matrixToLatex(
+			Ar,
+			unknownCols.map((j) => names[j]),
+			br
+		),
+		remaining: unknownCols.length
+	};
 }
