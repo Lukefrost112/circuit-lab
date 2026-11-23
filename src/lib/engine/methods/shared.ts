@@ -16,6 +16,8 @@ import {
 	type AnalysisMode,
 	type CircuitComponent,
 	type CircuitDocument,
+	type CircuitWire,
+	type GridPoint,
 	type MnaSolution
 } from '../types';
 
@@ -317,4 +319,33 @@ export function verifyAgainstMna(
  */
 export function latexSub(label: string): string {
 	return label.replace(/[^a-zA-Z0-9_]/g, '');
+}
+
+/**
+ * Wires that connect a synthetic port test source (placed far away, pins at `pinB`/`pinA`) to the
+ * port nodes at grid points `ptB`/`ptA` without touching anything else.
+ *
+ * A straight wire from the far source to a port point can pass exactly through another pin
+ * (any pin on the line gets merged as a T-junction), silently shorting an unrelated node into
+ * the port. These routes run along non-integer rows/columns, where no pin or wire vertex can
+ * lie, and reach each port point by a sub-unit diagonal step that contains no other grid point.
+ */
+export function buildPortTestWires(
+	idPrefix: string,
+	pinB: GridPoint,
+	ptB: GridPoint,
+	pinA: GridPoint,
+	ptA: GridPoint
+): CircuitWire[] {
+	const route = (pin: GridPoint, pt: GridPoint, dy: number): GridPoint[] => [
+		pin,
+		{ x: pin.x + 0.5, y: pin.y + dy },
+		{ x: pin.x + 0.5, y: pt.y + dy },
+		{ x: pt.x + 0.5, y: pt.y + dy },
+		pt
+	];
+	return [
+		{ id: `${idPrefix}wB__`, points: route(pinB, ptB, 0.61) },
+		{ id: `${idPrefix}wA__`, points: route(pinA, ptA, 0.37) }
+	];
 }

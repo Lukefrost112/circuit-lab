@@ -158,7 +158,18 @@
 	let hoverSnappedPin = $state<GridPoint | null>(null);
 	let hoveredNodeId = $state<string | null>(null);
 	let hoveredCrossingKey = $state<string | null>(null);
-	let pinnedProbeNodeId = $state<string | null>(null);
+	// Pinned probe is stored as a component pin: node IDs are renumbered when the layout changes.
+	let pinnedProbeAnchor = $state<{ componentId: string; pinIndex: number } | null>(null);
+	const pinnedProbeNodeId = $derived(
+		pinnedProbeAnchor
+			? (circuit.graph.componentNodes[pinnedProbeAnchor.componentId]?.[pinnedProbeAnchor.pinIndex] ??
+					null)
+			: null
+	);
+	function pinProbeNode(nodeId: string | null): void {
+		const pin = nodeId ? circuit.graph.nodes[nodeId]?.componentPins[0] : undefined;
+		pinnedProbeAnchor = pin ? { componentId: pin.componentId, pinIndex: pin.pinIndex } : null;
+	}
 	let isTouchInteraction = $state(false);
 
 	let wireStart = $state<GridPoint | null>(null);
@@ -773,7 +784,24 @@
 		return false;
 	}
 
+	/**
+	 * Inspector fields commit on blur, but the canvas changes the selection on pointerdown,
+	 * before the field loses focus. Blur the field first so a half-typed value is saved to the
+	 * component it was typed for, not to the one just clicked.
+	 */
+	function commitPendingFieldEdit(): void {
+		const el = typeof document !== 'undefined' ? document.activeElement : null;
+		if (
+			el instanceof HTMLInputElement ||
+			el instanceof HTMLTextAreaElement ||
+			el instanceof HTMLSelectElement
+		) {
+			el.blur();
+		}
+	}
+
 	function handleBackgroundPointerDown(e: PointerEvent): void {
+		commitPendingFieldEdit();
 		lastPointerType = e.pointerType;
 		isTouchInteraction = isTouchLikePointer(e.pointerType);
 		refreshSvgRect();
@@ -841,7 +869,7 @@
 
 		if (circuit.activeTool === 'probe') {
 			const nid = findNodeNearGrid(gx, gy, getNodeProbeDist(e.pointerType));
-			pinnedProbeNodeId = nid;
+			pinProbeNode(nid);
 			return;
 		}
 
@@ -886,6 +914,7 @@
 	}
 
 	function handleComponentPointerDown(e: PointerEvent, comp: CircuitComponent): void {
+		commitPendingFieldEdit();
 		lastPointerType = e.pointerType;
 		refreshSvgRect();
 
@@ -937,6 +966,7 @@
 		pinX: number,
 		pinY: number
 	): void {
+		commitPendingFieldEdit();
 		lastPointerType = e.pointerType;
 		refreshSvgRect();
 
@@ -979,7 +1009,7 @@
 		const pt = { x: pinX, y: pinY };
 
 		if (circuit.activeTool === 'probe') {
-			pinnedProbeNodeId = findNodeNearGrid(pinX, pinY, getNodeProbeDist(e.pointerType));
+			pinProbeNode(findNodeNearGrid(pinX, pinY, getNodeProbeDist(e.pointerType)));
 			return;
 		}
 
@@ -1002,6 +1032,7 @@
 	}
 
 	function handleWirePointerDown(e: PointerEvent, wire: CircuitWire): void {
+		commitPendingFieldEdit();
 		lastPointerType = e.pointerType;
 		isTouchInteraction = isTouchLikePointer(e.pointerType);
 		refreshSvgRect();
@@ -1046,7 +1077,7 @@
 		if (circuit.activeTool === 'probe') {
 			e.stopPropagation();
 			const { gx, gy } = clientToGrid(e.clientX, e.clientY);
-			pinnedProbeNodeId = findNodeNearGrid(gx, gy, getNodeProbeDist(e.pointerType));
+			pinProbeNode(findNodeNearGrid(gx, gy, getNodeProbeDist(e.pointerType)));
 			return;
 		}
 
@@ -1075,6 +1106,7 @@
 	 * (mouse click-click or touch press-drag-release), or completes the in-progress wire there.
 	 */
 	function handleWireEndpointPointerDown(e: PointerEvent, wireId: string, pt: GridPoint): void {
+		commitPendingFieldEdit();
 		lastPointerType = e.pointerType;
 		isTouchInteraction = isTouchLikePointer(e.pointerType);
 		refreshSvgRect();
@@ -1115,6 +1147,7 @@
 	}
 
 	function handleCrossingPointerDown(e: PointerEvent, crossing: WireCrossing): void {
+		commitPendingFieldEdit();
 		lastPointerType = e.pointerType;
 		isTouchInteraction = isTouchLikePointer(e.pointerType);
 		refreshSvgRect();
@@ -1433,7 +1466,7 @@
 				circuit.setActiveTool('select');
 			} else {
 				circuit.clearSelection();
-				pinnedProbeNodeId = null;
+				pinProbeNode(null);
 			}
 			return;
 		}
@@ -1529,7 +1562,7 @@
 		isDependentUnset?: boolean;
 	} {
 		if (comp.kind === 'voltmeter') {
-			const branch = circuit.solution.mna.valid ? circuit.solution.mna.branches[comp.id] : undefined;
+			const branch = circuit.solution.mna.valid && !circuit.solution.mna.multiFrequencyHz ? circuit.solution.mna.branches[comp.id] : undefined;
 			if (branch) {
 				const formattedV = formatComplexOverlay(branch.voltage, 'V', circuit.document.mode, {
 					precision: settings.precision,
@@ -1775,7 +1808,7 @@
 	}
 
 	const overlayLayout = $derived.by<{ nodes: NodeOverlayItem[]; branches: BranchOverlayItem[] }>(() => {
-		if (!settings.showLiveOverlays || !circuit.solution.mna.valid) {
+		if (!settings.showLiveOverlays || !circuit.solution.mna.valid || circuit.solution.mna.multiFrequencyHz) {
 			return { nodes: [], branches: [] };
 		}
 
@@ -1924,7 +1957,7 @@
 
 	const probedNodeData = $derived.by(() => {
 		const nid = hoveredNodeId ?? pinnedProbeNodeId;
-		if (!nid || !circuit.solution.mna.valid) return null;
+		if (!nid || !circuit.solution.mna.valid || circuit.solution.mna.multiFrequencyHz) return null;
 		const res = circuit.solution.mna.nodeVoltages[nid];
 		if (!res) return null;
 		return {
@@ -1944,6 +1977,10 @@
 <svelte:window
 	onkeydown={handleKeyDown}
 	onkeyup={handleKeyUp}
+	onblur={() => {
+		// The Space keyup never arrives if the window loses focus while Space is held
+		spaceHeld = false;
+	}}
 	onpointerup={(e) => {
 		if (activePointers.has(e.pointerId)) {
 			handlePointerUp(e);
@@ -1953,6 +1990,12 @@
 		if (activePointers.has(e.pointerId)) {
 			handlePointerCancel(e);
 		}
+	}}
+/>
+
+<svelte:document
+	onvisibilitychange={() => {
+		if (document.hidden) spaceHeld = false;
 	}}
 />
 
@@ -2996,7 +3039,7 @@
 						<SlidersHorizontal class="size-3.5" aria-hidden="true" />
 						<span>Edit</span>
 					</Button>
-					{#if isTwoTerminal}
+					{#if selectedComp.kind === 'resistor' || selectedComp.kind === 'capacitor' || selectedComp.kind === 'inductor'}
 						<Button
 							variant={isTheveninActive ? 'secondary' : 'ghost'}
 							size="sm"

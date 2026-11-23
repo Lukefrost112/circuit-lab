@@ -87,6 +87,7 @@
 	const selectedWire = $derived(circuit.selectedWire);
 
 	let labelDraft = $state('');
+	let labelError = $state<string | null>(null);
 	let terminalNameDraft = $state('');
 	let sourceFreqDraft = $state('');
 	let globalFreqDraft = $state(String(circuit.document.frequencyHz));
@@ -100,6 +101,7 @@
 	$effect(() => {
 		if (selectedComp) {
 			labelDraft = selectedComp.label;
+			labelError = null;
 			terminalNameDraft = selectedComp.terminalName ?? '';
 			sourceFreqDraft =
 				selectedComp.frequencyHz !== undefined ? String(selectedComp.frequencyHz) : '';
@@ -352,7 +354,7 @@
 	const selectedVoltmeterReading = $derived.by(() => {
 		if (!selectedComp || selectedComp.kind !== 'voltmeter') return null;
 		const [nodeA, nodeB] = circuit.graph.componentNodes[selectedComp.id] ?? [];
-		const branch = circuit.solution.mna.valid
+		const branch = circuit.solution.mna.valid && !circuit.solution.mna.multiFrequencyHz
 			? circuit.solution.mna.branches[selectedComp.id]
 			: undefined;
 		if (!branch) {
@@ -686,8 +688,13 @@
 			return;
 		}
 		if (trimmed !== selectedComp.label) {
-			circuit.updateComponent(selectedComp.id, { label: trimmed });
+			if (!circuit.updateComponent(selectedComp.id, { label: trimmed })) {
+				labelError = `“${trimmed}” is already used by another component.`;
+				labelDraft = selectedComp.label;
+				return;
+			}
 		}
+		labelError = null;
 	}
 
 	function commitTerminalName() {
@@ -856,7 +863,12 @@
 					onkeydown={(e) => {
 						if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
 					}}
+					aria-invalid={labelError ? true : undefined}
+					aria-describedby={labelError ? 'comp-label-error' : undefined}
 				/>
+				{#if labelError}
+					<p id="comp-label-error" class="text-xs text-destructive" role="alert">{labelError}</p>
+				{/if}
 			</div>
 
 			{#if selectedComp.kind === 'terminal'}
@@ -1493,7 +1505,7 @@
 				</Button>
 			{/if}
 
-			{#if isTwoTerminal}
+			{#if isPassive}
 				<Button
 					variant={isTheveninTarget ? 'default' : 'secondary'}
 					size="sm"

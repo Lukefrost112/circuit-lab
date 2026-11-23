@@ -302,6 +302,9 @@ describe('solveMNA — 15+ classic DC & AC circuits + error diagnostics', () => 
 		expect(sol.branches['C1'].powerFactorType).toBe('leading');
 		expect(sol.branches['V1'].realPower).toBeCloseTo(-120, 9);
 		expect(sol.branches['V1'].reactivePower).toBeCloseTo(-160, 9);
+		// Source PF is the delivered PF: S_supplied = 120 + j160 VA -> 0.6 lagging (not leading)
+		expect(sol.branches['V1'].powerFactor).toBeCloseTo(0.6, 9);
+		expect(sol.branches['V1'].powerFactorType).toBe('lagging');
 		expect(sol.powerBalance.totalRealPower).toBeCloseTo(0, 9);
 		expect(sol.powerBalance.totalReactivePower).toBeCloseTo(0, 9);
 	});

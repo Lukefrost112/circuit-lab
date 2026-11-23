@@ -204,6 +204,115 @@ describe('All 6 Pedagogical Method Solvers + Cross-Verification Gate', () => {
 		}
 	});
 
+	it('3b. Thévenin test-source wires never merge with an unrelated pin', () => {
+		// Layout where a straight wire from the far test source to the port lines up at exactly
+		// 45° with R5's pin, which used to short it into the port (Z_th = 5 Ω instead of 7.5 Ω).
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', -4, 16, 90, '10'),
+				comp('R1', 'resistor', -2, 14, 0, '10'),
+				comp('RL', 'resistor', 0, 16, 90, '10'),
+				comp('R4', 'resistor', 2, 14, 0, '10'),
+				comp('R5', 'resistor', 4, 16, 90, '10'),
+				comp('R6', 'resistor', 4, 20, 90, '10'),
+				comp('G', 'ground', -4, 18, 0, '0')
+			],
+			wires: [wire('g1', [-4, 18], [0, 18]), wire('g2', [4, 22], [-4, 22], [-4, 18])]
+		};
+		const r = solveCircuit(doc, { theveninTarget: { kind: 'component', componentId: 'RL' } });
+		expect(r.theveninNorton!.vth.re).toBeCloseTo(7.5, 9);
+		expect(r.theveninNorton!.zth!.re).toBeCloseTo(7.5, 9); // 10 || (10 + 10 + 10)
+		expect(r.methods.thevenin_norton!.verifiedAgainstMna).toBe(true);
+	});
+
+	it('3c. Thévenin with a source as the target is not applicable', () => {
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', 0, 2, 90, '10'),
+				comp('R1', 'resistor', 2, 0, 0, '2'),
+				comp('R2', 'resistor', 4, 2, 90, '4'),
+				comp('G1', 'ground', 0, 4, 0, '0')
+			],
+			wires: [wire('w_gnd', [0, 4], [4, 4])]
+		};
+		const r = solveCircuit(doc, { theveninTarget: { kind: 'component', componentId: 'V1' } });
+		expect(r.methods.thevenin_norton!.applicable).toBe(false);
+		expect(r.theveninNorton).toBeUndefined();
+	});
+
+	it('4b. Source transformation does not ping-pong Norton <-> Thévenin', () => {
+		// I1 || R1 (ground-N1), V1 from N1 to N2, I2 from N2 to ground
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('I1', 'current_source', 0, 2, 270, '2'),
+				comp('R1', 'resistor', 2, 2, 90, '4'),
+				comp('V1', 'voltage_source', 4, 0, 0, '6'),
+				comp('I2', 'current_source', 6, 2, 90, '1'),
+				comp('G', 'ground', 0, 4, 0, '0')
+			],
+			wires: [wire('wa', [0, 0], [2, 0]), wire('wc', [0, 4], [6, 4])]
+		};
+		const st = solveCircuit(doc).methods.source_transform!;
+		expect(st.steps.length).toBeLessThan(10);
+		if (st.applicable) expect(st.verifiedAgainstMna).toBe(true);
+		const titles = st.steps.map((x) => x.title).join('|');
+		expect(titles).not.toMatch(/Thévenin → Norton.*Norton → Thévenin.*Thévenin → Norton/);
+	});
+
+	it('5b. Superposition without a ground symbol uses one reference for every sub-circuit', () => {
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('I1', 'current_source', 0, 2, 270, '2'),
+				comp('R1', 'resistor', 2, 2, 90, '4'),
+				comp('R3', 'resistor', 4, 0, 0, '2'),
+				comp('R2', 'resistor', 6, 2, 90, '3'),
+				comp('I2', 'current_source', 8, 2, 270, '1')
+			],
+			wires: [wire('wa', [0, 0], [2, 0]), wire('wb', [6, 0], [8, 0]), wire('wc', [0, 4], [8, 4])]
+		};
+		const sup = solveCircuit(doc).methods.superposition!;
+		expect(sup.applicable).toBe(true);
+		expect(sup.verifiedAgainstMna).toBe(true);
+	});
+
+	it('3d. Dependent sources: delivered pf (lagging into R+jX) and not offered as Thévenin load', () => {
+		// V1 10 V -> R1 1 Ω -> R2 1 Ω divider; VCVS E1 = 2·V(R2) drives R3 3 Ω + jX_L 4 Ω
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'ac',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', 0, 2, 90, '10'),
+				comp('R1', 'resistor', 2, 0, 0, '1'),
+				comp('R2', 'resistor', 4, 2, 90, '1'),
+				comp('E1', 'vcvs', 8, 2, 90, '2', { controlRef: { controlComponentId: 'R2', gain: '2' } }),
+				comp('R3', 'resistor', 10, 0, 0, '3'),
+				comp('L1', 'inductor', 12, 2, 90, 'j4', { valueMode: 'impedance', unit: 'Ω' }),
+				comp('G1', 'ground', 0, 4, 0, '0')
+			],
+			wires: [wire('w_gnd', [0, 4], [12, 4])]
+		};
+		const r = solveCircuit(doc, { theveninTarget: { kind: 'component', componentId: 'E1' } });
+		expect(r.mna.valid).toBe(true);
+		const e1 = r.mna.branches['E1'];
+		expect(e1.realPower).toBeCloseTo(-12, 9);
+		expect(e1.powerFactor).toBeCloseTo(0.6, 9);
+		expect(e1.powerFactorType).toBe('lagging');
+		expect(r.methods.thevenin_norton!.applicable).toBe(false);
+	});
+
 	it('6. AC RLC Series-Parallel Thévenin & Conjugate Max Power Transfer', () => {
 		const freq = 1000 / (2 * Math.PI); // omega = 1000
 		// V1=50∠0° V, R1=30Ω, L1=40mH (j40 Ω) in series, load R_L=20Ω
@@ -262,6 +371,39 @@ describe('All 6 Pedagogical Method Solvers + Cross-Verification Gate', () => {
 		const allLatex = lastStep.latex!.join('\n');
 		expect(allLatex).toContain('\\cos(');
 		expect(allLatex).toContain('V_{N2,\\text{rms}}');
+	});
+
+	it('7b. Multi-Frequency: MNA is flagged and single-phasor methods are not applicable', () => {
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'ac',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', 0, 2, 90, '10∠0°', { frequencyHz: 60 }),
+				comp('R1', 'resistor', 2, 0, 0, '10'),
+				comp('R2', 'resistor', 4, 2, 90, '10'),
+				comp('V2', 'voltage_source', 8, 2, 90, '6∠90°', { frequencyHz: 120 }),
+				comp('R3', 'resistor', 6, 0, 0, '10'),
+				comp('G1', 'ground', 0, 4, 0, '0')
+			],
+			wires: [wire('w_gnd', [0, 4], [8, 4])]
+		};
+
+		const full = solveCircuit(doc);
+		expect(full.mna.multiFrequencyHz).toEqual([60, 120]);
+		expect(full.mna.diagnostics.some((d) => d.code === 'MULTI_FREQUENCY')).toBe(true);
+		for (const id of ['kcl_kvl', 'nodal', 'mesh', 'source_transform', 'thevenin_norton'] as const) {
+			expect(full.methods[id]?.applicable).toBe(false);
+		}
+		expect(full.methods.superposition?.applicable).toBe(true);
+
+		// Same circuit at one frequency is not flagged
+		const single = solveCircuit({
+			...doc,
+			components: doc.components.map((c) => (c.id === 'V2' ? { ...c, frequencyHz: 60 } : c))
+		});
+		expect(single.mna.multiFrequencyHz).toBeUndefined();
+		expect(single.methods.nodal?.applicable).toBe(true);
 	});
 
 	it('8. Non-Planar K_{3,3} Graph: Mesh returns applicable=false while Nodal & KCL/KVL solve accurately', () => {

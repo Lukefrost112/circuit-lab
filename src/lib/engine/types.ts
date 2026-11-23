@@ -62,6 +62,12 @@ export interface DependentControlRef {
 	/** For VCVS/VCCS: controlling positive/negative nodes (used when controlComponentId is not set) */
 	controlNodePos?: string;
 	controlNodeNeg?: string;
+	/**
+	 * Pin anchors for controlNodePos/Neg. Node IDs are renumbered when the layout changes, so the
+	 * store re-resolves the node names from these pins before solving (engine ignores them).
+	 */
+	controlNodePosPin?: PinAnchor;
+	controlNodeNegPin?: PinAnchor;
 	/** For CCVS/CCCS: ID of branch component whose current (pin 0 -> pin 1) controls the source */
 	controlBranchComponentId?: string;
 	/** Optional sign multiplier for the controlling variable (+1 default, -1 flipped) */
@@ -112,6 +118,17 @@ export interface CircuitConstraint {
 	value: string;
 	/** Optional display label (e.g. "V_o", "I_x", "P_R2") */
 	label?: string;
+	/**
+	 * For node_voltage: a component pin on the target node. Node IDs (N1, N2, ...) are renumbered
+	 * whenever the layout changes, so the store re-resolves `targetId` from this pin before solving.
+	 */
+	targetPin?: PinAnchor;
+}
+
+/** A stable reference to an electrical node: one component pin that sits on it. */
+export interface PinAnchor {
+	componentId: string;
+	pinIndex: number;
 }
 
 export interface UnknownTerm {
@@ -267,7 +284,8 @@ export interface BranchResult {
 	reactivePower: number;
 	/** Apparent power |S| in VA */
 	apparentPower: number;
-	/** Power factor P / |S|, or null if |S| == 0 */
+	/** Power factor P / |S| (absorbed P for passives, delivered P for sources), or null if |S| == 0.
+	 *  `powerFactorType` uses the same view: a source feeding an inductive load is 'lagging'. */
 	powerFactor: number | null;
 	powerFactorType?: 'leading' | 'lagging' | 'unity';
 	/** True for ideal non-intrusive measurement instruments (e.g. ideal voltmeter, Y = 0, I = 0) */
@@ -296,6 +314,11 @@ export interface MnaSolution {
 	mode: AnalysisMode;
 	frequencyHz: number;
 	acMagnitudeMode: AcMagnitudeMode;
+	/**
+	 * Set when active AC sources run at different frequencies. The single-phasor node/branch
+	 * values are then NOT a valid answer (they mix frequencies); only Superposition is.
+	 */
+	multiFrequencyHz?: number[];
 	diagnostics: ValidationDiagnostic[];
 	nodeVoltages: Record<string, NodeResult>;
 	branches: Record<string, BranchResult>;
@@ -336,7 +359,7 @@ export interface MethodResult {
 
 export type TheveninTarget =
 	| { kind: 'component'; componentId: string }
-	| { kind: 'terminals'; nodeA: string; nodeB: string };
+	| { kind: 'terminals'; nodeA: string; nodeB: string; pinA?: PinAnchor; pinB?: PinAnchor };
 
 export interface MaxPowerTransferInfo {
 	optimalLoadImpedance: Complex;
