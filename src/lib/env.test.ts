@@ -68,23 +68,25 @@ describe('resolveGaMeasurementId', () => {
 });
 
 describe('resolveAcEnabled', () => {
-	it('disables AC by default on production and enables it on staging and development', () => {
-		expect(resolveAcEnabled('production')).toBe(false);
+	it('enables AC by default on production, staging, and development', () => {
+		expect(resolveAcEnabled('production')).toBe(true);
 		expect(resolveAcEnabled('staging')).toBe(true);
 		expect(resolveAcEnabled('development')).toBe(true);
 	});
 
 	it('honors explicit true/false overrides regardless of environment', () => {
+		expect(resolveAcEnabled('production', 'false')).toBe(false);
+		expect(resolveAcEnabled('production', '  FALSE ')).toBe(false);
 		expect(resolveAcEnabled('production', 'true')).toBe(true);
 		expect(resolveAcEnabled('production', '  TRUE ')).toBe(true);
 		expect(resolveAcEnabled('staging', 'false')).toBe(false);
 		expect(resolveAcEnabled('development', ' False ')).toBe(false);
 	});
 
-	it('ignores empty or unrecognized overrides and falls back to env default', () => {
-		expect(resolveAcEnabled('production', '')).toBe(false);
-		expect(resolveAcEnabled('production', '   ')).toBe(false);
-		expect(resolveAcEnabled('production', 'yes')).toBe(false);
+	it('ignores empty or unrecognized overrides and falls back to true', () => {
+		expect(resolveAcEnabled('production', '')).toBe(true);
+		expect(resolveAcEnabled('production', '   ')).toBe(true);
+		expect(resolveAcEnabled('production', 'yes')).toBe(true);
 		expect(resolveAcEnabled('staging', 'invalid')).toBe(true);
 		expect(resolveAcEnabled('development', '0')).toBe(true);
 	});

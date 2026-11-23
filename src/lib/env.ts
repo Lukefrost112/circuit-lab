@@ -19,11 +19,11 @@ export function resolveGaMeasurementId(
 	return trimmed || DEFAULT_PRODUCTION_GA_ID;
 }
 
-export function resolveAcEnabled(env: DeployEnv, rawOverride?: string): boolean {
+export function resolveAcEnabled(_env: DeployEnv, rawOverride?: string): boolean {
 	const normalized = rawOverride?.trim().toLowerCase();
 	if (normalized === 'true') return true;
 	if (normalized === 'false') return false;
-	return env !== 'production';
+	return true;
 }
 
 export function getSettingsStorageKey(env: DeployEnv): string {
