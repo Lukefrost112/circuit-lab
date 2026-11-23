@@ -264,6 +264,39 @@ describe('All 6 Pedagogical Method Solvers + Cross-Verification Gate', () => {
 		expect(allLatex).toContain('V_{N2,\\text{rms}}');
 	});
 
+	it('7b. Multi-Frequency: MNA is flagged and single-phasor methods are not applicable', () => {
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'ac',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', 0, 2, 90, '10∠0°', { frequencyHz: 60 }),
+				comp('R1', 'resistor', 2, 0, 0, '10'),
+				comp('R2', 'resistor', 4, 2, 90, '10'),
+				comp('V2', 'voltage_source', 8, 2, 90, '6∠90°', { frequencyHz: 120 }),
+				comp('R3', 'resistor', 6, 0, 0, '10'),
+				comp('G1', 'ground', 0, 4, 0, '0')
+			],
+			wires: [wire('w_gnd', [0, 4], [8, 4])]
+		};
+
+		const full = solveCircuit(doc);
+		expect(full.mna.multiFrequencyHz).toEqual([60, 120]);
+		expect(full.mna.diagnostics.some((d) => d.code === 'MULTI_FREQUENCY')).toBe(true);
+		for (const id of ['kcl_kvl', 'nodal', 'mesh', 'source_transform', 'thevenin_norton'] as const) {
+			expect(full.methods[id]?.applicable).toBe(false);
+		}
+		expect(full.methods.superposition?.applicable).toBe(true);
+
+		// Same circuit at one frequency is not flagged
+		const single = solveCircuit({
+			...doc,
+			components: doc.components.map((c) => (c.id === 'V2' ? { ...c, frequencyHz: 60 } : c))
+		});
+		expect(single.mna.multiFrequencyHz).toBeUndefined();
+		expect(single.methods.nodal?.applicable).toBe(true);
+	});
+
 	it('8. Non-Planar K_{3,3} Graph: Mesh returns applicable=false while Nodal & KCL/KVL solve accurately', () => {
 		// Bipartite K_{3,3}: left nodes L0='0', L1=(0,2), L2=(0,4); right nodes R0=(4,0), R1=(4,2), R2=(4,4)
 		// Connect all 9 pairs via resistors + 1 voltage source V1 across (L1, 0)

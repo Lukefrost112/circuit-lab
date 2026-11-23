@@ -1521,7 +1521,7 @@
 		isVoltmeterOpen?: boolean;
 	} {
 		if (comp.kind === 'voltmeter') {
-			const branch = circuit.solution.mna.valid ? circuit.solution.mna.branches[comp.id] : undefined;
+			const branch = circuit.solution.mna.valid && !circuit.solution.mna.multiFrequencyHz ? circuit.solution.mna.branches[comp.id] : undefined;
 			if (branch) {
 				const formattedV = formatComplexOverlay(branch.voltage, 'V', circuit.document.mode, {
 					precision: settings.precision,
@@ -1711,7 +1711,7 @@
 	}
 
 	const overlayLayout = $derived.by<{ nodes: NodeOverlayItem[]; branches: BranchOverlayItem[] }>(() => {
-		if (!settings.showLiveOverlays || !circuit.solution.mna.valid) {
+		if (!settings.showLiveOverlays || !circuit.solution.mna.valid || circuit.solution.mna.multiFrequencyHz) {
 			return { nodes: [], branches: [] };
 		}
 
@@ -1860,7 +1860,7 @@
 
 	const probedNodeData = $derived.by(() => {
 		const nid = hoveredNodeId ?? pinnedProbeNodeId;
-		if (!nid || !circuit.solution.mna.valid) return null;
+		if (!nid || !circuit.solution.mna.valid || circuit.solution.mna.multiFrequencyHz) return null;
 		const res = circuit.solution.mna.nodeVoltages[nid];
 		if (!res) return null;
 		return {

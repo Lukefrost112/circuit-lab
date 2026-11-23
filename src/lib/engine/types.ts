@@ -273,6 +273,11 @@ export interface MnaSolution {
 	mode: AnalysisMode;
 	frequencyHz: number;
 	acMagnitudeMode: AcMagnitudeMode;
+	/**
+	 * Set when active AC sources run at different frequencies. The single-phasor node/branch
+	 * values are then NOT a valid answer (they mix frequencies); only Superposition is.
+	 */
+	multiFrequencyHz?: number[];
 	diagnostics: ValidationDiagnostic[];
 	nodeVoltages: Record<string, NodeResult>;
 	branches: Record<string, BranchResult>;

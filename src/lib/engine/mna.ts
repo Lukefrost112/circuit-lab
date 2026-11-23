@@ -165,6 +165,26 @@ function makeInvalidSolution(
 }
 
 /**
+ * Returns the distinct frequencies of the *active* (non-zero) independent sources when an AC
+ * circuit mixes frequencies, else undefined. Zeroed sources (e.g. deactivated by superposition)
+ * do not count, so per-source superposition sub-circuits are single-frequency.
+ */
+export function detectMultiFrequency(
+	doc: CircuitDocument,
+	frequencyHz: number
+): number[] | undefined {
+	if (doc.mode !== 'ac') return undefined;
+	const freqs = new Set<number>();
+	for (const comp of doc.components) {
+		if (comp.kind !== 'voltage_source' && comp.kind !== 'current_source') continue;
+		const val = parseSourceValue(comp, 'ac');
+		if (!val || val.abs() < 1e-15) continue;
+		freqs.add(comp.frequencyHz ?? frequencyHz);
+	}
+	return freqs.size > 1 ? [...freqs].sort((a, b) => a - b) : undefined;
+}
+
+/**
  * Solves a DC or AC steady-state linear circuit using Modified Nodal Analysis (MNA).
  */
 export function solveMNA(doc: CircuitDocument, options?: SolveMnaOptions): MnaSolution {
@@ -178,6 +198,20 @@ export function solveMNA(doc: CircuitDocument, options?: SolveMnaOptions): MnaSo
 
 	if (diagnostics.some((d) => d.severity === 'error')) {
 		return makeInvalidSolution(doc, frequencyHz, acMagnitudeMode, diagnostics);
+	}
+
+	const multiFrequencyHz = detectMultiFrequency(doc, frequencyHz);
+	if (multiFrequencyHz) {
+		diagnostics.push({
+			severity: 'warning',
+			code: 'MULTI_FREQUENCY',
+			message: `Sources run at different frequencies (${multiFrequencyHz
+				.map((f) => `${Number(f.toPrecision(4))} Hz`)
+				.join(', ')}). One phasor per node cannot describe this circuit, so node/branch values are hidden. Use the Superposition tab: it solves each frequency separately and adds the responses in the time domain.`,
+			componentIds: doc.components
+				.filter((c) => c.kind === 'voltage_source' || c.kind === 'current_source')
+				.map((c) => c.id)
+		});
 	}
 
 	const nodeOrder = graph.nonRefNodeIds;
@@ -410,6 +444,7 @@ export function solveMNA(doc: CircuitDocument, options?: SolveMnaOptions): MnaSo
 		mode,
 		frequencyHz,
 		acMagnitudeMode,
+		...(multiFrequencyHz ? { multiFrequencyHz } : {}),
 		diagnostics,
 		nodeVoltages,
 		branches,

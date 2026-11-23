@@ -115,7 +115,7 @@
 	const selectedVoltmeterReading = $derived.by(() => {
 		if (!selectedComp || selectedComp.kind !== 'voltmeter') return null;
 		const [nodeA, nodeB] = circuit.graph.componentNodes[selectedComp.id] ?? [];
-		const branch = circuit.solution.mna.valid
+		const branch = circuit.solution.mna.valid && !circuit.solution.mna.multiFrequencyHz
 			? circuit.solution.mna.branches[selectedComp.id]
 			: undefined;
 		if (!branch) {
