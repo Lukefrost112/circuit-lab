@@ -216,6 +216,12 @@ export function solveSourceTransform(doc: CircuitDocument, mna: MnaSolution): Me
 	const incidentEdgesOf = (node: string) =>
 		edges.filter((e) => e.u === node || e.v === node);
 
+	// Rules 5 (Thévenin→Norton) and 6 (Norton→Thévenin) are inverses. Never let one directly
+	// undo the other, or the reduction ping-pongs until MAX_ITERS.
+	const nodesFromNortonToThevenin = new Set<string>();
+	const sourcesFromTheveninToNorton = new Set<string>();
+	let converged = false;
+
 	const MAX_ITERS = 100;
 	for (let iter = 0; iter < MAX_ITERS; iter++) {
 		let changed = false;
@@ -402,6 +408,7 @@ export function solveSourceTransform(doc: CircuitDocument, mna: MnaSolution): Me
 		for (const w of candidateNodes) {
 			const inc = incidentEdgesOf(w);
 			if (inc.length !== 2) continue;
+			if (nodesFromNortonToThevenin.has(w)) continue;
 			const vEdge = inc.find((e) => e.kind === 'v_source');
 			const zEdge = inc.find((e) => e.kind === 'impedance');
 			if (!vEdge || !zEdge || zEdge.value.isZero(1e-15)) continue;
@@ -425,6 +432,7 @@ export function solveSourceTransform(doc: CircuitDocument, mna: MnaSolution): Me
 
 			edges = edges.filter((e) => e.id !== vEdge.id && e.id !== zEdge.id);
 			edges.push({ id: newIId, label: newILabel, kind: 'i_source', u, v, value: iN });
+			sourcesFromTheveninToNorton.add(newIId);
 			edges.push({
 				id: newZId,
 				label: newZLabel,
@@ -473,6 +481,7 @@ export function solveSourceTransform(doc: CircuitDocument, mna: MnaSolution): Me
 		// guaranteeing that the next iteration combines impedances in series!
 		const csCandidates = edges.filter((e) => e.kind === 'i_source');
 		for (const cs of csCandidates) {
+			if (sourcesFromTheveninToNorton.has(cs.id)) continue;
 			const zPartner = edges.find(
 				(e) =>
 					e.kind === 'impedance' &&
@@ -525,6 +534,7 @@ export function solveSourceTransform(doc: CircuitDocument, mna: MnaSolution): Me
 				value: zPartner.value
 			});
 			activeNodes.add(wNew);
+			nodesFromNortonToThevenin.add(wNew);
 
 			unwindStack.push((nodeV, edgeV, edgeI) => {
 				const vFixed = nodeV.get(fixedAt!) ?? Complex.zero();
@@ -551,7 +561,21 @@ export function solveSourceTransform(doc: CircuitDocument, mna: MnaSolution): Me
 			break;
 		}
 
-		if (!changed) break;
+		if (!changed) {
+			converged = true;
+			break;
+		}
+	}
+
+	if (!converged) {
+		return {
+			methodId: 'source_transform',
+			title,
+			applicable: false,
+			inapplicableReason:
+				'Source transformations did not settle on a reduced circuit for this topology; use nodal or mesh analysis instead.',
+			steps: []
+		};
 	}
 
 	// Solve the final reduced core independently

@@ -246,6 +246,28 @@ describe('All 6 Pedagogical Method Solvers + Cross-Verification Gate', () => {
 		expect(r.theveninNorton).toBeUndefined();
 	});
 
+	it('4b. Source transformation does not ping-pong Norton <-> Thévenin', () => {
+		// I1 || R1 (ground-N1), V1 from N1 to N2, I2 from N2 to ground
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('I1', 'current_source', 0, 2, 270, '2'),
+				comp('R1', 'resistor', 2, 2, 90, '4'),
+				comp('V1', 'voltage_source', 4, 0, 0, '6'),
+				comp('I2', 'current_source', 6, 2, 90, '1'),
+				comp('G', 'ground', 0, 4, 0, '0')
+			],
+			wires: [wire('wa', [0, 0], [2, 0]), wire('wc', [0, 4], [6, 4])]
+		};
+		const st = solveCircuit(doc).methods.source_transform!;
+		expect(st.steps.length).toBeLessThan(10);
+		if (st.applicable) expect(st.verifiedAgainstMna).toBe(true);
+		const titles = st.steps.map((x) => x.title).join('|');
+		expect(titles).not.toMatch(/Thévenin → Norton.*Norton → Thévenin.*Thévenin → Norton/);
+	});
+
 	it('6. AC RLC Series-Parallel Thévenin & Conjugate Max Power Transfer', () => {
 		const freq = 1000 / (2 * Math.PI); // omega = 1000
 		// V1=50∠0° V, R1=30Ω, L1=40mH (j40 Ω) in series, load R_L=20Ω
