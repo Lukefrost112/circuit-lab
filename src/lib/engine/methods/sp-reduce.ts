@@ -339,7 +339,9 @@ export function walkToTarget(args: SpWalkArgs): SpWalk | null {
 		if (node.kind === 'series') {
 			let at = entry;
 			let next: SpTree | undefined;
-			for (const c of node.children) {
+			// Children run from node.from to node.to; walk them from the end the current enters.
+			const kids = node.from === entry ? node.children : [...node.children].reverse();
+			for (const c of kids) {
 				if (has(c)) {
 					next = c;
 					entry = at;

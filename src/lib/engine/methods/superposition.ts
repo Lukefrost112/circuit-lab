@@ -381,6 +381,10 @@ export function solveSuperposition(
 					(c) =>
 						c.id === options.targetComponentId &&
 						c.kind !== 'voltmeter' &&
+						// An independent source is switched off in some parts, so it can't be the
+						// element we work toward; the Ans. step still reports it.
+						c.kind !== 'voltage_source' &&
+						c.kind !== 'current_source' &&
 						mna.branches[c.id] !== undefined
 				)
 			: undefined;

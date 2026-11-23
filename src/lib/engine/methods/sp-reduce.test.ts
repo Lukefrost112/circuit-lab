@@ -193,3 +193,23 @@ describe('sp-reduce: names', () => {
 		expect(latexName('')).toBe('\\text{?}');
 	});
 });
+
+describe('walkToTarget: series chain entered from its far end', () => {
+	it('keeps the right sign when the chain was built from the other port', () => {
+		const red = reduceSeriesParallel({
+			edges: [edge('Ra', 'Q', 'M', 1000), edge('Rb', 'M', 'P', 2000)],
+			ports: ['P', 'Q']
+		});
+		const w = walkToTarget({
+			root: red.root!,
+			entry: 'Q',
+			current: Complex.from(1, 0),
+			currentName: 'I_s',
+			targetId: 'Ra',
+			finalName: "I'_{R_{a}}",
+			mode: 'dc'
+		})!;
+		expect(w.current.re).toBeCloseTo(1, 12);
+		expect(w.reversed).toBe(false);
+	});
+});

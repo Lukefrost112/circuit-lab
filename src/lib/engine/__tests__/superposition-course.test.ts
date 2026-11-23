@@ -145,7 +145,7 @@ describe('superposition, course style', () => {
 
 	it('a bridge forced to superposition falls back per part, never throws, still verified', () => {
 		const bridge = getPresetById('dc-wheatstone-bridge')!.document;
-		for (const target of ['R5', 'R1', 'V1']) {
+		for (const target of ['R5', 'R1']) {
 			const { res } = sup(structuredClone(bridge), target);
 			expect(res.applicable).toBe(true);
 			expect(res.verifiedAgainstMna).toBe(true);
@@ -154,6 +154,15 @@ describe('superposition, course style', () => {
 			expect(lines).toContain('\\text{Nodal KCL Equations}');
 			expect(lines).toContain(`I'_{`);
 		}
+	});
+
+	it('a source as the target is not worked toward (it is off in some parts), but still solves', () => {
+		const bridge = getPresetById('dc-wheatstone-bridge')!.document;
+		const { res } = sup(structuredClone(bridge), 'V1');
+		expect(res.applicable).toBe(true);
+		expect(res.verifiedAgainstMna).toBe(true);
+		const all = res.steps.flatMap((s) => s.latex ?? []).join('\n');
+		expect(all).not.toContain(`I'_{V`);
 	});
 
 	it('a circuit with a dependent source falls back and is verified', () => {
