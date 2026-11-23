@@ -688,6 +688,7 @@ class CircuitStore {
 				};
 			})
 		};
+		return true;
 	}
 
 	updateComponentControlRef(id: string, patch: Partial<DependentControlRef>): void {
@@ -728,7 +729,6 @@ class CircuitStore {
 				c.id === id ? { ...c, controlRef: merged } : c
 			)
 		};
-		return true;
 	}
 
 	deleteComponent(id: string): void {
