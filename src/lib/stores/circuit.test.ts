@@ -344,6 +344,22 @@ describe('circuit reactive store', () => {
 		);
 	});
 
+	it('rejects duplicate labels (including ones that render the same) and keeps Thévenin changes in undo history', () => {
+		expect(circuit.updateComponent('R2', { label: 'R1' })).toBe(false);
+		expect(circuit.updateComponent('R2', { label: 'R-1' })).toBe(false); // renders as R_1
+		expect(circuit.document.components.find((c) => c.id === 'R2')!.label).toBe('R2');
+		expect(circuit.updateComponent('R2', { label: 'Rload' })).toBe(true);
+
+		expect(circuit.theveninTarget).toEqual({ kind: 'component', componentId: 'R3' });
+		circuit.updateComponent('R1', { value: '3k' });
+		circuit.setTheveninComponent('R2');
+		circuit.undo(); // undoes only the target change
+		expect(circuit.theveninTarget).toEqual({ kind: 'component', componentId: 'R3' });
+		expect(circuit.document.components.find((c) => c.id === 'R1')!.value).toBe('3k');
+		circuit.redo();
+		expect(circuit.theveninTarget).toEqual({ kind: 'component', componentId: 'R2' });
+	});
+
 	it('auto-wires unlinked components into a valid MNA solution and restores unwired state in a single undo step', () => {
 		circuit.clearCircuit();
 		circuit.addComponent('voltage_source', 4, 8, { rotation: 90, value: '12' });

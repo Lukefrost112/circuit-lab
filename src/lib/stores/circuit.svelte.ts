@@ -603,12 +603,29 @@ class CircuitStore {
 		};
 	}
 
+	/**
+	 * True if another component already uses this label (or one that renders the same in the
+	 * steps: LaTeX subscripts keep only [A-Za-z0-9_], so "R-1" and "R1" both show as R_1).
+	 */
+	isLabelTaken(label: string, exceptId?: string): boolean {
+		const key = label.replace(/[^a-zA-Z0-9_]/g, '');
+		return this._document.components.some(
+			(c) =>
+				c.id !== exceptId &&
+				(c.label.replace(/[^a-zA-Z0-9_]/g, '') === key || c.id === label)
+		);
+	}
+
+	/** Returns false (and changes nothing) if the patch would duplicate another label. */
 	updateComponent(
 		id: string,
 		patch: Partial<Omit<CircuitComponent, 'id' | 'kind'>>
-	): void {
+	): boolean {
 		const target = this._document.components.find((c) => c.id === id);
-		if (!target) return;
+		if (!target) return false;
+		if (patch.label !== undefined && patch.label !== target.label && this.isLabelTaken(patch.label, id)) {
+			return false;
+		}
 
 		this.recordSnapshot();
 
@@ -636,6 +653,7 @@ class CircuitStore {
 					: c
 			)
 		};
+		return true;
 	}
 
 	deleteComponent(id: string): void {
@@ -1184,11 +1202,14 @@ class CircuitStore {
 		) {
 			return;
 		}
+		if (this._theveninTarget?.kind === 'component' && this._theveninTarget.componentId === id) return;
+		this.recordSnapshot();
 		this._theveninTarget = { kind: 'component', componentId: id };
 	}
 
 	setTheveninTerminals(nodeA: string, nodeB: string): void {
 		if (!nodeA || !nodeB || nodeA === nodeB) return;
+		this.recordSnapshot();
 		this._theveninTarget = {
 			kind: 'terminals',
 			nodeA,
@@ -1199,6 +1220,8 @@ class CircuitStore {
 	}
 
 	clearTheveninTarget(): void {
+		if (!this._theveninTarget) return;
+		this.recordSnapshot();
 		this._theveninTarget = undefined;
 	}
 
