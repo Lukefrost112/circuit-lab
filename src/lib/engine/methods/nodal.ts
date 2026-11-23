@@ -18,7 +18,7 @@ import {
 	parseSourceValue,
 	resolveDependentControlNodes
 } from '../graph';
-import { matrixToLatex, solveComplexLinearSystem } from '../linalg';
+import { solveComplexLinearSystem } from '../linalg';
 import {
 	isDependentSourceKind,
 	isDependentVoltageSource,
@@ -29,6 +29,7 @@ import {
 	type SolutionStep
 } from '../types';
 import {
+	courseSolveDisplay,
 	formatDependentSourceExpr,
 	formatLatexTerm,
 	formatLatexValue,
@@ -483,7 +484,7 @@ export function solveNodal(doc: CircuitDocument, mna: MnaSolution): MethodResult
 		nodeVoltages[nid] = v;
 	}
 
-	let matrixLatex: string | undefined;
+	let solveDisplay: ReturnType<typeof courseSolveDisplay> | undefined;
 	if (U > 0) {
 		if (row !== U) {
 			return {
@@ -507,10 +508,12 @@ export function solveNodal(doc: CircuitDocument, mna: MnaSolution): MethodResult
 		unknownNodes.forEach((nid, i) => {
 			nodeVoltages[nid] = solved.x[i];
 		});
-		matrixLatex = matrixToLatex(
+		solveDisplay = courseSolveDisplay(
 			A,
+			b,
 			unknownNodes.map((nid) => `V_{${nid}}`),
-			b
+			'V',
+			mode
 		);
 	}
 
@@ -640,11 +643,15 @@ export function solveNodal(doc: CircuitDocument, mna: MnaSolution): MethodResult
 		latex: kclLatex.length > 0 ? kclLatex : ['\\text{All node voltages are directly fixed by sources.}']
 	});
 
-	if (matrixLatex) {
+	if (solveDisplay && (solveDisplay.latex.length > 0 || solveDisplay.matrixLatex)) {
 		steps.push({
-			title: `${stepNum++}. Reduced Nodal Matrix System`,
-			description: `Reduced ${U}×${U} nodal system (eliminating ground-referenced independent source nodes and voltage-source current rows).`,
-			matrixLatex
+			title: `${stepNum++}. ${solveDisplay.remaining >= 2 ? 'Solve the Simultaneous Equations' : 'Solve the Equation'}`,
+			description:
+				solveDisplay.remaining >= 2
+					? `${solveDisplay.remaining} equations in ${solveDisplay.remaining} unknown node voltages, solved together (matrix form).`
+					: 'Collect the terms of each unknown node voltage and divide.',
+			latex: solveDisplay.latex.length > 0 ? solveDisplay.latex : undefined,
+			matrixLatex: solveDisplay.matrixLatex
 		});
 	}
 

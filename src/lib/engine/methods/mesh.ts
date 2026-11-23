@@ -15,7 +15,7 @@ import {
 	parseSourceValue,
 	resolveDependentControlNodes
 } from '../graph';
-import { matrixToLatex, solveComplexLinearSystem } from '../linalg';
+import { solveComplexLinearSystem } from '../linalg';
 import {
 	isDependentCurrentSource,
 	isDependentSourceKind,
@@ -27,6 +27,7 @@ import {
 	type SolutionStep
 } from '../types';
 import {
+	courseSolveDisplay,
 	formatDependentSourceExpr,
 	formatLatexTerm,
 	formatLatexValue,
@@ -984,15 +985,24 @@ export function solveMesh(doc: CircuitDocument, mna: MnaSolution): MethodResult 
 		latex: kvlLatex.length > 0 ? kvlLatex : ['\\text{All mesh currents are fixed directly by current sources.}']
 	});
 
-	steps.push({
-		title: `${stepNum++}. Mesh Matrix System`,
-		description: `Assembled ${M}×${M} mesh impedance & constraint matrix.`,
-		matrixLatex: matrixToLatex(
-			Z,
-			meshes.map((m) => `I_{m${m.id + 1}}`),
-			rhs
-		)
-	});
+	const solveDisplay = courseSolveDisplay(
+		Z,
+		rhs,
+		meshes.map((m) => `I_{m${m.id + 1}}`),
+		'A',
+		mode
+	);
+	if (solveDisplay.latex.length > 0 || solveDisplay.matrixLatex) {
+		steps.push({
+			title: `${stepNum++}. ${solveDisplay.remaining >= 2 ? 'Solve the Simultaneous Equations' : 'Solve the Equation'}`,
+			description:
+				solveDisplay.remaining >= 2
+					? `${solveDisplay.remaining} equations in ${solveDisplay.remaining} unknown mesh currents, solved together (matrix form).`
+					: 'Mesh currents fixed by current sources are substituted; the remaining equation is solved by collecting terms and dividing.',
+			latex: solveDisplay.latex.length > 0 ? solveDisplay.latex : undefined,
+			matrixLatex: solveDisplay.matrixLatex
+		});
+	}
 
 	steps.push({
 		title: `${stepNum++}. Solved Mesh & Branch Currents`,
