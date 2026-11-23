@@ -10,6 +10,11 @@ describe('courseSolveDisplay', () => {
 		expect(d.remaining).toBe(1);
 		expect(d.matrixLatex).toBeUndefined();
 		expect(d.latex.join(' ')).toMatch(/V_{N1} = .* = 4\\text/);
+		// No bare ';' (a lost backslash in "\\;") and no nested fractions.
+		for (const l of d.latex) {
+			expect(l).not.toMatch(/(^|[^\\]);/);
+			expect(l).not.toMatch(/\\frac\{[^}]*\\frac/);
+		}
 	});
 
 	it('substitutes a mesh current fixed by a current source, then solves the one left', () => {

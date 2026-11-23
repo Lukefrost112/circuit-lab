@@ -418,7 +418,7 @@ export function courseSolveDisplay(
 			latex.push(
 				a.equals(Complex.one(), EPS)
 					? `${names[j]} = ${val(x)}\\text{ ${unit}}`
-					: `${term(a)}\\,${names[j]} = ${val(rhs)} \;\\Rightarrow\; ${names[j]} = ${val(x)}\\text{ ${unit}}`
+					: `${term(a)}\\,${names[j]} = ${val(rhs)} \\;\\Rightarrow\\; ${names[j]} = ${val(x)}\\text{ ${unit}}`
 			);
 			progress = true;
 		}
@@ -437,7 +437,7 @@ export function courseSolveDisplay(
 		const x = rhs.div(a);
 		if (known.size > 0) latex.push(`\\text{Substituting the known values leaves one equation:}`);
 		latex.push(
-			`${term(a)}\\,${names[j]} = ${val(rhs)} \;\\Rightarrow\; ${names[j]} = \\frac{${val(rhs)}}{${val(a)}} = ${val(x)}\\text{ ${unit}}`
+			`${term(a)}\\,${names[j]} = ${val(rhs)} \\;\\Rightarrow\\; ${names[j]} = ${val(rhs).includes('\\frac') || val(a).includes('\\frac') ? `${term(rhs)} \\div ${term(a)}` : `\\frac{${val(rhs)}}{${val(a)}}`} = ${val(x)}\\text{ ${unit}}`
 		);
 		return { latex, remaining: 1 };
 	}

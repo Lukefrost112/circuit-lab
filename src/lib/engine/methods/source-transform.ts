@@ -699,7 +699,8 @@ export function solveSourceTransform(
 			const iTot = vT.mul(ySum);
 			finishDesc = `Everything left sits in parallel with ${targetEdge.label}: one node pair. The total source current splits by admittance (current divider).`;
 			finishLatex.push(
-				`V_{${tLabel}} = \\frac{I_{\\text{total}}}{\\sum Y} = \\frac{${formatLatexValue(iTot, mode)}}{${zs.map((e) => `\\frac{1}{${formatLatexTerm(e.value, mode)}}`).join(' + ')}} = ${formatLatexValue(vT, mode)}\\text{ V}`,
+				`V_{${tLabel}} = \\frac{I_{\\text{total}}}{\\sum Y},\\quad \\sum Y = ${zs.map((e) => `\\frac{1}{${formatLatexTerm(e.value, mode)}}`).join(' + ')} = ${formatLatexValue(ySum, mode)}\\text{ S}`,
+				`V_{${tLabel}} = ${formatLatexTerm(iTot, mode)} \\div ${formatLatexTerm(ySum, mode)} = ${formatLatexValue(vT, mode)}\\text{ V}`,
 				`I_{${tLabel}} = \\frac{V_{${tLabel}}}{${formatLatexTerm(targetEdge.value, mode)}} = ${formatLatexValue(iT, mode)}\\text{ A}`
 			);
 		} else if (singleLoop()) {
