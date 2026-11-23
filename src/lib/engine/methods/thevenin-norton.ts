@@ -162,7 +162,11 @@ export function solveTheveninNorton(
 				}
 			};
 		}
-		if (loadComp.kind === 'voltage_source' || loadComp.kind === 'current_source') {
+		if (
+			loadComp.kind === 'voltage_source' ||
+			loadComp.kind === 'current_source' ||
+			isDependentSourceKind(loadComp.kind)
+		) {
 			return {
 				methodResult: {
 					methodId: 'thevenin_norton',

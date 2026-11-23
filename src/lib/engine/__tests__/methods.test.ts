@@ -287,6 +287,32 @@ describe('All 6 Pedagogical Method Solvers + Cross-Verification Gate', () => {
 		expect(sup.verifiedAgainstMna).toBe(true);
 	});
 
+	it('3d. Dependent sources: delivered pf (lagging into R+jX) and not offered as Thévenin load', () => {
+		// V1 10 V -> R1 1 Ω -> R2 1 Ω divider; VCVS E1 = 2·V(R2) drives R3 3 Ω + jX_L 4 Ω
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'ac',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', 0, 2, 90, '10'),
+				comp('R1', 'resistor', 2, 0, 0, '1'),
+				comp('R2', 'resistor', 4, 2, 90, '1'),
+				comp('E1', 'vcvs', 8, 2, 90, '2', { controlRef: { controlComponentId: 'R2', gain: '2' } }),
+				comp('R3', 'resistor', 10, 0, 0, '3'),
+				comp('L1', 'inductor', 12, 2, 90, 'j4', { valueMode: 'impedance', unit: 'Ω' }),
+				comp('G1', 'ground', 0, 4, 0, '0')
+			],
+			wires: [wire('w_gnd', [0, 4], [12, 4])]
+		};
+		const r = solveCircuit(doc, { theveninTarget: { kind: 'component', componentId: 'E1' } });
+		expect(r.mna.valid).toBe(true);
+		const e1 = r.mna.branches['E1'];
+		expect(e1.realPower).toBeCloseTo(-12, 9);
+		expect(e1.powerFactor).toBeCloseTo(0.6, 9);
+		expect(e1.powerFactorType).toBe('lagging');
+		expect(r.methods.thevenin_norton!.applicable).toBe(false);
+	});
+
 	it('6. AC RLC Series-Parallel Thévenin & Conjugate Max Power Transfer', () => {
 		const freq = 1000 / (2 * Math.PI); // omega = 1000
 		// V1=50∠0° V, R1=30Ω, L1=40mH (j40 Ω) in series, load R_L=20Ω

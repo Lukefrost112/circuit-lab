@@ -23,6 +23,7 @@ import {
 } from './graph';
 import { solveComplexLinearSystem } from './linalg';
 import {
+	isDependentSourceKind,
 	isDependentVoltageSource,
 	type AcMagnitudeMode,
 	type BranchResult,
@@ -670,7 +671,10 @@ export function solveMNA(doc: CircuitDocument, options?: SolveMnaOptions): MnaSo
 		// Sources report the power factor they deliver (S_supplied = -S_absorbed), which is the
 		// textbook "source power factor": a source feeding an R + jX load is lagging, not leading.
 		// Passives report the power factor of the power they absorb.
-		const isSource = comp.kind === 'voltage_source' || comp.kind === 'current_source';
+		const isSource =
+			comp.kind === 'voltage_source' ||
+			comp.kind === 'current_source' ||
+			isDependentSourceKind(comp.kind);
 		const pfReal = isSource ? -realPower : realPower;
 		const pfReactive = isSource ? -reactivePower : reactivePower;
 
