@@ -155,7 +155,18 @@
 	let hoverSnappedPin = $state<GridPoint | null>(null);
 	let hoveredNodeId = $state<string | null>(null);
 	let hoveredCrossingKey = $state<string | null>(null);
-	let pinnedProbeNodeId = $state<string | null>(null);
+	// Pinned probe is stored as a component pin: node IDs are renumbered when the layout changes.
+	let pinnedProbeAnchor = $state<{ componentId: string; pinIndex: number } | null>(null);
+	const pinnedProbeNodeId = $derived(
+		pinnedProbeAnchor
+			? (circuit.graph.componentNodes[pinnedProbeAnchor.componentId]?.[pinnedProbeAnchor.pinIndex] ??
+					null)
+			: null
+	);
+	function pinProbeNode(nodeId: string | null): void {
+		const pin = nodeId ? circuit.graph.nodes[nodeId]?.componentPins[0] : undefined;
+		pinnedProbeAnchor = pin ? { componentId: pin.componentId, pinIndex: pin.pinIndex } : null;
+	}
 	let isTouchInteraction = $state(false);
 
 	let wireStart = $state<GridPoint | null>(null);
@@ -851,7 +862,7 @@
 
 		if (circuit.activeTool === 'probe') {
 			const nid = findNodeNearGrid(gx, gy, getNodeProbeDist(e.pointerType));
-			pinnedProbeNodeId = nid;
+			pinProbeNode(nid);
 			return;
 		}
 
@@ -991,7 +1002,7 @@
 		const pt = { x: pinX, y: pinY };
 
 		if (circuit.activeTool === 'probe') {
-			pinnedProbeNodeId = findNodeNearGrid(pinX, pinY, getNodeProbeDist(e.pointerType));
+			pinProbeNode(findNodeNearGrid(pinX, pinY, getNodeProbeDist(e.pointerType)));
 			return;
 		}
 
@@ -1059,7 +1070,7 @@
 		if (circuit.activeTool === 'probe') {
 			e.stopPropagation();
 			const { gx, gy } = clientToGrid(e.clientX, e.clientY);
-			pinnedProbeNodeId = findNodeNearGrid(gx, gy, getNodeProbeDist(e.pointerType));
+			pinProbeNode(findNodeNearGrid(gx, gy, getNodeProbeDist(e.pointerType)));
 			return;
 		}
 
@@ -1448,7 +1459,7 @@
 				circuit.setActiveTool('select');
 			} else {
 				circuit.clearSelection();
-				pinnedProbeNodeId = null;
+				pinProbeNode(null);
 			}
 			return;
 		}

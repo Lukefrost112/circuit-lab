@@ -24,6 +24,7 @@ import {
 	type GridPoint,
 	type MethodId,
 	type PassiveValueMode,
+	type PinAnchor,
 	type Rotation,
 	type TheveninTarget,
 	type UnknownProblemSpec
@@ -103,6 +104,55 @@ function cloneDocument(doc: CircuitDocument): CircuitDocument {
 				}
 			: undefined
 	};
+}
+
+/**
+ * Node IDs (N1, N2, ...) are renumbered by position whenever the layout changes, so anything
+ * that points at a node is stored with a pin anchor and re-resolved against the current graph.
+ */
+function anchorForNode(
+	graph: ElectricalGraph,
+	nodeId: string,
+	excludeComponentId?: string
+): PinAnchor | undefined {
+	const pin = graph.nodes[nodeId]?.componentPins.find((p) => p.componentId !== excludeComponentId);
+	return pin ? { componentId: pin.componentId, pinIndex: pin.pinIndex } : undefined;
+}
+
+function nodeForAnchor(graph: ElectricalGraph, anchor?: PinAnchor): string | undefined {
+	if (!anchor) return undefined;
+	return graph.componentNodes[anchor.componentId]?.[anchor.pinIndex];
+}
+
+function resolveDocumentAnchors(doc: CircuitDocument, graph: ElectricalGraph): CircuitDocument {
+	const up = doc.unknownProblem;
+	const c = up?.constraint;
+	if (!up || !c || c.kind !== 'node_voltage' || !c.targetPin) return doc;
+	const nodeId = nodeForAnchor(graph, c.targetPin);
+	if (!nodeId || nodeId === c.targetId) return doc;
+	return { ...doc, unknownProblem: { ...up, constraint: { ...c, targetId: nodeId } } };
+}
+
+function resolveTheveninAnchors(
+	target: TheveninTarget | undefined,
+	graph: ElectricalGraph
+): TheveninTarget | undefined {
+	if (!target || target.kind !== 'terminals') return target;
+	const nodeA = nodeForAnchor(graph, target.pinA) ?? target.nodeA;
+	const nodeB = nodeForAnchor(graph, target.pinB) ?? target.nodeB;
+	if (nodeA === target.nodeA && nodeB === target.nodeB) return target;
+	return { ...target, nodeA, nodeB };
+}
+
+/** Re-anchor a pin that belongs to a component about to be deleted onto another pin of its node. */
+function reanchorAwayFrom(
+	graph: ElectricalGraph,
+	anchor: PinAnchor | undefined,
+	deletedId: string
+): PinAnchor | undefined {
+	if (!anchor || anchor.componentId !== deletedId) return anchor;
+	const nodeId = nodeForAnchor(graph, anchor);
+	return nodeId ? anchorForNode(graph, nodeId, deletedId) : undefined;
 }
 
 function cloneTheveninTarget(target?: TheveninTarget): TheveninTarget | undefined {
@@ -225,11 +275,18 @@ class CircuitStore {
 	private _redoStack = $state<HistorySnapshot[]>([]);
 
 	private _graph = $derived<ElectricalGraph>(buildElectricalGraph(this._document));
+	/** Document / Thévenin target with node references re-resolved from their pin anchors. */
+	private _resolvedDocument = $derived<CircuitDocument>(
+		resolveDocumentAnchors(this._document, this._graph)
+	);
+	private _resolvedTheveninTarget = $derived<TheveninTarget | undefined>(
+		resolveTheveninAnchors(this._theveninTarget, this._graph)
+	);
 	private _solution = $derived<FullSolveResult>(
-		solveCircuit(this._document, {
+		solveCircuit(this._resolvedDocument, {
 			frequencyHz: this._document.frequencyHz,
 			acMagnitudeMode: settings.acMagnitudeMode,
-			theveninTarget: this._theveninTarget
+			theveninTarget: this._resolvedTheveninTarget
 		})
 	);
 	private _selectedComponent = $derived<CircuitComponent | null>(
@@ -244,7 +301,7 @@ class CircuitStore {
 	);
 
 	get document(): CircuitDocument {
-		return this._document;
+		return this._resolvedDocument;
 	}
 
 	get documentLoadSeq(): number {
@@ -305,7 +362,7 @@ class CircuitStore {
 	}
 
 	get theveninTarget(): TheveninTarget | undefined {
-		return this._theveninTarget;
+		return this._resolvedTheveninTarget;
 	}
 
 	get activeMethod(): MethodId {
@@ -606,6 +663,22 @@ class CircuitStore {
 					}
 				}
 			}
+		}
+
+		if (nextUnknownProblem?.constraint.kind === 'node_voltage') {
+			const targetPin = reanchorAwayFrom(this._graph, nextUnknownProblem.constraint.targetPin, id);
+			nextUnknownProblem = {
+				...nextUnknownProblem,
+				constraint: { ...nextUnknownProblem.constraint, targetPin }
+			};
+		}
+		const tt = this._theveninTarget;
+		if (tt?.kind === 'terminals') {
+			this._theveninTarget = {
+				...tt,
+				pinA: reanchorAwayFrom(this._graph, tt.pinA, id),
+				pinB: reanchorAwayFrom(this._graph, tt.pinB, id)
+			};
 		}
 
 		this._document = {
@@ -1052,6 +1125,23 @@ class CircuitStore {
 		} else {
 			this._theveninTarget = undefined;
 		}
+
+		// Anchor node references from the loaded file/link to pins of the loaded layout
+		const up = this._document.unknownProblem;
+		if (up?.constraint.kind === 'node_voltage' && !up.constraint.targetPin) {
+			this._document = {
+				...this._document,
+				unknownProblem: { ...up, constraint: this.anchorConstraint(up.constraint) }
+			};
+		}
+		const tt = this._theveninTarget;
+		if (tt?.kind === 'terminals') {
+			this._theveninTarget = {
+				...tt,
+				pinA: tt.pinA ?? anchorForNode(this._graph, tt.nodeA),
+				pinB: tt.pinB ?? anchorForNode(this._graph, tt.nodeB)
+			};
+		}
 	}
 
 	loadPreset(presetId: string): boolean {
@@ -1099,7 +1189,13 @@ class CircuitStore {
 
 	setTheveninTerminals(nodeA: string, nodeB: string): void {
 		if (!nodeA || !nodeB || nodeA === nodeB) return;
-		this._theveninTarget = { kind: 'terminals', nodeA, nodeB };
+		this._theveninTarget = {
+			kind: 'terminals',
+			nodeA,
+			nodeB,
+			pinA: anchorForNode(this._graph, nodeA),
+			pinB: anchorForNode(this._graph, nodeB)
+		};
 	}
 
 	clearTheveninTarget(): void {
@@ -1114,10 +1210,22 @@ class CircuitStore {
 				? {
 						...problem,
 						...(problem.terms ? { terms: problem.terms.map((t) => ({ ...t })) } : {}),
-						constraint: { ...problem.constraint }
+						constraint: this.anchorConstraint(problem.constraint)
 					}
 				: undefined
 		};
+	}
+
+	/** Attach a pin anchor to a node_voltage constraint (targetId is a current node ID). */
+	private anchorConstraint(
+		constraint: UnknownProblemSpec['constraint']
+	): UnknownProblemSpec['constraint'] {
+		if (constraint.kind !== 'node_voltage') {
+			const { targetPin: _drop, ...rest } = constraint;
+			return { ...rest };
+		}
+		const targetPin = anchorForNode(this._graph, constraint.targetId);
+		return targetPin ? { ...constraint, targetPin } : { ...constraint };
 	}
 
 	clearUnknownProblem(): void {

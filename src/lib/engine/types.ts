@@ -88,6 +88,17 @@ export interface CircuitConstraint {
 	value: string;
 	/** Optional display label (e.g. "V_o", "I_x", "P_R2") */
 	label?: string;
+	/**
+	 * For node_voltage: a component pin on the target node. Node IDs (N1, N2, ...) are renumbered
+	 * whenever the layout changes, so the store re-resolves `targetId` from this pin before solving.
+	 */
+	targetPin?: PinAnchor;
+}
+
+/** A stable reference to an electrical node: one component pin that sits on it. */
+export interface PinAnchor {
+	componentId: string;
+	pinIndex: number;
 }
 
 export interface UnknownTerm {
@@ -318,7 +329,7 @@ export interface MethodResult {
 
 export type TheveninTarget =
 	| { kind: 'component'; componentId: string }
-	| { kind: 'terminals'; nodeA: string; nodeB: string };
+	| { kind: 'terminals'; nodeA: string; nodeB: string; pinA?: PinAnchor; pinB?: PinAnchor };
 
 export interface MaxPowerTransferInfo {
 	optimalLoadImpedance: Complex;
