@@ -26,6 +26,7 @@ import type {
 } from '../types';
 import {
 	buildDeactivatedDocument,
+	buildPortTestWires,
 	formatLatexValue,
 	getPassiveImpedance,
 	latexSub,
@@ -201,8 +202,8 @@ export function solveTheveninNorton(
 	const ptA = openGraph.nodes[openNodeA].gridPoints[0];
 	const ptB = openGraph.nodes[openNodeB].gridPoints[0];
 
-	// Place a synthetic 1 A test current source far from schematic coordinates with prime offset
-	// so its connecting wires cannot accidentally collide with any intermediate grid pin.
+	// Synthetic 1 A test current source far from the schematic; buildPortTestWires routes its
+	// wires so they cannot pass through (and merge with) any other pin on the way.
 	const testComp: CircuitComponent = {
 		id: '__thevenin_itest__',
 		kind: 'current_source',
@@ -217,8 +218,13 @@ export function solveTheveninNorton(
 		components: [...deactivatedDoc.components, testComp],
 		wires: [
 			...deactivatedDoc.wires,
-			{ id: '__thevenin_wB__', points: [{ x: 1000001, y: 1000019 }, ptB] },
-			{ id: '__thevenin_wA__', points: [{ x: 1000005, y: 1000019 }, ptA] }
+			...buildPortTestWires(
+				'__thevenin_',
+				{ x: 1000001, y: 1000019 },
+				ptB,
+				{ x: 1000005, y: 1000019 },
+				ptA
+			)
 		]
 	};
 

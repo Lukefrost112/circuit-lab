@@ -204,6 +204,30 @@ describe('All 6 Pedagogical Method Solvers + Cross-Verification Gate', () => {
 		}
 	});
 
+	it('3b. Thévenin test-source wires never merge with an unrelated pin', () => {
+		// Layout where a straight wire from the far test source to the port lines up at exactly
+		// 45° with R5's pin, which used to short it into the port (Z_th = 5 Ω instead of 7.5 Ω).
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', -4, 16, 90, '10'),
+				comp('R1', 'resistor', -2, 14, 0, '10'),
+				comp('RL', 'resistor', 0, 16, 90, '10'),
+				comp('R4', 'resistor', 2, 14, 0, '10'),
+				comp('R5', 'resistor', 4, 16, 90, '10'),
+				comp('R6', 'resistor', 4, 20, 90, '10'),
+				comp('G', 'ground', -4, 18, 0, '0')
+			],
+			wires: [wire('g1', [-4, 18], [0, 18]), wire('g2', [4, 22], [-4, 22], [-4, 18])]
+		};
+		const r = solveCircuit(doc, { theveninTarget: { kind: 'component', componentId: 'RL' } });
+		expect(r.theveninNorton!.vth.re).toBeCloseTo(7.5, 9);
+		expect(r.theveninNorton!.zth!.re).toBeCloseTo(7.5, 9); // 10 || (10 + 10 + 10)
+		expect(r.methods.thevenin_norton!.verifiedAgainstMna).toBe(true);
+	});
+
 	it('6. AC RLC Series-Parallel Thévenin & Conjugate Max Power Transfer', () => {
 		const freq = 1000 / (2 * Math.PI); // omega = 1000
 		// V1=50∠0° V, R1=30Ω, L1=40mH (j40 Ω) in series, load R_L=20Ω

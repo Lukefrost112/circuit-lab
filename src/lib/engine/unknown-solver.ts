@@ -19,6 +19,7 @@ import { Complex } from './complex';
 import { buildElectricalGraph, isImpedanceSpecified } from './graph';
 import {
 	buildDeactivatedDocument,
+	buildPortTestWires,
 	formatLatexTerm,
 	formatLatexValue,
 	latexSub,
@@ -1110,8 +1111,13 @@ function computePortEquivalent(
 			components: [...deactivatedDoc.components, testComp],
 			wires: [
 				...deactivatedDoc.wires,
-				{ id: '__unknown_thevenin_wB__', points: [{ x: 1000001, y: 1000019 }, ptB] },
-				{ id: '__unknown_thevenin_wA__', points: [{ x: 1000005, y: 1000019 }, ptA] }
+				...buildPortTestWires(
+					'__unknown_thevenin_',
+					{ x: 1000001, y: 1000019 },
+					ptB,
+					{ x: 1000005, y: 1000019 },
+					ptA
+				)
 			]
 		};
 		const testGraph = buildElectricalGraph(testDoc);
