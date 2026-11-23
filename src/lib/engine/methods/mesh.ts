@@ -506,12 +506,12 @@ export function solveMesh(doc: CircuitDocument, mna: MnaSolution): MethodResult 
 				title,
 				applicable: false,
 				inapplicableReason:
-					'Circuit graph is non-planar (contains a K₅ or K₃,₃ subdivision). Planar Mesh Analysis only applies to planar circuits; use Nodal Analysis or MNA instead.',
+					'Circuit graph is non-planar (contains a K₅ or K₃,₃ subdivision). Mesh Analysis only applies to circuits that can be drawn flat; use Nodal Analysis instead.',
 				steps: [
 					{
 						title: 'Non-Planar Topology Detected',
 						description:
-							'This circuit cannot be drawn in a plane without crossing wires, so a 2-basis of window meshes does not exist. Use Nodal Analysis or general Loop Analysis.'
+							'This circuit cannot be drawn in a plane without crossing wires, so its meshes cannot be identified. Use Nodal Analysis or general Loop Analysis.'
 					}
 				]
 			};
@@ -956,8 +956,8 @@ export function solveMesh(doc: CircuitDocument, mna: MnaSolution): MethodResult 
 	let stepNum = 1;
 
 	steps.push({
-		title: `${stepNum++}. Planar Mesh Identification`,
-		description: `Extracted ${M} independent planar window meshes from the conducting multigraph.`,
+		title: `${stepNum++}. Mesh Identification`,
+		description: `Identified ${M} mesh${M === 1 ? '' : 'es'} (window loops) in the circuit.`,
 		latex: meshDescribeLatex
 	});
 
@@ -972,9 +972,8 @@ export function solveMesh(doc: CircuitDocument, mna: MnaSolution): MethodResult 
 
 	if (csLatex.length > 0) {
 		steps.push({
-			title: `${stepNum++}. Supermesh & Current-Source Constraints`,
-			description:
-				'Current sources (independent or dependent) either fix perimeter mesh currents or form supermeshes combining adjacent meshes.',
+			title: `${stepNum++}. ${dependentLatex.length > 0 ? 'Supermesh & Current-Source Equations' : 'Current Sources & Supermeshes'}`,
+			description: `${dependentLatex.length > 0 ? 'Current sources (independent or dependent)' : 'Current sources'} either fix the outer mesh currents or join adjacent meshes into a supermesh.`,
 			latex: csLatex
 		});
 	}
@@ -992,15 +991,14 @@ export function solveMesh(doc: CircuitDocument, mna: MnaSolution): MethodResult 
 		'A',
 		mode
 	);
-	if (solveDisplay.latex.length > 0 || solveDisplay.matrixLatex) {
+	if (solveDisplay.latex.length > 0) {
 		steps.push({
 			title: `${stepNum++}. ${solveDisplay.remaining >= 2 ? 'Solve the Simultaneous Equations' : 'Solve the Equation'}`,
 			description:
 				solveDisplay.remaining >= 2
-					? `${solveDisplay.remaining} equations in ${solveDisplay.remaining} unknown mesh currents, solved together (matrix form).`
+					? `${solveDisplay.remaining} equations in ${solveDisplay.remaining} unknown mesh currents, solved by substitution.`
 					: 'Mesh currents fixed by current sources are substituted; the remaining equation is solved by collecting terms and dividing.',
-			latex: solveDisplay.latex.length > 0 ? solveDisplay.latex : undefined,
-			matrixLatex: solveDisplay.matrixLatex
+			latex: solveDisplay.latex
 		});
 	}
 

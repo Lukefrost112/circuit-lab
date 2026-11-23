@@ -49,7 +49,6 @@ describe('All 6 Pedagogical Method Solvers + Cross-Verification Gate', () => {
 		expect(full.maxDiscrepancy).toBeLessThan(1e-8);
 
 		for (const id of [
-			'kcl_kvl',
 			'nodal',
 			'mesh',
 			'superposition',
@@ -95,6 +94,33 @@ describe('All 6 Pedagogical Method Solvers + Cross-Verification Gate', () => {
 		// Verify Mesh detected the Supermesh
 		expect(full.methods.mesh!.applicable).toBe(true);
 		expect(full.methods.mesh!.steps.some((s) => s.title.includes('Supermesh'))).toBe(true);
+	});
+
+	it('2b. A component target adds a final "Ans." step to each method except Thévenin/Norton', () => {
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', 0, 2, 90, '12'),
+				comp('R1', 'resistor', 2, 0, 0, '4'),
+				comp('I1', 'current_source', 4, 2, 270, '2'),
+				comp('R2', 'resistor', 6, 0, 0, '2'),
+				comp('R3', 'resistor', 8, 2, 90, '6'),
+				comp('G1', 'ground', 0, 4, 0, '0')
+			],
+			wires: [wire('w_gnd', [0, 4], [8, 4])]
+		};
+		const full = solveCircuit(doc, { theveninTarget: { kind: 'component', componentId: 'R3' } });
+		expect(full.methods.kcl_kvl).toBeUndefined();
+		for (const id of ['nodal', 'mesh', 'superposition'] as const) {
+			const last = full.methods[id]!.steps.at(-1)!;
+			expect(last.title).toBe('Ans.');
+			const text = last.latex!.join(' ');
+			expect(text).toContain('\\text{Ans. } V_{R3} = 10\\text{ V}');
+			expect(text).toContain('\\text{Ans. } I_{R3} = \\frac{5}{3}\\text{ A}');
+		}
+		expect(full.methods.thevenin_norton!.steps.some((st) => st.title === 'Ans.')).toBe(false);
 	});
 
 	it('3. DC Wheatstone Bridge (3 meshes) + Thévenin across bridge resistor R5', () => {
@@ -192,7 +218,6 @@ describe('All 6 Pedagogical Method Solvers + Cross-Verification Gate', () => {
 		expect(full.maxDiscrepancy).toBeLessThan(1e-8);
 
 		for (const id of [
-			'kcl_kvl',
 			'nodal',
 			'mesh',
 			'superposition',
@@ -393,7 +418,7 @@ describe('All 6 Pedagogical Method Solvers + Cross-Verification Gate', () => {
 		const full = solveCircuit(doc);
 		expect(full.mna.multiFrequencyHz).toEqual([60, 120]);
 		expect(full.mna.diagnostics.some((d) => d.code === 'MULTI_FREQUENCY')).toBe(true);
-		for (const id of ['kcl_kvl', 'nodal', 'mesh', 'source_transform', 'thevenin_norton'] as const) {
+		for (const id of ['nodal', 'mesh', 'source_transform', 'thevenin_norton'] as const) {
 			expect(full.methods[id]?.applicable).toBe(false);
 		}
 		expect(full.methods.superposition?.applicable).toBe(true);
@@ -631,7 +656,6 @@ describe('All 6 Pedagogical Method Solvers + Cross-Verification Gate', () => {
 		expect(fullCccs.maxDiscrepancy).toBeLessThan(1e-8);
 		expect(fullCccs.theveninNorton!.vth.re).toBeCloseTo(12, 9);
 		expect(fullCccs.theveninNorton!.zth!.re).toBeCloseTo(4 / 3, 9);
-		expect(fullCccs.methods.kcl_kvl!.verifiedAgainstMna).toBe(true);
 		expect(fullCccs.methods.nodal!.verifiedAgainstMna).toBe(true);
 		expect(fullCccs.methods.mesh!.verifiedAgainstMna).toBe(true);
 		expect(fullCccs.methods.superposition!.verifiedAgainstMna).toBe(true);
@@ -673,9 +697,11 @@ describe('Source transformation aimed at the asked branch (course style)', () =>
 		// No step combines the target away.
 		expect(st.steps.some((s) => /^Combine/.test(s.title.replace(/^Step \d+: /, '')) && s.description.includes('R1v'))).toBe(false);
 		// Consecutive same-kind steps are merged and numbered 1..n.
-		st.steps.forEach((s, i) => expect(s.title.startsWith(`Step ${i + 1}:`)).toBe(true));
-		for (let i = 1; i < st.steps.length; i++) {
-			expect(st.steps[i].title.replace(/^Step \d+: /, '')).not.toBe(st.steps[i - 1].title.replace(/^Step \d+: /, ''));
+		expect(st.steps.at(-1)!.title).toBe('Ans.');
+		const work = st.steps.slice(0, -1);
+		work.forEach((s, i) => expect(s.title.startsWith(`Step ${i + 1}:`)).toBe(true));
+		for (let i = 1; i < work.length; i++) {
+			expect(work[i].title.replace(/^Step \d+: /, '')).not.toBe(work[i - 1].title.replace(/^Step \d+: /, ''));
 		}
 	});
 });
