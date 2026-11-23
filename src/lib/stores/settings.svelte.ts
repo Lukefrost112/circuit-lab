@@ -82,7 +82,13 @@ function sanitizeSettings(raw: unknown): CircuitLabSettings {
 }
 
 function canUseLocalStorage(): boolean {
-	return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+	// Reading window.localStorage itself throws a SecurityError when site data is blocked
+	// (or in sandboxed iframes); that must not white-screen the app at module load.
+	try {
+		return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
+	} catch {
+		return false;
+	}
 }
 
 function loadPersistedSettings(): CircuitLabSettings {
