@@ -12,7 +12,7 @@
  */
 
 import { Complex } from '../complex';
-import { buildElectricalGraph } from '../graph';
+import { buildElectricalGraph, latexNodeId } from '../graph';
 import { solveMNA } from '../mna';
 import {
 	isDependentSourceKind,
@@ -414,7 +414,7 @@ export function solveTheveninNorton(
 		{
 			title: '2. Open-Circuit Voltage (V_th)',
 			description: 'Solved open-circuit network for V_th = V_A - V_B.',
-			latex: [`V_{th} = V_{${origNodeA}} - V_{${origNodeB}} = ${formatLatexValue(vth, mode)}\\text{ V}`]
+			latex: [`V_{th} = V_{${latexNodeId(origNodeA)}} - V_{${latexNodeId(origNodeB)}} = ${formatLatexValue(vth, mode)}\\text{ V}`]
 		},
 		{
 			title:

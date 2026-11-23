@@ -122,6 +122,12 @@ function compactDocument(doc: CircuitDocument): Record<string, unknown> {
 			}
 		};
 	}
+	if (doc.nodeNames !== undefined && doc.nodeNames.length > 0) {
+		out.nodeNames = doc.nodeNames.map((e) => ({
+			pin: { componentId: e.pin.componentId, pinIndex: e.pin.pinIndex },
+			name: e.name
+		}));
+	}
 	return out;
 }
 
