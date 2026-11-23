@@ -167,3 +167,24 @@ describe('node names: LaTeX safety', () => {
 		expect(failures).toEqual([]);
 	});
 });
+
+describe('node names: legacy N<k> references', () => {
+	it('maps old N1-style dependent-control and Thevenin terminal IDs to letters on load', async () => {
+		const doc = preset('dc-supermesh');
+		const legacy = JSON.parse(exportCircuitJson(doc));
+		legacy.unknownProblem = {
+			componentId: legacy.components.find((c: { kind: string }) => c.kind === 'resistor').id,
+			constraint: { kind: 'node_voltage', targetId: 'N2', value: '1' }
+		};
+		const imported = parseCircuitImport(JSON.stringify(legacy));
+		expect(imported.ok).toBe(true);
+		if (!imported.ok) return;
+		expect(imported.document.unknownProblem?.constraint.targetId).toBe('B');
+		const hash = await encodeCircuitToHash({
+			document: imported.document,
+			theveninTarget: { kind: 'terminals', nodeA: 'N1', nodeB: 'N3' }
+		});
+		const back = await decodeCircuitFromHash(hash);
+		expect(back?.theveninTarget).toEqual({ kind: 'terminals', nodeA: 'A', nodeB: 'C' });
+	});
+});
