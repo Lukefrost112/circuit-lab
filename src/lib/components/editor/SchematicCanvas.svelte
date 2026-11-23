@@ -1913,6 +1913,10 @@
 <svelte:window
 	onkeydown={handleKeyDown}
 	onkeyup={handleKeyUp}
+	onblur={() => {
+		// The Space keyup never arrives if the window loses focus while Space is held
+		spaceHeld = false;
+	}}
 	onpointerup={(e) => {
 		if (activePointers.has(e.pointerId)) {
 			handlePointerUp(e);
@@ -1922,6 +1926,12 @@
 		if (activePointers.has(e.pointerId)) {
 			handlePointerCancel(e);
 		}
+	}}
+/>
+
+<svelte:document
+	onvisibilitychange={() => {
+		if (document.hidden) spaceHeld = false;
 	}}
 />
 
