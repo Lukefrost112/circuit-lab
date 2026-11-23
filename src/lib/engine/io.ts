@@ -13,7 +13,8 @@ import {
 	parseDependentGain,
 	parseDirectImpedance,
 	parsePassiveValue,
-	parseSourceValue
+	parseSourceValue,
+	migrateLegacyNodeIds
 } from './graph';
 import {
 	isDependentSourceKind,
@@ -825,6 +826,7 @@ function parseCircuitDocumentFormat(obj: Record<string, unknown>): CircuitImport
 		});
 		if (names.length > 0) document.nodeNames = names;
 	}
+	migrateLegacyNodeIds(document);
 
 	return {
 		ok: true,

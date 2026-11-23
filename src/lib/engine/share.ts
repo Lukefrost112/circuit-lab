@@ -7,6 +7,7 @@
  */
 
 import { parseCircuitImport } from './io';
+import { legacyNodeIdToLetter } from './graph';
 import type {
 	CircuitComponent,
 	CircuitDocument,
@@ -275,7 +276,8 @@ function extractEncodedParam(hash: string): string | null {
 
 function validateTheveninTarget(
 	raw: unknown,
-	components: CircuitComponent[]
+	components: CircuitComponent[],
+	legacyIds = false
 ): TheveninTarget | undefined {
 	if (!isPlainObject(raw)) return undefined;
 	if (raw.kind === 'component') {
@@ -301,7 +303,11 @@ function validateTheveninTarget(
 			const nodeA = raw.nodeA.trim();
 			const nodeB = raw.nodeB.trim();
 			if (nodeA && nodeB && nodeA !== nodeB) {
-				return { kind: 'terminals', nodeA, nodeB };
+				return {
+					kind: 'terminals',
+					nodeA: legacyIds ? (legacyNodeIdToLetter(nodeA) ?? nodeA) : nodeA,
+					nodeB: legacyIds ? (legacyNodeIdToLetter(nodeB) ?? nodeB) : nodeB
+				};
 			}
 		}
 		return undefined;
@@ -366,7 +372,11 @@ export async function decodeCircuitFromHash(
 			return null;
 		}
 
-		const theveninTarget = validateTheveninTarget(parsedRaw.t, imported.document.components);
+		const theveninTarget = validateTheveninTarget(
+			parsedRaw.t,
+			imported.document.components,
+			!imported.document.nodeNames?.length
+		);
 		const unitSystem = validateUnitSystem(parsedRaw.u);
 
 		const result: ShareableCircuitPayload = {

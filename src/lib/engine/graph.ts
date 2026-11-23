@@ -168,6 +168,29 @@ function isPointOnSegment(p: GridPoint, a: GridPoint, b: GridPoint, eps = 1e-6):
 }
 
 /** Auto node name for the n-th (0-based) non-reference node: A..Z, AA, AB, ..., AZ, BA, ... */
+/**
+ * Old documents and share links (before letter names) refer to nodes as N1, N2, …, numbered in
+ * the same order the letters use now, so N<k> is the k-th letter. Returns null for other IDs.
+ */
+export function legacyNodeIdToLetter(id: string): string | null {
+	const m = /^N([1-9]\d*)$/.exec(id);
+	return m ? nodeLetterName(Number(m[1]) - 1) : null;
+}
+
+/** Rewrites legacy N<k> node references in a document that has no custom node names. */
+export function migrateLegacyNodeIds(doc: CircuitDocument): void {
+	if (doc.nodeNames && doc.nodeNames.length > 0) return;
+	const fix = (id: string | undefined) => (id === undefined ? id : (legacyNodeIdToLetter(id) ?? id));
+	for (const c of doc.components) {
+		const ref = c.controlRef;
+		if (!ref) continue;
+		if (ref.controlNodePos !== undefined) ref.controlNodePos = fix(ref.controlNodePos);
+		if (ref.controlNodeNeg !== undefined) ref.controlNodeNeg = fix(ref.controlNodeNeg);
+	}
+	const con = doc.unknownProblem?.constraint;
+	if (con && con.kind === 'node_voltage') con.targetId = fix(con.targetId)!;
+}
+
 export function nodeLetterName(index: number): string {
 	let n = index + 1;
 	let out = '';
