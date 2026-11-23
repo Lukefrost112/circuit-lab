@@ -617,14 +617,14 @@ export function solveSourceTransform(
 		};
 	}
 
-	// Solve the final reduced core independently
+	// Solve the final simplified circuit independently
 	const reduced = solveReducedCore(edges, activeNodes);
 	if (!reduced) {
 		return {
 			methodId: 'source_transform',
 			title,
 			applicable: false,
-			inapplicableReason: 'Reduced core could not be solved.',
+			inapplicableReason: 'The simplified circuit could not be solved.',
 			steps
 		};
 	}
@@ -654,8 +654,8 @@ export function solveSourceTransform(
 
 	const irreducibleNote =
 		edges.length > 3
-			? `Reduced to a ${activeNodes.size}-node, ${edges.length}-branch core; solved core and back-substituted all eliminated branches.`
-			: 'Fully reduced network via source transformations and series/parallel combinations, then back-substituted.';
+			? `Simplified to a ${activeNodes.size}-node, ${edges.length}-branch circuit, solved it, then worked back to every branch that was removed.`
+			: 'Simplified the circuit with source transformations and series/parallel combinations, then worked back to every branch.';
 
 	const finalLatex = graph.nonRefNodeIds.map(
 		(nid) => `V_{${nid}} = ${formatLatexValue(nodeVoltages[nid], mode)}\\text{ V}`
@@ -736,7 +736,7 @@ export function solveSourceTransform(
 	}
 
 	steps.push({
-		title: `Step ${steps.length + 1}: Final Solution & Back-Substitution`,
+		title: `Step ${steps.length + 1}: All Node Voltages and Branch Currents`,
 		description: irreducibleNote,
 		latex: [
 			...finalLatex,
