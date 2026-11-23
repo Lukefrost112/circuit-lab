@@ -327,13 +327,20 @@ export function solveMNA(doc: CircuitDocument, options?: SolveMnaOptions): MnaSo
 		const reactivePower = complexPower.im;
 		const apparentPower = complexPower.abs();
 
+		// Sources report the power factor they deliver (S_supplied = -S_absorbed), which is the
+		// textbook "source power factor": a source feeding an R + jX load is lagging, not leading.
+		// Passives report the power factor of the power they absorb.
+		const isSource = comp.kind === 'voltage_source' || comp.kind === 'current_source';
+		const pfReal = isSource ? -realPower : realPower;
+		const pfReactive = isSource ? -reactivePower : reactivePower;
+
 		let powerFactor: number | null = null;
 		let powerFactorType: BranchResult['powerFactorType'] = undefined;
 		if (apparentPower > 1e-12) {
-			powerFactor = Math.max(-1, Math.min(1, realPower / apparentPower));
-			if (Math.abs(reactivePower) <= 1e-12 * apparentPower) {
+			powerFactor = Math.max(-1, Math.min(1, pfReal / apparentPower));
+			if (Math.abs(pfReactive) <= 1e-12 * apparentPower) {
 				powerFactorType = 'unity';
-			} else if (reactivePower > 0) {
+			} else if (pfReactive > 0) {
 				powerFactorType = 'lagging';
 			} else {
 				powerFactorType = 'leading';

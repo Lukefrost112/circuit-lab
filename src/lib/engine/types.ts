@@ -243,7 +243,8 @@ export interface BranchResult {
 	reactivePower: number;
 	/** Apparent power |S| in VA */
 	apparentPower: number;
-	/** Power factor P / |S|, or null if |S| == 0 */
+	/** Power factor P / |S| (absorbed P for passives, delivered P for sources), or null if |S| == 0.
+	 *  `powerFactorType` uses the same view: a source feeding an inductive load is 'lagging'. */
 	powerFactor: number | null;
 	powerFactorType?: 'leading' | 'lagging' | 'unity';
 	/** True for ideal non-intrusive measurement instruments (e.g. ideal voltmeter, Y = 0, I = 0) */
