@@ -29,32 +29,39 @@ function mapSubNodesToOriginal(
 	subGraph: ReturnType<typeof buildElectricalGraph>,
 	subSol: MnaSolution
 ): Record<string, Complex> {
+	// Sub-circuit voltage at the node matching an original node (by shared pin, else grid point)
+	const lookup = (origNode: (typeof origGraph.nodes)[string]): Complex | undefined => {
+		for (const pin of origNode.componentPins) {
+			const subCompNodes = subGraph.componentNodes[pin.componentId];
+			if (subCompNodes && subCompNodes[pin.pinIndex]) {
+				const v = subSol.nodeVoltages[subCompNodes[pin.pinIndex]]?.voltage;
+				if (v) return v;
+			}
+		}
+		if (origNode.gridPoints.length > 0) {
+			const gp = origNode.gridPoints[0];
+			for (const [subNid, subNode] of Object.entries(subGraph.nodes)) {
+				if (subNode.gridPoints.some((p) => p.x === gp.x && p.y === gp.y)) {
+					return subSol.nodeVoltages[subNid]?.voltage;
+				}
+			}
+		}
+		return undefined;
+	};
+
+	// Without a ground symbol each sub-circuit auto-picks its own reference node, which can differ
+	// from the original one. Re-reference every sub-solution to the original reference "0".
+	const origRef = origGraph.nodes['0'];
+	const refOffset = (origRef && lookup(origRef)) ?? Complex.zero();
+
 	const mapped: Record<string, Complex> = {};
 	for (const [origNodeId, origNode] of Object.entries(origGraph.nodes)) {
 		if (origNodeId === '0') {
 			mapped[origNodeId] = Complex.zero();
 			continue;
 		}
-		// Match by any shared grid point or component pin
-		let foundVoltage: Complex | undefined;
-		for (const pin of origNode.componentPins) {
-			const subCompNodes = subGraph.componentNodes[pin.componentId];
-			if (subCompNodes && subCompNodes[pin.pinIndex]) {
-				const subNid = subCompNodes[pin.pinIndex];
-				foundVoltage = subSol.nodeVoltages[subNid]?.voltage;
-				if (foundVoltage) break;
-			}
-		}
-		if (!foundVoltage && origNode.gridPoints.length > 0) {
-			const gp = origNode.gridPoints[0];
-			for (const [subNid, subNode] of Object.entries(subGraph.nodes)) {
-				if (subNode.gridPoints.some((p) => p.x === gp.x && p.y === gp.y)) {
-					foundVoltage = subSol.nodeVoltages[subNid]?.voltage;
-					break;
-				}
-			}
-		}
-		mapped[origNodeId] = foundVoltage ?? Complex.zero();
+		const v = lookup(origNode);
+		mapped[origNodeId] = v ? v.sub(refOffset) : Complex.zero();
 	}
 	return mapped;
 }

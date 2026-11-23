@@ -268,6 +268,25 @@ describe('All 6 Pedagogical Method Solvers + Cross-Verification Gate', () => {
 		expect(titles).not.toMatch(/Thévenin → Norton.*Norton → Thévenin.*Thévenin → Norton/);
 	});
 
+	it('5b. Superposition without a ground symbol uses one reference for every sub-circuit', () => {
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('I1', 'current_source', 0, 2, 270, '2'),
+				comp('R1', 'resistor', 2, 2, 90, '4'),
+				comp('R3', 'resistor', 4, 0, 0, '2'),
+				comp('R2', 'resistor', 6, 2, 90, '3'),
+				comp('I2', 'current_source', 8, 2, 270, '1')
+			],
+			wires: [wire('wa', [0, 0], [2, 0]), wire('wb', [6, 0], [8, 0]), wire('wc', [0, 4], [8, 4])]
+		};
+		const sup = solveCircuit(doc).methods.superposition!;
+		expect(sup.applicable).toBe(true);
+		expect(sup.verifiedAgainstMna).toBe(true);
+	});
+
 	it('6. AC RLC Series-Parallel Thévenin & Conjugate Max Power Transfer', () => {
 		const freq = 1000 / (2 * Math.PI); // omega = 1000
 		// V1=50∠0° V, R1=30Ω, L1=40mH (j40 Ω) in series, load R_L=20Ω
