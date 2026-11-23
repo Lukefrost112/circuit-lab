@@ -137,12 +137,47 @@ function nodeForAnchor(graph: ElectricalGraph, anchor?: PinAnchor): string | und
 }
 
 function resolveDocumentAnchors(doc: CircuitDocument, graph: ElectricalGraph): CircuitDocument {
-	const up = doc.unknownProblem;
+	let out = doc;
+
+	// Dependent sources controlled by a node pair
+	let componentsChanged = false;
+	const components = doc.components.map((comp) => {
+		const ref = comp.controlRef;
+		if (!ref || (!ref.controlNodePosPin && !ref.controlNodeNegPin)) return comp;
+		const pos = nodeForAnchor(graph, ref.controlNodePosPin) ?? ref.controlNodePos;
+		const neg = nodeForAnchor(graph, ref.controlNodeNegPin) ?? ref.controlNodeNeg;
+		if (pos === ref.controlNodePos && neg === ref.controlNodeNeg) return comp;
+		componentsChanged = true;
+		return { ...comp, controlRef: { ...ref, controlNodePos: pos, controlNodeNeg: neg } };
+	});
+	if (componentsChanged) out = { ...out, components };
+
+	// Unknown-value constraint on a node voltage
+	const up = out.unknownProblem;
 	const c = up?.constraint;
-	if (!up || !c || c.kind !== 'node_voltage' || !c.targetPin) return doc;
-	const nodeId = nodeForAnchor(graph, c.targetPin);
-	if (!nodeId || nodeId === c.targetId) return doc;
-	return { ...doc, unknownProblem: { ...up, constraint: { ...c, targetId: nodeId } } };
+	if (up && c && c.kind === 'node_voltage' && c.targetPin) {
+		const nodeId = nodeForAnchor(graph, c.targetPin);
+		if (nodeId && nodeId !== c.targetId) {
+			out = { ...out, unknownProblem: { ...up, constraint: { ...c, targetId: nodeId } } };
+		}
+	}
+	return out;
+}
+
+/** Attach (or refresh) pin anchors for a dependent source's controlling node pair. */
+function anchorControlNodes(ref: DependentControlRef, graph: ElectricalGraph): DependentControlRef {
+	const next: DependentControlRef = { ...ref };
+	delete next.controlNodePosPin;
+	delete next.controlNodeNegPin;
+	if (next.controlNodePos) {
+		const pin = anchorForNode(graph, next.controlNodePos);
+		if (pin) next.controlNodePosPin = pin;
+	}
+	if (next.controlNodeNeg) {
+		const pin = anchorForNode(graph, next.controlNodeNeg);
+		if (pin) next.controlNodeNegPin = pin;
+	}
+	return next;
 }
 
 function resolveTheveninAnchors(
@@ -697,8 +732,11 @@ class CircuitStore {
 
 		this.recordSnapshot();
 
+		// Start from the resolved ref: stored node names may be stale after a renumbering
+		const currentRef =
+			this._resolvedDocument.components.find((c) => c.id === id)?.controlRef ?? target.controlRef;
 		const merged: DependentControlRef = {
-			...(target.controlRef ?? {}),
+			...(currentRef ?? {}),
 			...patch
 		};
 
@@ -726,7 +764,7 @@ class CircuitStore {
 		this._document = {
 			...this._document,
 			components: this._document.components.map((c) =>
-				c.id === id ? { ...c, controlRef: merged } : c
+				c.id === id ? { ...c, controlRef: anchorControlNodes(merged, this._graph) } : c
 			)
 		};
 	}
@@ -774,9 +812,25 @@ class CircuitStore {
 			};
 		}
 
+		const graph = this._graph;
 		this._document = {
 			...this._document,
-			components: this._document.components.filter((c) => c.id !== id),
+			components: this._document.components
+				.filter((c) => c.id !== id)
+				.map((c) => {
+					const ref = c.controlRef;
+					if (!ref || (ref.controlNodePosPin?.componentId !== id && ref.controlNodeNegPin?.componentId !== id)) {
+						return c;
+					}
+					return {
+						...c,
+						controlRef: {
+							...ref,
+							controlNodePosPin: reanchorAwayFrom(graph, ref.controlNodePosPin, id),
+							controlNodeNegPin: reanchorAwayFrom(graph, ref.controlNodeNegPin, id)
+						}
+					};
+				}),
 			unknownProblem: nextUnknownProblem
 		};
 
@@ -1220,6 +1274,17 @@ class CircuitStore {
 		}
 
 		// Anchor node references from the loaded file/link to pins of the loaded layout
+		if (this._document.components.some((c) => c.controlRef?.controlNodePos || c.controlRef?.controlNodeNeg)) {
+			const graph = this._graph;
+			this._document = {
+				...this._document,
+				components: this._document.components.map((c) =>
+					c.controlRef && (c.controlRef.controlNodePos || c.controlRef.controlNodeNeg)
+						? { ...c, controlRef: anchorControlNodes(c.controlRef, graph) }
+						: c
+				)
+			};
+		}
 		const up = this._document.unknownProblem;
 		if (up?.constraint.kind === 'node_voltage' && !up.constraint.targetPin) {
 			this._document = {

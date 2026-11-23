@@ -62,6 +62,12 @@ export interface DependentControlRef {
 	/** For VCVS/VCCS: controlling positive/negative nodes (used when controlComponentId is not set) */
 	controlNodePos?: string;
 	controlNodeNeg?: string;
+	/**
+	 * Pin anchors for controlNodePos/Neg. Node IDs are renumbered when the layout changes, so the
+	 * store re-resolves the node names from these pins before solving (engine ignores them).
+	 */
+	controlNodePosPin?: PinAnchor;
+	controlNodeNegPin?: PinAnchor;
 	/** For CCVS/CCCS: ID of branch component whose current (pin 0 -> pin 1) controls the source */
 	controlBranchComponentId?: string;
 	/** Optional sign multiplier for the controlling variable (+1 default, -1 flipped) */
