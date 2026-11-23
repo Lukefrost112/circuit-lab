@@ -2875,7 +2875,7 @@
 						<SlidersHorizontal class="size-3.5" aria-hidden="true" />
 						<span>Edit</span>
 					</Button>
-					{#if isTwoTerminal}
+					{#if isTwoTerminal && selectedComp.kind !== 'voltage_source' && selectedComp.kind !== 'current_source'}
 						<Button
 							variant={isTheveninActive ? 'secondary' : 'ghost'}
 							size="sm"

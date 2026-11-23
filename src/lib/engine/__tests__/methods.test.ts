@@ -228,6 +228,24 @@ describe('All 6 Pedagogical Method Solvers + Cross-Verification Gate', () => {
 		expect(r.methods.thevenin_norton!.verifiedAgainstMna).toBe(true);
 	});
 
+	it('3c. Thévenin with a source as the target is not applicable', () => {
+		const doc: CircuitDocument = {
+			schemaVersion: 1,
+			mode: 'dc',
+			frequencyHz: 60,
+			components: [
+				comp('V1', 'voltage_source', 0, 2, 90, '10'),
+				comp('R1', 'resistor', 2, 0, 0, '2'),
+				comp('R2', 'resistor', 4, 2, 90, '4'),
+				comp('G1', 'ground', 0, 4, 0, '0')
+			],
+			wires: [wire('w_gnd', [0, 4], [4, 4])]
+		};
+		const r = solveCircuit(doc, { theveninTarget: { kind: 'component', componentId: 'V1' } });
+		expect(r.methods.thevenin_norton!.applicable).toBe(false);
+		expect(r.theveninNorton).toBeUndefined();
+	});
+
 	it('6. AC RLC Series-Parallel Thévenin & Conjugate Max Power Transfer', () => {
 		const freq = 1000 / (2 * Math.PI); // omega = 1000
 		// V1=50∠0° V, R1=30Ω, L1=40mH (j40 Ω) in series, load R_L=20Ω

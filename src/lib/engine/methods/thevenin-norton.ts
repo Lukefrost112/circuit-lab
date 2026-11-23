@@ -138,6 +138,17 @@ export function solveTheveninNorton(
 				}
 			};
 		}
+		if (loadComp.kind === 'voltage_source' || loadComp.kind === 'current_source') {
+			return {
+				methodResult: {
+					methodId: 'thevenin_norton',
+					title,
+					applicable: false,
+					inapplicableReason: `${loadComp.label} is a source, not a load. Pick the load element (or place port terminals A and B) to find the Thévenin equivalent seen by it.`,
+					steps: []
+				}
+			};
+		}
 		[origNodeA, origNodeB] = origGraph.componentNodes[loadComp.id];
 	} else {
 		origNodeA = resolvedTarget.nodeA;

@@ -1034,7 +1034,7 @@
 				</Button>
 			{/if}
 
-			{#if isTwoTerminal}
+			{#if isPassive}
 				<Button
 					variant={isTheveninTarget ? 'default' : 'secondary'}
 					size="sm"
